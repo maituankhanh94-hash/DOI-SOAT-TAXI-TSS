@@ -59,7 +59,7 @@
     let loggedInUser = null; 
     let personalTrips = []; 
     let allCompanyTrips = []; 
-    let deletedTripsMap = {}; // Lưu trữ danh sách đơn đã xóa để khôi phục
+    let lastDeletedTripBackup = null; // Lưu trữ tạm đơn vừa xóa để khôi phục nhanh
     
     let userAccounts = [
       { user: 'TSS01', pass: '123', role: 'pos' },
@@ -157,12 +157,6 @@
         } else {
           rtdb.ref('settings/lockHour').set(lockHourSetting);
         }
-      });
-
-      // Lắng nghe thùng rác đơn đã xóa trên Cloud
-      rtdb.ref('deleted_trips').on('value', snap => {
-        deletedTripsMap = snap.val() || {};
-        if (loggedInUser && loggedInUser.role === 'manager') renderDeletedTripsTable();
       });
     }
 
@@ -344,10 +338,13 @@
             </div>
           </div>
 
-          <!-- BẢNG 3: LỊCH SỬ ĐƠN HÀNG -->
+          <!-- BẢNG 3: LỊCH SỬ ĐƠN HÀNG (CÓ TÍCH CHỌN XÓA HÀNG LOẠT) -->
           <div class="bg-white p-4 sm:p-6 rounded-3xl shadow-xl border border-slate-200 space-y-3">
             <div class="flex flex-col sm:flex-row items-center justify-between border-b pb-3 gap-2">
-              <h3 class="text-xs sm:text-sm font-extrabold text-slate-800 uppercase">📋 Lịch Sử Đơn Hàng Theo Ngày (${loggedInUser.user})</h3>
+              <div class="flex items-center space-x-3">
+                <h3 class="text-xs sm:text-sm font-extrabold text-slate-800 uppercase">📋 Lịch Sử Đơn Hàng Theo Ngày (${loggedInUser.user})</h3>
+                <button onclick="deleteSelectedPersonalTrips()" class="px-3 py-1 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-xs shadow-sm">🗑️ Xóa Các Đơn Đã Chọn</button>
+              </div>
               <div class="flex items-center space-x-2">
                 <label class="text-xs font-bold text-slate-600">Chọn ngày xem:</label>
                 <input type="date" id="filter-history-date" class="px-3 py-1.5 bg-slate-50 border rounded-xl font-mono text-xs font-bold" onchange="renderActiveWorksheetTrips()">
@@ -358,6 +355,7 @@
               <table class="w-full text-left border-collapse text-xs">
                 <thead class="sticky top-0 bg-slate-800 text-white">
                   <tr>
+                    <th class="p-2.5 text-center w-10"><input type="checkbox" id="select-all-personal" onclick="toggleSelectAllPersonal(this)"></th>
                     <th class="p-2.5">Ngày</th>
                     <th class="p-2.5">Số Phiếu</th>
                     <th class="p-2.5">Biển Số</th>
@@ -365,7 +363,7 @@
                     <th class="p-2.5">Thanh Toán</th>
                     <th class="p-2.5">Ghi Chú</th>
                     <th class="p-2.5 text-right">Tổng Tiền</th>
-                    <th class="p-2.5 text-center">Thao Tác Xóa</th>
+                    <th class="p-2.5 text-center">Thao Tác</th>
                   </tr>
                 </thead>
                 <tbody id="tbody-personal-trips" class="divide-y divide-slate-200"></tbody>
@@ -565,18 +563,20 @@
       });
 
       if (filteredTrips.length === 0) {
-        tb.innerHTML = `<tr><td colspan="8" class="p-4 text-center text-slate-400">Không có đơn hàng nào vào ngày ${targetDateStr || 'này'}.</td></tr>`;
+        tb.innerHTML = `<tr><td colspan="9" class="p-4 text-center text-slate-400">Không có đơn hàng nào vào ngày ${targetDateStr || 'này'}.</td></tr>`;
         return;
       }
 
       tb.innerHTML = filteredTrips.map(t => {
         const isDeletable = canDeleteTrip(t.timestamp);
+        const checkboxHtml = isDeletable ? `<input type="checkbox" class="personal-trip-checkbox" value="${t.id}">` : `<span title="Đã khóa">🔒</span>`;
         const deleteBtn = isDeletable 
-          ? `<button onclick="deletePersonalTrip('${t.id}')" class="px-2.5 py-1 bg-rose-50 hover:bg-rose-100 text-rose-600 font-bold rounded-lg text-[11px]">🗑️ Xóa Đơn</button>`
-          : `<span class="text-slate-400 font-semibold italic text-[11px]" title="Đã quá giờ khóa đơn">🔒 Đã Khóa</span>`;
+          ? `<button onclick="deletePersonalTrip('${t.id}')" class="px-2.5 py-1 bg-rose-50 hover:bg-rose-100 text-rose-600 font-bold rounded-lg text-[11px]">🗑️ Xóa</button>`
+          : `<span class="text-slate-400 font-semibold italic text-[11px]">Đã Khóa</span>`;
 
         return `
           <tr class="hover:bg-slate-50">
+            <td class="p-2.5 text-center">${checkboxHtml}</td>
             <td class="p-2.5">${t.dateStr || '--'}</td>
             <td class="p-2.5 font-mono font-bold text-blue-600">${t.ticketNumber}</td>
             <td class="p-2.5 font-mono font-bold uppercase">${t.plateNumber}</td>
@@ -588,6 +588,35 @@
           </tr>
         `;
       }).join('');
+    }
+
+    function toggleSelectAllPersonal(masterCheckbox) {
+      const checkboxes = document.querySelectorAll('.personal-trip-checkbox');
+      checkboxes.forEach(cb => cb.checked = masterCheckbox.checked);
+    }
+
+    function deleteSelectedPersonalTrips() {
+      const checkboxes = document.querySelectorAll('.personal-trip-checkbox:checked');
+      if (checkboxes.length === 0) { alert("Vui lòng tích chọn ít nhất một đơn hàng để xóa!"); return; }
+
+      if (confirm(`Bạn có chắc chắn muốn xóa ${checkboxes.length} đơn hàng đã chọn không?`)) {
+        let updates = {};
+        let deletedList = [];
+        checkboxes.forEach(cb => {
+          const id = cb.value;
+          const trip = personalTrips.find(x => x.id === id);
+          if (trip && canDeleteTrip(trip.timestamp)) {
+            updates[`users_trips/${loggedInUser.user}/${id}`] = null;
+            updates[`trips/${id}`] = null;
+            deletedList.push(trip);
+          }
+        });
+
+        rtdb.ref().update(updates).then(() => {
+          lastDeletedTripBackup = deletedList;
+          showUndoAlert(`Đã xóa ${deletedList.length} đơn hàng!`, restoreDeletedTrips);
+        });
+      }
     }
 
     function deletePersonalTrip(id) {
@@ -603,13 +632,44 @@
         let updates = {};
         updates[`users_trips/${loggedInUser.user}/${id}`] = null;
         updates[`trips/${id}`] = null;
-        // Lưu vào thùng rác trên Cloud để có thể khôi phục
-        updates[`deleted_trips/${id}`] = { ...trip, deletedAt: Date.now(), deletedBy: loggedInUser.user };
 
         rtdb.ref().update(updates).then(() => {
-          alert("Đã chuyển đơn hàng vào thùng rác!");
+          lastDeletedTripBackup = [trip];
+          showUndoAlert("Đã xóa đơn hàng!", restoreDeletedTrips);
         });
       }
+    }
+
+    // Nút thông báo kèm Khôi phục nhanh
+    function showUndoAlert(message, undoCallback) {
+      const oldAlert = document.getElementById('floating-undo-banner');
+      if (oldAlert) oldAlert.remove();
+
+      const banner = document.createElement('div');
+      banner.id = 'floating-undo-banner';
+      banner.className = 'fixed bottom-5 right-5 z-50 bg-slate-900 text-white px-4 py-3 rounded-2xl shadow-2xl flex items-center space-x-3 text-xs font-bold animate-bounce';
+      banner.innerHTML = `
+        <span>🗑️ ${message}</span>
+        <button onclick="(${undoCallback.toString()})(); document.getElementById('floating-undo-banner').remove();" class="px-3 py-1 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl shadow">🔄 Khôi Phục Ngay</button>
+        <button onclick="this.parentElement.remove()" class="text-slate-400 hover:text-white px-1">✕</button>
+      `;
+      document.body.appendChild(banner);
+      setTimeout(() => { if(banner) banner.remove(); }, 8000);
+    }
+
+    function restoreDeletedTrips() {
+      if (!lastDeletedTripBackup || lastDeletedTripBackup.length === 0) { alert("Không có đơn hàng nào để khôi phục!"); return; }
+      let updates = {};
+      lastDeletedTripBackup.forEach(trip => {
+        updates[`trips/${trip.id}`] = trip;
+        if (trip.createdBy) {
+          updates[`users_trips/${trip.createdBy}/${trip.id}`] = trip;
+        }
+      });
+      rtdb.ref().update(updates).then(() => {
+        alert("Đã khôi phục đơn hàng thành công!");
+        lastDeletedTripBackup = null;
+      });
     }
 
     function renderBatchRows(role) {
@@ -771,20 +831,7 @@
             </div>
           </div>
 
-          <!-- MỤC 1: THÙNG RÁC / KHÔI PHỤC ĐƠN ĐÃ XÓA -->
-          <div class="bg-rose-50 border border-rose-200 p-4 sm:p-5 rounded-3xl shadow-sm space-y-3">
-            <h4 class="text-xs font-extrabold text-rose-900 uppercase">🗑️ Thùng Rác / Khôi Phục Đơn Hàng Đã Xóa Nhầm</h4>
-            <div class="overflow-x-auto custom-scrollbar max-h-48 bg-white rounded-2xl border p-2">
-              <table class="w-full text-left text-xs">
-                <thead><tr class="bg-slate-100 font-bold"><th class="p-2">Ngày</th><th class="p-2">Nhân Sự</th><th class="p-2">Số Phiếu</th><th class="p-2">Biển Số</th><th class="p-2 text-right">Tổng Tiền</th><th class="p-2 text-center">Khôi Phục</th></tr></thead>
-                <tbody id="tbody-deleted-trips">
-                  <tr><td colspan="6" class="p-3 text-center text-slate-400">Không có đơn hàng nào trong thùng rác.</td></tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          <!-- MỤC 2: QUẢN LÝ NGUỒN ĐƠN -->
+          <!-- MỤC 1: QUẢN LÝ NGUỒN ĐƠN -->
           <div class="bg-white rounded-3xl shadow-md border border-slate-200 p-4 sm:p-5 space-y-3">
             <h4 class="text-xs font-extrabold text-blue-900 uppercase">🏢 Quản Lý Nguồn Đơn / Đối Tác</h4>
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
@@ -800,7 +847,7 @@
             <div class="flex flex-wrap gap-2 pt-2" id="sources-tag-list"></div>
           </div>
 
-          <!-- MỤC 3: QUẢN LÝ TÊN NHÂN SỰ -->
+          <!-- MỤC 2: QUẢN LÝ TÊN NHÂN SỰ -->
           <div class="bg-white rounded-3xl shadow-md border border-slate-200 p-4 sm:p-5 space-y-3">
             <h4 class="text-xs font-extrabold text-blue-900 uppercase">👤 Quản Lý Danh Sách Tên Nhân Sự</h4>
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
@@ -816,7 +863,7 @@
             <div class="flex flex-wrap gap-2 pt-2" id="staff-tag-list"></div>
           </div>
 
-          <!-- MỤC 4: QUẢN LÝ LOẠI XE -->
+          <!-- MỤC 3: QUẢN LÝ LOẠI XE -->
           <div class="bg-white rounded-3xl shadow-md border border-slate-200 p-4 sm:p-5 space-y-3">
             <h4 class="text-xs font-extrabold text-blue-900 uppercase">🚗 Quản Lý Loại Xe</h4>
             <div class="flex gap-2 text-xs">
@@ -826,7 +873,7 @@
             <div class="flex flex-wrap gap-2 pt-2" id="cartype-tag-list"></div>
           </div>
 
-          <!-- MỤC 5: QUẢN LÝ HÌNH THỨC THANH TOÁN -->
+          <!-- MỤC 4: QUẢN LÝ HÌNH THỨC THANH TOÁN -->
           <div class="bg-white rounded-3xl shadow-md border border-slate-200 p-4 sm:p-5 space-y-3">
             <h4 class="text-xs font-extrabold text-blue-900 uppercase">💳 Quản Lý Hình Thức Thanh Toán</h4>
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
@@ -842,7 +889,7 @@
             <div class="flex flex-wrap gap-2 pt-2" id="payment-tag-list"></div>
           </div>
 
-          <!-- MỤC 6: QUẢN LÝ TÀI KHOẢN -->
+          <!-- MỤC 5: QUẢN LÝ TÀI KHOẢN -->
           <div class="bg-white rounded-3xl shadow-md border border-slate-200 p-4 sm:p-5 space-y-3">
             <h4 class="text-xs font-extrabold text-blue-900 uppercase">🔑 Cấp Phát Tài Khoản & Mật Khẩu (Đồng Bộ Firebase Cloud)</h4>
             <input type="hidden" id="edit-user-idx" value="-1">
@@ -867,10 +914,13 @@
             </div>
           </div>
 
-          <!-- MỤC 7: BẢNG ĐỐI SOÁT ĐƠN HÀNG -->
+          <!-- MỤC 6: BẢNG ĐỐI SOÁT ĐƠN HÀNG (CÓ TÍCH CHỌN XÓA HÀNG LOẠT & CỘT THỜI GIAN NỘP ĐƠN) -->
           <div class="bg-white rounded-3xl shadow-md border border-slate-200 overflow-hidden p-4 sm:p-5 space-y-3">
             <div class="flex flex-col sm:flex-row items-center justify-between border-b pb-3 gap-3">
-              <h4 class="text-xs sm:text-sm font-extrabold text-slate-800 uppercase">🔍 Bảng Đối Soát Đơn Hàng & Chọn Ngày Xem</h4>
+              <div class="flex items-center space-x-3">
+                <h4 class="text-xs sm:text-sm font-extrabold text-slate-800 uppercase">🔍 Bảng Đối Soát Đơn Hàng & Chọn Ngày Xem</h4>
+                <button onclick="deleteSelectedManagerTrips()" class="px-3 py-1 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-xs shadow-sm">🗑️ Xóa Các Đơn Đã Chọn</button>
+              </div>
               <div class="flex flex-wrap items-center gap-2">
                 <input type="date" id="audit-date-picker" class="px-3 py-1.5 bg-slate-50 border rounded-xl font-mono text-xs font-bold" onchange="updateManagerAuditTable()">
                 <button onclick="resetAuditDateToAll()" class="px-2.5 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl text-xs font-bold">Xem Tất Cả</button>
@@ -878,10 +928,12 @@
               </div>
             </div>
             <div class="overflow-x-auto custom-scrollbar max-h-[550px]">
-              <table class="w-full text-left border-collapse text-xs min-w-[1200px]">
+              <table class="w-full text-left border-collapse text-xs min-w-[1300px]">
                 <thead class="sticky top-0 z-20">
                   <tr class="bg-slate-900 text-white font-bold uppercase tracking-wider text-[11px]">
+                    <th class="p-3 text-center w-10"><input type="checkbox" id="select-all-manager" onclick="toggleSelectAllManager(this)"></th>
                     <th class="p-3">Ngày</th>
+                    <th class="p-3">Thời Gian Nộp Đơn</th>
                     <th class="p-3">Phân Vùng</th>
                     <th class="p-3">Nhân Sự</th>
                     <th class="p-3">Số Phiếu</th>
@@ -891,7 +943,7 @@
                     <th class="p-3">Ghi Chú</th>
                     <th class="p-3 text-right">Tổng Tiền</th>
                     <th class="p-3 text-center">Trạng Thái Đối Soát</th>
-                    <th class="p-3 text-center">Quản Lý Xóa</th>
+                    <th class="p-3 text-center">Xóa</th>
                   </tr>
                 </thead>
                 <tbody id="tbody-mgr" class="divide-y divide-slate-200"></tbody>
@@ -913,51 +965,38 @@
       renderStaffTable();
       renderCarTypesTable();
       renderPaymentsTable();
-      renderDeletedTripsTable();
       updateManagerAuditTable();
     }
 
-    function renderDeletedTripsTable() {
-      const tb = document.getElementById('tbody-deleted-trips');
-      if (!tb) return;
-      const keys = Object.keys(deletedTripsMap);
-      if (keys.length === 0) {
-        tb.innerHTML = `<tr><td colspan="6" class="p-3 text-center text-slate-400">Không có đơn hàng nào trong thùng rác.</td></tr>`;
-        return;
-      }
-
-      tb.innerHTML = Object.entries(deletedTripsMap).map(([id, t]) => `
-        <tr class="border-b hover:bg-slate-50">
-          <td class="p-2">${t.dateStr || '--'}</td>
-          <td class="p-2 font-bold">${t.staff || '--'}</td>
-          <td class="p-2 font-mono font-bold text-blue-600">${t.ticketNumber || '--'}</td>
-          <td class="p-2 font-mono font-bold uppercase">${t.plateNumber || '--'}</td>
-          <td class="p-2 text-right font-extrabold text-emerald-700">${Number(t.totalFare || 0).toLocaleString('vi-VN')} ₫</td>
-          <td class="p-2 text-center">
-            <button onclick="restoreTrip('${id}')" class="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-extrabold text-[11px]">🔄 Khôi Phục</button>
-          </td>
-        </tr>
-      `).join('');
+    function toggleSelectAllManager(masterCheckbox) {
+      const checkboxes = document.querySelectorAll('.manager-trip-checkbox');
+      checkboxes.forEach(cb => cb.checked = masterCheckbox.checked);
     }
 
-    function restoreTrip(id) {
-      const trip = deletedTripsMap[id];
-      if (!trip) return;
+    function deleteSelectedManagerTrips() {
+      const checkboxes = document.querySelectorAll('.manager-trip-checkbox:checked');
+      if (checkboxes.length === 0) { alert("Vui lòng tích chọn ít nhất một đơn hàng để xóa!"); return; }
 
-      let updates = {};
-      // Khôi phục lại vào bảng trips chung và bảng users_trips của người tạo
-      updates[`trips/${id}`] = trip;
-      if (trip.createdBy) {
-        updates[`users_trips/${trip.createdBy}/${id}`] = trip;
+      if (confirm(`[ADMIN] Bạn có chắc muốn xóa vĩnh viễn ${checkboxes.length} đơn hàng đã chọn không?`)) {
+        let updates = {};
+        let deletedList = [];
+        checkboxes.forEach(cb => {
+          const id = cb.value;
+          const trip = allCompanyTrips.find(x => x.id === id);
+          if (trip) {
+            updates[`trips/${id}`] = null;
+            if (trip.createdBy) {
+              updates[`users_trips/${trip.createdBy}/${id}`] = null;
+            }
+            deletedList.push(trip);
+          }
+        });
+
+        rtdb.ref().update(updates).then(() => {
+          lastDeletedTripBackup = deletedList;
+          showUndoAlert(`Đã xóa ${deletedList.length} đơn hàng!`, restoreDeletedTrips);
+        });
       }
-      // Xóa khỏi thùng rác
-      updates[`deleted_trips/${id}`] = null;
-
-      rtdb.ref().update(updates).then(() => {
-        alert("Đã khôi phục đơn hàng thành công!");
-      }).catch(err => {
-        alert("Lỗi khôi phục: " + err.message);
-      });
     }
 
     function resetAuditDateToAll() {
@@ -1119,7 +1158,7 @@
       const tb = document.getElementById('tbody-mgr');
       if (!tb) return;
       if (allCompanyTrips.length === 0) {
-        tb.innerHTML = `<tr><td colspan="11" class="p-4 text-center text-slate-400">Chưa có dữ liệu đơn hàng.</td></tr>`;
+        tb.innerHTML = `<tr><td colspan="13" class="p-4 text-center text-slate-400">Chưa có dữ liệu đơn hàng.</td></tr>`;
         return;
       }
 
@@ -1177,7 +1216,7 @@
 
         group.forEach((t, idx) => {
           const defaultPay = paymentOptions[0] || 'Nhân Viên Quầy Thu';
-          const rowString = `${t.dateStr} ${t.role} ${t.staff} ${t.ticketNumber} ${t.plateNumber} ${t.destination} ${t.paymentMethod || defaultPay} ${t.note || ''} ${t.totalFare}`.toLowerCase();
+          const rowString = `${t.dateStr} ${t.timeStr} ${t.role} ${t.staff} ${t.ticketNumber} ${t.plateNumber} ${t.destination} ${t.paymentMethod || defaultPay} ${t.note || ''} ${t.totalFare}`.toLowerCase();
           if (keyword && !rowString.includes(keyword)) return;
 
           const isPos = t.role === 'pos';
@@ -1186,6 +1225,7 @@
             : `<span class="px-2 py-0.5 bg-amber-100 text-amber-800 rounded-md font-extrabold text-[10px]">🚗 Tài Xế</span>`;
           const rowBg = isPos ? 'bg-blue-50/30' : 'bg-amber-50/30';
 
+          const checkboxHtml = `<input type="checkbox" class="manager-trip-checkbox" value="${t.id}">`;
           const deleteBtn = `<button onclick="adminDeleteTrip('${t.id}', '${t.createdBy}')" class="px-2 py-0.5 bg-rose-50 hover:bg-rose-100 text-rose-600 font-bold rounded-md text-[10px]">🗑️ Xóa</button>`;
 
           const auditCell = (idx === 0) ? `<td class="p-3 text-center align-middle" rowspan="${group.length}">${statusHtml}</td>` : '';
@@ -1193,7 +1233,9 @@
 
           rowsHtml += `
             <tr class="${rowBg} hover:bg-slate-100/80 transition-all ${borderClass}">
+              <td class="p-2.5 text-center align-middle">${checkboxHtml}</td>
               <td class="p-2.5">${t.dateStr || '--'}</td>
+              <td class="p-2.5 font-mono font-bold text-slate-600">${t.timeStr || '--'}</td>
               <td class="p-2.5">${roleBadge}</td>
               <td class="p-2.5 font-extrabold text-slate-800">${t.staff || 'N/A'}</td>
               <td class="p-2.5 font-mono font-bold text-blue-600">${t.ticketNumber || '--'}</td>
@@ -1209,7 +1251,7 @@
         });
       });
 
-      tb.innerHTML = rowsHtml || `<tr><td colspan="11" class="p-4 text-center text-slate-400">Không tìm thấy dữ liệu đối soát phù hợp.</td></tr>`;
+      tb.innerHTML = rowsHtml || `<tr><td colspan="13" class="p-4 text-center text-slate-400">Không tìm thấy dữ liệu đối soát phù hợp.</td></tr>`;
     }
 
     function exportCustomExcel() {
@@ -1269,10 +1311,11 @@
         let groupRows = [];
         group.forEach(t => {
           const defaultPay = paymentOptions[0] || 'Nhân Viên Quầy Thu';
-          const rowString = `${t.dateStr} ${t.role} ${t.staff} ${t.ticketNumber} ${t.plateNumber} ${t.destination} ${t.paymentMethod || defaultPay} ${t.note || ''} ${t.totalFare}`.toLowerCase();
+          const rowString = `${t.dateStr} ${t.timeStr} ${t.role} ${t.staff} ${t.ticketNumber} ${t.plateNumber} ${t.destination} ${t.paymentMethod || defaultPay} ${t.note || ''} ${t.totalFare}`.toLowerCase();
           if (!keyword || rowString.includes(keyword)) {
             groupRows.push({
               "Ngày": t.dateStr || '--',
+              "Thời Gian Nộp": t.timeStr || '--',
               "Phân Vùng": t.role === 'pos' ? 'Bán Vé (Quầy)' : 'Cổng Chủ Xe',
               "Nhân Sự": t.staff || 'N/A',
               "Số Phiếu": t.ticketNumber || '--',
@@ -1289,7 +1332,7 @@
         if (groupRows.length > 0) {
           sortedExcelRows.push(...groupRows);
           sortedExcelRows.push({
-            "Ngày": "", "Phân Vùng": "", "Nhân Sự": "", "Số Phiếu": "", "Biển Số": "", "Điểm Đến": "", "Hình Thức Thanh Toán": "", "Ghi Chú": "", "Tổng Tiền": "", "Trạng Thái Đối Soát": ""
+            "Ngày": "", "Thời Gian Nộp": "", "Phân Vùng": "", "Nhân Sự": "", "Số Phiếu": "", "Biển Số": "", "Điểm Đến": "", "Hình Thức Thanh Toán": "", "Ghi Chú": "", "Tổng Tiền": "", "Trạng Thái Đối Soát": ""
           });
         }
       });
@@ -1298,7 +1341,7 @@
 
       const worksheet = XLSX.utils.json_to_sheet(sortedExcelRows);
       worksheet['!cols'] = [
-        {wch: 14}, {wch: 18}, {wch: 16}, {wch: 14}, {wch: 14}, {wch: 28}, {wch: 22}, {wch: 22}, {wch: 18}, {wch: 22}
+        {wch: 14}, {wch: 16}, {wch: 18}, {wch: 16}, {wch: 14}, {wch: 14}, {wch: 28}, {wch: 22}, {wch: 22}, {wch: 18}, {wch: 22}
       ];
 
       const workbook = XLSX.utils.book_new();
@@ -1314,12 +1357,10 @@
         if (ownerUser) {
           updates[`users_trips/${ownerUser}/${id}`] = null;
         }
-        if (tripToDelete) {
-          updates[`deleted_trips/${id}`] = { ...tripToDelete, deletedAt: Date.now(), deletedBy: loggedInUser.user };
-        }
 
         rtdb.ref().update(updates).then(() => {
-          alert("Đã chuyển đơn hàng vào thùng rác quản trị!");
+          if (tripToDelete) lastDeletedTripBackup = [tripToDelete];
+          showUndoAlert("Đã xóa đơn hàng!", restoreDeletedTrips);
         });
       }
     }

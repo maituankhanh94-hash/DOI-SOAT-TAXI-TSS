@@ -1,0 +1,1294 @@
+<!DOCTYPE html>
+<html lang="vi" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TSS POS - Hệ Thống Điều Xe Sân Bay</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap');
+    body { font-family: 'Plus Jakarta Sans', sans-serif; }
+    .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+    .custom-scrollbar::-webkit-scrollbar-track { background: #f1f5f9; }
+    .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+    .local-dropdown { position: absolute; z-index: 999999; background: white; border: 2px solid #2563eb; border-radius: 12px; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.15); max-height: 200px; overflow-y: auto; width: 100%; margin-top: 4px; left: 0; }
+    .local-item { padding: 8px 12px; font-size: 11px; font-weight: 700; color: #1e293b; cursor: pointer; border-bottom: 1px solid #f1f5f9; }
+    .local-item:hover { background: #eff6ff; color: #1d4ed8; }
+  </style>
+</head>
+<body class="h-full bg-slate-100 flex flex-col overflow-hidden">
+
+  <!-- HEADER -->
+  <header class="bg-blue-600 text-white px-4 py-3 flex items-center justify-between shadow-md flex-none z-30">
+    <div class="flex items-center space-x-3">
+      <span class="font-extrabold text-sm">✈️ TSS POS</span>
+      <span id="header-status" class="text-xs bg-blue-700 px-2.5 py-1 rounded-lg">Màn hình đăng nhập</span>
+      <!-- FIREBASE LIVE STATUS INDICATOR -->
+      <div id="firebase-status-badge" class="px-2.5 py-1 bg-emerald-500 text-white text-[10px] font-extrabold rounded-lg shadow-sm flex items-center space-x-1.5 transition-all">
+        <span id="firebase-dot" class="w-2 h-2 rounded-full bg-white animate-ping"></span>
+        <span id="firebase-status-text">🟢 Cloud Đang Kết Nối</span>
+      </div>
+    </div>
+    <div class="flex items-center space-x-2">
+      <button onclick="logoutSession()" id="btn-logout" class="px-3 py-1.5 bg-rose-500 hover:bg-rose-600 text-white rounded-lg text-xs font-bold hidden">Đăng Xuất</button>
+      <button onclick="location.reload()" class="px-2.5 py-1.5 bg-slate-700 hover:bg-slate-800 text-white rounded-lg text-xs font-bold">Thoát App</button>
+    </div>
+  </header>
+
+  <!-- MAIN CONTAINER -->
+  <main id="main-container" class="flex-1 overflow-y-auto p-3 sm:p-6 max-w-7xl mx-auto w-full flex flex-col">
+    <!-- Nội dung render động -->
+  </main>
+
+  <script>
+    const firebaseConfig = {
+      apiKey: "AIzaSyB9rTrGArG5WUfUMfznab5YjblCv4Amg4M",
+      authDomain: "taxi-tss-df1a5.firebaseapp.com",
+      databaseURL: "https://taxi-tss-df1a5-default-rtdb.firebaseio.com",
+      projectId: "taxi-tss-df1a5",
+      storageBucket: "taxi-tss-df1a5.firebasestorage.app",
+      messagingSenderId: "487347280845",
+      appId: "1:487347280845:web:90ee3c994ae250918ec284"
+    };
+    firebase.initializeApp(firebaseConfig);
+    const rtdb = firebase.database();
+
+    let loggedInUser = null; 
+    let personalTrips = []; 
+    let allCompanyTrips = []; 
+    
+    let userAccounts = [
+      { user: 'TSS01', pass: '123', role: 'pos' },
+      { user: 'TSS02', pass: '123', role: 'driver' }
+    ];
+
+    let sourceOptions = ["SQ", "G1", "VTO", "Khách Quầy", "City Tour", "ThanhLong", "JOVIA", "VDT", "MONICA", "NOVEMBER", "STELLAR", "SANNA", "LA SIESTA"];
+    let staffOptions = ["Mai Tuấn Khanh", "Nguyễn Văn An", "Trần Thị Tâm", "Lê Văn Liên", "Hoàng Đức Tài"];
+    let carTypeOptions = ["Xe 4 Chỗ", "Xe 7 Chỗ", "Xe 16 Chỗ"];
+    let paymentOptions = ["Nhân Viên Quầy Thu", "Thẻ", "Kế Hoạch", "Tài Xế Thu"];
+    
+    // Giờ khóa sửa/xóa đơn mặc định (Ví dụ: 8 giờ sáng)
+    let lockHourSetting = 8; 
+
+    const TERMINAL_OPTIONS = ["T2", "T1", "T3"];
+
+    window.addEventListener('DOMContentLoaded', () => {
+      initCloudStatusMonitor();
+      loadCloudSettings();
+      renderHomeSelection();
+    });
+
+    function initCloudStatusMonitor() {
+      const badge = document.getElementById('firebase-status-badge');
+      const text = document.getElementById('firebase-status-text');
+      const dot = document.getElementById('firebase-dot');
+
+      rtdb.ref('.info/connected').on('value', (snap) => {
+        if (snap.val() === true) {
+          if(badge) badge.className = "px-2.5 py-1 bg-emerald-500 text-white text-[10px] font-extrabold rounded-lg shadow-sm flex items-center space-x-1.5 transition-all";
+          if(text) text.innerText = "🟢 Cloud Đang Kết Nối";
+          if(dot) dot.style.display = 'block';
+        } else {
+          if(badge) badge.className = "px-2.5 py-1 bg-rose-600 text-white text-[10px] font-extrabold rounded-lg shadow-sm flex items-center space-x-1.5 animate-pulse transition-all";
+          if(text) text.innerText = "🔴 Mất Kết Nối Cloud";
+          if(dot) dot.style.display = 'none';
+        }
+      });
+    }
+
+    function loadCloudSettings() {
+      rtdb.ref('settings/accounts').on('value', snap => {
+        if (snap.val()) {
+          const val = snap.val();
+          userAccounts = Array.isArray(val) ? val : Object.values(val);
+          if (loggedInUser && loggedInUser.role === 'manager') renderAccountsTable();
+        } else {
+          rtdb.ref('settings/accounts').set(userAccounts);
+        }
+      });
+
+      rtdb.ref('settings/sources').on('value', snap => {
+        if (snap.val()) {
+          const val = snap.val();
+          sourceOptions = Array.isArray(val) ? val : Object.values(val);
+          if (loggedInUser && loggedInUser.role === 'manager') renderSourcesTable();
+        } else {
+          rtdb.ref('settings/sources').set(sourceOptions);
+        }
+      });
+
+      rtdb.ref('settings/staff').on('value', snap => {
+        if (snap.val()) {
+          const val = snap.val();
+          staffOptions = Array.isArray(val) ? val : Object.values(val);
+          if (loggedInUser && loggedInUser.role === 'manager') renderStaffTable();
+        } else {
+          rtdb.ref('settings/staff').set(staffOptions);
+        }
+      });
+
+      rtdb.ref('settings/carTypes').on('value', snap => {
+        if (snap.val()) {
+          const val = snap.val();
+          carTypeOptions = Array.isArray(val) ? val : Object.values(val);
+          if (loggedInUser && loggedInUser.role === 'manager') renderCarTypesTable();
+        } else {
+          rtdb.ref('settings/carTypes').set(carTypeOptions);
+        }
+      });
+
+      rtdb.ref('settings/payments').on('value', snap => {
+        if (snap.val()) {
+          const val = snap.val();
+          paymentOptions = Array.isArray(val) ? val : Object.values(val);
+          if (loggedInUser && loggedInUser.role === 'manager') renderPaymentsTable();
+        } else {
+          rtdb.ref('settings/payments').set(paymentOptions);
+        }
+      });
+
+      rtdb.ref('settings/lockHour').on('value', snap => {
+        if (snap.val() !== null) {
+          lockHourSetting = parseInt(snap.val(), 10);
+          const inp = document.getElementById('lock-hour-input');
+          if (inp) inp.value = lockHourSetting;
+        } else {
+          rtdb.ref('settings/lockHour').set(lockHourSetting);
+        }
+      });
+    }
+
+    function saveCloudAccounts() { rtdb.ref('settings/accounts').set(userAccounts); }
+    function saveLockHour() {
+      const inp = document.getElementById('lock-hour-input');
+      if (!inp) return;
+      const val = parseInt(inp.value, 10);
+      if (isNaN(val) || val < 0 || val > 23) { alert("Vui lòng nhập giờ hợp lệ từ 0 đến 23!"); return; }
+      lockHourSetting = val;
+      rtdb.ref('settings/lockHour').set(lockHourSetting).then(() => {
+        alert(`Đã cập nhật giờ khóa đơn thành ${lockHourSetting}:00 sáng hôm sau!`);
+      });
+    }
+
+    function renderHomeSelection() {
+      loggedInUser = null;
+      document.getElementById('header-status').innerText = "Chọn phân vùng đăng nhập";
+      document.getElementById('btn-logout').classList.add('hidden');
+      
+      document.getElementById('main-container').innerHTML = `
+        <div class="flex flex-col items-center justify-center text-center space-y-6 my-auto py-10">
+          <div class="bg-gradient-to-tr from-blue-600 to-indigo-600 text-white w-24 h-24 rounded-3xl flex items-center justify-center text-4xl font-extrabold shadow-2xl">
+            ✈️
+          </div>
+          <div class="space-y-2">
+            <h1 class="text-2xl font-extrabold text-slate-900">HỆ THỐNG ĐIỀU XE SÂN BAY TSS</h1>
+            <p class="text-xs text-slate-500 max-w-sm mx-auto">Chọn phân vùng làm việc của bạn bên dưới:</p>
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 w-full max-w-md">
+            <button onclick="promptLogin('pos')" class="p-4 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-2xl shadow-lg">🚖 Bán Vé (Quầy)</button>
+            <button onclick="promptLogin('driver')" class="p-4 bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs rounded-2xl shadow-lg">🚗 Cổng Chủ Xe</button>
+            <button onclick="promptLogin('manager')" class="p-4 bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs rounded-2xl shadow-lg">📊 Trang Quản Lý</button>
+          </div>
+        </div>
+      `;
+    }
+
+    function promptLogin(role) {
+      if (role === 'manager') {
+        const html = `
+          <div id="manager-login-modal" class="fixed inset-0 bg-slate-900/80 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+            <div class="bg-white rounded-3xl shadow-2xl max-w-xs w-full p-6 text-center space-y-4">
+              <div class="bg-slate-900 text-white w-12 h-12 rounded-2xl flex items-center justify-center mx-auto text-xl font-bold">📊</div>
+              <h3 class="text-sm font-bold text-slate-900">Đăng Nhập Quản Lý</h3>
+              <input type="password" id="mgr-pwd" autocomplete="current-password" placeholder="Mật khẩu quản lý..." class="w-full px-3 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-center" onkeydown="if(event.key==='Enter') executeManagerLogin()">
+              <div class="flex space-x-2 pt-1">
+                <button onclick="executeManagerLogin()" class="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold">Xác Nhận</button>
+                <button onclick="document.getElementById('manager-login-modal').remove()" class="w-full py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold">Hủy</button>
+              </div>
+            </div>
+          </div>
+        `;
+        document.getElementById('main-container').insertAdjacentHTML('beforeend', html);
+        setTimeout(() => { const inp = document.getElementById('mgr-pwd'); if (inp) inp.focus(); }, 100);
+      } else {
+        promptUserLoginModal(role);
+      }
+    }
+
+    function executeManagerLogin() {
+      const inp = document.getElementById('mgr-pwd');
+      const val = inp ? inp.value.trim() : '';
+      if (val === '999') {
+        loggedInUser = { user: 'Admin', role: 'manager' };
+        document.getElementById('header-status').innerText = "Quản Lý (Admin)";
+        document.getElementById('btn-logout').classList.remove('hidden');
+        
+        rtdb.ref('trips').on('value', s => {
+          allCompanyTrips = s.val() ? Object.values(s.val()) : [];
+          updateManagerAuditTable();
+        });
+        renderManagerDashboard();
+      } else {
+        alert("Mật khẩu quản lý không chính xác!");
+        if (inp) { inp.value = ''; inp.focus(); }
+      }
+    }
+
+    function promptUserLoginModal(role) {
+      const title = `Đăng Nhập ${role === 'pos' ? 'Bán Vé' : 'Tài Xế'}`;
+      const html = `
+        <div class="fixed inset-0 bg-slate-900/80 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+          <div class="bg-white rounded-3xl shadow-2xl max-w-xs w-full p-6 text-center space-y-4">
+            <div class="bg-blue-600 text-white w-12 h-12 rounded-2xl flex items-center justify-center mx-auto text-xl font-bold">🔐</div>
+            <h3 class="text-sm font-bold text-slate-900">${title}</h3>
+            <div class="space-y-2 text-left">
+              <input type="text" id="modal-user" autocomplete="off" placeholder="Tài khoản (VD: TSS01)..." class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold">
+              <input type="password" id="modal-pwd" autocomplete="off" placeholder="Mật khẩu..." class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold" onkeydown="if(event.key==='Enter') executeUserLogin('${role}')">
+            </div>
+            <div class="flex space-x-2 pt-1">
+              <button onclick="executeUserLogin('${role}')" class="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold">Xác Nhận</button>
+              <button onclick="renderHomeSelection()" class="w-full py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold">Hủy</button>
+            </div>
+          </div>
+        </div>
+      `;
+      document.getElementById('main-container').insertAdjacentHTML('beforeend', html);
+      document.getElementById('modal-user').focus();
+    }
+
+    function executeUserLogin(role) {
+      const u = document.getElementById('modal-user').value.trim().toUpperCase();
+      const p = document.getElementById('modal-pwd').value.trim();
+      const found = userAccounts.find(x => x.user === u && x.pass === p && x.role === role);
+      if (found) {
+        loggedInUser = found;
+        document.getElementById('header-status').innerText = `${role === 'pos' ? 'Bán Vé' : 'Tài Xế'}: ${found.user}`;
+        document.getElementById('btn-logout').classList.remove('hidden');
+
+        rtdb.ref(`users_trips/${loggedInUser.user}`).on('value', s => {
+          personalTrips = s.val() ? Object.values(s.val()) : [];
+          updatePersonalSummary();
+          renderActiveWorksheetTrips();
+        });
+
+        renderWorksheetView(role);
+      } else {
+        alert("Tài khoản hoặc mật khẩu không đúng hoặc không đúng phân vùng!");
+      }
+    }
+
+    function logoutSession() {
+      location.reload();
+    }
+
+    function canDeleteTrip(tripTimestamp) {
+      if (!tripTimestamp) return true;
+      const now = Date.now();
+      const tripDate = new Date(tripTimestamp);
+      const limitDate = new Date(tripDate.getFullYear(), tripDate.getMonth(), tripDate.getDate() + 1, lockHourSetting, 0, 0);
+      return now < limitDate.getTime();
+    }
+
+    function renderWorksheetView(role) {
+      const isPos = role === 'pos';
+      document.getElementById('main-container').innerHTML = `
+        <div class="space-y-4 pb-20 w-full">
+          <!-- BẢNG 1: TỔNG KẾT DOANH THU CÓ THỂ CHỌN NGÀY TÙY CHỌN -->
+          <div class="bg-white p-4 sm:p-5 rounded-3xl shadow-md border border-slate-200 space-y-3">
+            <div class="flex flex-col sm:flex-row items-center justify-between border-b pb-3 gap-3">
+              <h3 class="text-xs sm:text-sm font-extrabold ${isPos ? 'text-blue-900' : 'text-amber-800'} uppercase">📊 Tổng Kết Doanh Thu Theo Ngày (${loggedInUser.user})</h3>
+              <div class="flex items-center space-x-2">
+                <label class="text-xs font-bold text-slate-600">Chọn ngày xem:</label>
+                <input type="date" id="summary-date-picker" class="px-3 py-1.5 bg-slate-50 border rounded-xl font-mono text-xs font-bold" onchange="updatePersonalSummary()">
+                <button onclick="resetSummaryDateToToday()" class="px-2.5 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl text-xs font-bold">Hôm nay</button>
+                <button onclick="openMonthlyHistoryModal()" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-sm">📅 Xem Tháng</button>
+              </div>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-5 gap-3" id="summary-cards-container"></div>
+          </div>
+
+          <!-- BẢNG 2: NHẬP HÀNG LOẠT 20 ĐƠN -->
+          <div class="bg-white p-4 sm:p-6 rounded-3xl shadow-xl border border-slate-200 space-y-4">
+            <div class="flex flex-col sm:flex-row items-center justify-between gap-3 border-b pb-4">
+              <h3 class="text-xs sm:text-sm font-extrabold uppercase ${isPos ? 'text-blue-900' : 'text-amber-800'}">📋 Nhập Hàng Loạt 20 Dòng Nhanh</h3>
+              <button onclick="submitBatch('${role}')" class="px-5 py-2.5 ${isPos ? 'bg-blue-600 hover:bg-blue-700' : 'bg-amber-600 hover:bg-amber-700'} text-white font-extrabold text-xs rounded-xl shadow-lg transition-all">🚀 Lưu Đơn Lên Cloud</button>
+            </div>
+            <div class="overflow-x-auto custom-scrollbar max-h-[450px]">
+              <table class="w-full text-left border-collapse min-w-[1700px]">
+                <thead class="sticky top-0 z-20 shadow-md">
+                  <tr class="bg-slate-900 text-white text-[11px] font-bold">
+                    <th class="p-3 text-center w-10 bg-slate-900">STT</th>
+                    <th class="p-3 w-32 bg-slate-900">Ngày Tháng</th>
+                    <th class="p-3 w-40 bg-slate-900 relative">Tên Nhân Sự (Gõ mới đề xuất)</th>
+                    <th class="p-3 w-28 bg-slate-900">Số Phiếu (Tự nhảy)</th>
+                    <th class="p-3 w-32 bg-slate-900">Biển Số Xe</th>
+                    <th class="p-3 w-36 bg-slate-900">Loại Xe</th>
+                    <th class="p-3 w-40 bg-slate-900">Nguồn Đơn</th>
+                    <th class="p-3 w-28 bg-slate-900">Điểm Đón</th>
+                    <th class="p-3 min-w-[220px] bg-slate-900">Điểm Đến</th>
+                    <th class="p-3 w-36 text-right bg-slate-900">Tổng Tiền</th>
+                    <th class="p-3 w-32 bg-slate-900">Thanh Toán</th>
+                    <th class="p-3 min-w-[180px] bg-slate-900">Ghi Chú</th>
+                  </tr>
+                </thead>
+                <tbody id="tbody-batch" class="divide-y divide-slate-200 text-xs"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- BẢNG 3: LỊCH SỬ ĐƠN HÀNG -->
+          <div class="bg-white p-4 sm:p-6 rounded-3xl shadow-xl border border-slate-200 space-y-3">
+            <div class="flex flex-col sm:flex-row items-center justify-between border-b pb-3 gap-2">
+              <h3 class="text-xs sm:text-sm font-extrabold text-slate-800 uppercase">📋 Lịch Sử Đơn Hàng Theo Ngày (${loggedInUser.user})</h3>
+              <div class="flex items-center space-x-2">
+                <label class="text-xs font-bold text-slate-600">Chọn ngày xem:</label>
+                <input type="date" id="filter-history-date" class="px-3 py-1.5 bg-slate-50 border rounded-xl font-mono text-xs font-bold" onchange="renderActiveWorksheetTrips()">
+                <button onclick="resetHistoryDateToToday()" class="px-2.5 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl text-xs font-bold">Hôm nay</button>
+              </div>
+            </div>
+            <div class="overflow-x-auto custom-scrollbar max-h-[350px]">
+              <table class="w-full text-left border-collapse text-xs">
+                <thead class="sticky top-0 bg-slate-800 text-white">
+                  <tr>
+                    <th class="p-2.5">Ngày</th>
+                    <th class="p-2.5">Số Phiếu</th>
+                    <th class="p-2.5">Biển Số</th>
+                    <th class="p-2.5">Điểm Đến</th>
+                    <th class="p-2.5">Thanh Toán</th>
+                    <th class="p-2.5">Ghi Chú</th>
+                    <th class="p-2.5 text-right">Tổng Tiền</th>
+                    <th class="p-2.5 text-center">Thao Tác Xóa</th>
+                  </tr>
+                </thead>
+                <tbody id="tbody-personal-trips" class="divide-y divide-slate-200"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      `;
+      renderBatchRows(role);
+
+      // Gán giá trị mặc định ngày hôm nay cho cả 2 ô chọn ngày (Tổng kết & Lịch sử)
+      const todayObj = new Date();
+      const yyyy = todayObj.getFullYear();
+      const mm = String(todayObj.getMonth() + 1).padStart(2, '0');
+      const dd = String(todayObj.getDate()).padStart(2, '0');
+      const todayFormatted = `${yyyy}-${mm}-${dd}`;
+
+      const sumDateInp = document.getElementById('summary-date-picker');
+      if(sumDateInp) sumDateInp.value = todayFormatted;
+
+      const histDateInp = document.getElementById('filter-history-date');
+      if(histDateInp) histDateInp.value = todayFormatted;
+
+      updatePersonalSummary();
+      renderActiveWorksheetTrips();
+    }
+
+    function resetSummaryDateToToday() {
+      const sumDateInp = document.getElementById('summary-date-picker');
+      if(sumDateInp) {
+        const todayObj = new Date();
+        const yyyy = todayObj.getFullYear();
+        const mm = String(todayObj.getMonth() + 1).padStart(2, '0');
+        const dd = String(todayObj.getDate()).padStart(2, '0');
+        sumDateInp.value = `${yyyy}-${mm}-${dd}`;
+        updatePersonalSummary();
+      }
+    }
+
+    function resetHistoryDateToToday() {
+      const histDateInp = document.getElementById('filter-history-date');
+      if(histDateInp) {
+        const todayObj = new Date();
+        const yyyy = todayObj.getFullYear();
+        const mm = String(todayObj.getMonth() + 1).padStart(2, '0');
+        const dd = String(todayObj.getDate()).padStart(2, '0');
+        histDateInp.value = `${yyyy}-${mm}-${dd}`;
+        renderActiveWorksheetTrips();
+      }
+    }
+
+    function openMonthlyHistoryModal() {
+      const now = new Date();
+      const currentMonth = now.getMonth() + 1;
+      const currentYear = now.getFullYear();
+
+      const monthTrips = personalTrips.filter(t => {
+        if (!t.dateStr) return false;
+        const parts = t.dateStr.split('/');
+        if (parts.length === 3) {
+          return parseInt(parts[1]) === currentMonth && parseInt(parts[2]) === currentYear;
+        }
+        return false;
+      });
+
+      const totalMonthSum = monthTrips.reduce((acc, t) => acc + Number(t.totalFare || 0), 0);
+
+      const html = `
+        <div id="monthly-history-modal" class="fixed inset-0 bg-slate-900/85 z-50 flex items-center justify-center p-3 backdrop-blur-sm">
+          <div class="bg-white rounded-3xl shadow-2xl max-w-4xl w-full p-5 sm:p-6 space-y-4 max-h-[90vh] flex flex-col">
+            <div class="flex items-center justify-between border-b pb-3">
+              <div>
+                <h3 class="text-sm font-extrabold text-slate-900 uppercase">📅 Lịch Sử Đơn Hàng & Doanh Thu Tháng ${currentMonth}/${currentYear}</h3>
+                <p class="text-xs text-slate-500">Tài khoản: ${loggedInUser.user}</p>
+              </div>
+              <button onclick="document.getElementById('monthly-history-modal').remove()" class="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold">Đóng</button>
+            </div>
+
+            <div class="grid grid-cols-2 gap-3 bg-slate-50 p-3 rounded-2xl border">
+              <div>
+                <div class="text-[10px] font-bold text-slate-500 uppercase">Tổng Doanh Thu Tháng</div>
+                <div class="text-lg font-extrabold text-emerald-700">${totalMonthSum.toLocaleString('vi-VN')} ₫</div>
+              </div>
+              <div>
+                <div class="text-[10px] font-bold text-slate-500 uppercase">Tổng Số Đơn Trong Tháng</div>
+                <div class="text-lg font-extrabold text-blue-700">${monthTrips.length} đơn</div>
+              </div>
+            </div>
+
+            <div class="overflow-x-auto custom-scrollbar flex-1 border rounded-2xl">
+              <table class="w-full text-left border-collapse text-xs">
+                <thead class="bg-slate-800 text-white sticky top-0">
+                  <tr>
+                    <th class="p-2.5">Ngày</th>
+                    <th class="p-2.5">Số Phiếu</th>
+                    <th class="p-2.5">Biển Số</th>
+                    <th class="p-2.5">Điểm Đến</th>
+                    <th class="p-2.5">Thanh Toán</th>
+                    <th class="p-2.5">Ghi Chú</th>
+                    <th class="p-2.5 text-right">Tổng Tiền</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-200">
+                  ${monthTrips.length === 0 ? `<tr><td colspan="7" class="p-4 text-center text-slate-400">Không có đơn hàng nào trong tháng này.</td></tr>` : 
+                    monthTrips.map(t => `
+                      <tr class="hover:bg-slate-50">
+                        <td class="p-2.5">${t.dateStr}</td>
+                        <td class="p-2.5 font-mono font-bold text-blue-600">${t.ticketNumber}</td>
+                        <td class="p-2.5 font-mono font-bold uppercase">${t.plateNumber}</td>
+                        <td class="p-2.5">${t.destination}</td>
+                        <td class="p-2.5 font-bold">${t.paymentMethod || paymentOptions[0]}</td>
+                        <td class="p-2.5 text-slate-600">${t.note || '--'}</td>
+                        <td class="p-2.5 text-right font-bold text-emerald-600">${Number(t.totalFare || 0).toLocaleString('vi-VN')} ₫</td>
+                      </tr>
+                    `).join('')}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      `;
+      document.getElementById('main-container').insertAdjacentHTML('beforeend', html);
+    }
+
+    // Cập nhật tổng kết doanh thu theo ngày người dùng chọn trên input date
+    function updatePersonalSummary() {
+      if (!loggedInUser || loggedInUser.role === 'manager') return;
+
+      const sumDateInp = document.getElementById('summary-date-picker');
+      let targetDateStr = '';
+      if (sumDateInp && sumDateInp.value) {
+        const parts = sumDateInp.value.split('-');
+        if (parts.length === 3) {
+          targetDateStr = `${parts[2]}/${parts[1]}/${parts[0]}`;
+        }
+      }
+
+      const selectedItems = personalTrips.filter(t => {
+        if (!targetDateStr) return true;
+        return t.dateStr === targetDateStr;
+      });
+
+      const totalSum = selectedItems.reduce((acc, t) => acc + (Number(t.totalFare) || 0), 0);
+      
+      let methodSums = {};
+      paymentOptions.forEach(opt => methodSums[opt] = 0);
+
+      selectedItems.forEach(t => {
+        const fare = Number(t.totalFare || 0);
+        const method = t.paymentMethod || paymentOptions[0];
+        if (methodSums[method] !== undefined) {
+          methodSums[method] += fare;
+        } else {
+          methodSums[paymentOptions[0]] = (methodSums[paymentOptions[0]] || 0) + fare;
+        }
+      });
+
+      const container = document.getElementById('summary-cards-container');
+      if (!container) return;
+
+      let cardsHtml = `
+        <div class="bg-emerald-50 border border-emerald-200 p-3.5 rounded-2xl shadow-sm sm:col-span-1">
+          <div class="text-[10px] font-bold uppercase text-emerald-600">Tổng Tiền Ngày Này</div>
+          <div id="personal-sum" class="text-lg sm:text-xl font-extrabold text-emerald-800 mt-1">${totalSum.toLocaleString('vi-VN')} ₫</div>
+          <div id="personal-count" class="text-[11px] text-slate-500 mt-0.5">${selectedItems.length} đơn</div>
+        </div>
+      `;
+
+      const colors = ['bg-blue-50 border-blue-200 text-blue-800', 'bg-indigo-50 border-indigo-200 text-indigo-800', 'bg-amber-50 border-amber-200 text-amber-800', 'bg-purple-50 border-purple-200 text-purple-800', 'bg-rose-50 border-rose-200 text-rose-800'];
+      paymentOptions.forEach((opt, idx) => {
+        const cls = colors[idx % colors.length];
+        cardsHtml += `
+          <div class="${cls} border p-3.5 rounded-2xl shadow-sm">
+            <div class="text-[10px] font-bold uppercase opacity-80">${opt}</div>
+            <div class="text-base font-extrabold mt-1">${(methodSums[opt] || 0).toLocaleString('vi-VN')} ₫</div>
+          </div>
+        `;
+      });
+
+      container.innerHTML = cardsHtml;
+    }
+
+    function renderActiveWorksheetTrips() {
+      const tb = document.getElementById('tbody-personal-trips');
+      if (!tb || !loggedInUser) return;
+
+      const dateInp = document.getElementById('filter-history-date');
+      let targetDateStr = '';
+      if (dateInp && dateInp.value) {
+        const parts = dateInp.value.split('-');
+        if (parts.length === 3) {
+          targetDateStr = `${parts[2]}/${parts[1]}/${parts[0]}`;
+        }
+      }
+
+      const filteredTrips = personalTrips.filter(t => {
+        if (!targetDateStr) return true;
+        return t.dateStr === targetDateStr;
+      });
+
+      if (filteredTrips.length === 0) {
+        tb.innerHTML = `<tr><td colspan="8" class="p-4 text-center text-slate-400">Không có đơn hàng nào vào ngày ${targetDateStr || 'này'}.</td></tr>`;
+        return;
+      }
+
+      tb.innerHTML = filteredTrips.map(t => {
+        const isDeletable = canDeleteTrip(t.timestamp);
+        const deleteBtn = isDeletable 
+          ? `<button onclick="deletePersonalTrip('${t.id}')" class="px-2.5 py-1 bg-rose-50 hover:bg-rose-100 text-rose-600 font-bold rounded-lg text-[11px]">🗑️ Xóa Đơn</button>`
+          : `<span class="text-slate-400 font-semibold italic text-[11px]" title="Đã quá giờ khóa đơn">🔒 Đã Khóa</span>`;
+
+        return `
+          <tr class="hover:bg-slate-50">
+            <td class="p-2.5">${t.dateStr || '--'}</td>
+            <td class="p-2.5 font-mono font-bold text-blue-600">${t.ticketNumber}</td>
+            <td class="p-2.5 font-mono font-bold uppercase">${t.plateNumber}</td>
+            <td class="p-2.5">${t.destination}</td>
+            <td class="p-2.5 font-bold text-slate-700">${t.paymentMethod || paymentOptions[0]}</td>
+            <td class="p-2.5 text-slate-600">${t.note || '--'}</td>
+            <td class="p-2.5 text-right font-bold text-emerald-600">${Number(t.totalFare || 0).toLocaleString('vi-VN')} ₫</td>
+            <td class="p-2.5 text-center">${deleteBtn}</td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    function deletePersonalTrip(id) {
+      const trip = personalTrips.find(t => t.id === id);
+      if (!trip) return;
+
+      if (!canDeleteTrip(trip.timestamp)) {
+        alert(`Đã quá giờ quy định của ngày hôm sau, đơn hàng đã bị khóa và không thể xóa!`);
+        return;
+      }
+
+      if (confirm("Bạn có chắc chắn muốn xóa đơn hàng này không?")) {
+        let updates = {};
+        updates[`users_trips/${loggedInUser.user}/${id}`] = null;
+        updates[`trips/${id}`] = null;
+
+        rtdb.ref().update(updates).then(() => {
+          alert("Đã xóa đơn hàng thành công!");
+        });
+      }
+    }
+
+    function renderBatchRows(role) {
+      const tb = document.getElementById('tbody-batch');
+      if (!tb) return;
+      const defaultDate = new Date().toLocaleDateString('vi-VN');
+      let html = '';
+      for (let i = 0; i < 20; i++) {
+        html += `
+          <tr>
+            <td class="p-2.5 text-center font-bold">${i+1}</td>
+            <td class="p-2.5"><input type="text" id="date-${i}" autocomplete="off" value="${defaultDate}" class="w-full p-2 bg-slate-50 border rounded-xl font-mono text-xs"></td>
+            <td class="p-2.5 relative">
+              <input type="text" id="staff-${i}" autocomplete="off" value="" placeholder="Gõ tên để đề xuất..." class="w-full p-2 bg-slate-50 border rounded-xl font-bold text-xs" oninput="showStaffSuggestions(this, 'staff-drop-${i}')" onfocus="showStaffSuggestions(this, 'staff-drop-${i}')">
+              <div id="staff-drop-${i}"></div>
+            </td>
+            <td class="p-2.5"><input type="text" id="t-${i}" autocomplete="off" placeholder="Phiếu..." class="w-full p-2 bg-slate-50 border rounded-xl font-mono font-bold text-xs" onfocus="handleSmartTicketFocus(${i})"></td>
+            <td class="p-2.5"><input type="text" id="p-${i}" autocomplete="off" placeholder="51H-..." class="w-full p-2 bg-slate-50 border rounded-xl font-mono font-bold uppercase text-xs"></td>
+            <td class="p-2.5">
+              <select id="c-${i}" class="w-full p-2 bg-slate-50 border rounded-xl font-bold text-xs">
+                ${carTypeOptions.map(ct => `<option value="${ct}">${ct}</option>`).join('')}
+              </select>
+            </td>
+            <td class="p-2.5">
+              <select id="src-${i}" class="w-full p-2 bg-slate-50 border rounded-xl font-bold text-xs">
+                ${sourceOptions.map(s => `<option value="${s}">${s}</option>`).join('')}
+              </select>
+            </td>
+            <td class="p-2.5">
+              <select id="pick-${i}" class="w-full p-2 bg-slate-50 border rounded-xl font-bold text-xs">
+                ${TERMINAL_OPTIONS.map(t => `<option value="${t}">Ga ${t}</option>`).join('')}
+              </select>
+            </td>
+            <td class="p-2.5">
+              <input type="text" id="d-${i}" autocomplete="off" placeholder="Nhập điểm đến..." class="w-full p-2 bg-amber-50 border border-amber-300 rounded-xl font-semibold text-xs">
+            </td>
+            <td class="p-2.5"><input type="text" id="f-${i}" autocomplete="off" placeholder="Số tiền..." onblur="formatCurrSmartInput(this)" class="w-full p-2 bg-emerald-50 border border-emerald-300 rounded-xl font-extrabold text-emerald-800 text-right text-xs"></td>
+            <td class="p-2.5">
+              <select id="m-${i}" class="w-full p-2 bg-slate-50 border rounded-xl font-bold text-xs">
+                ${paymentOptions.map(opt => `<option value="${opt}">${opt}</option>`).join('')}
+              </select>
+            </td>
+            <td class="p-2.5">
+              <input type="text" id="note-${i}" autocomplete="off" placeholder="Ghi chú thêm..." class="w-full p-2 bg-slate-50 border rounded-xl text-xs">
+            </td>
+          </tr>
+        `;
+      }
+      tb.innerHTML = html;
+    }
+
+    function showStaffSuggestions(input, dropId) {
+      const q = input.value.trim().toLowerCase();
+      const drop = document.getElementById(dropId);
+      if (!drop) return;
+      if (!q) { drop.innerHTML = ''; return; }
+
+      const matches = staffOptions.filter(name => name.toLowerCase().includes(q));
+      if (matches.length === 0) { drop.innerHTML = ''; return; }
+
+      drop.innerHTML = `<div class="local-dropdown">${matches.map(name => `
+        <div class="local-item" onclick="document.getElementById('${input.id}').value='${name}';document.getElementById('${dropId}').innerHTML=''">👤 ${name}</div>
+      `).join('')}</div>`;
+    }
+
+    function handleSmartTicketFocus(currentIndex) {
+      const currentInput = document.getElementById(`t-${currentIndex}`);
+      if (currentInput && !currentInput.value.trim() && currentIndex > 0) {
+        for (let j = currentIndex - 1; j >= 0; j--) {
+          const prevInput = document.getElementById(`t-${j}`);
+          if (prevInput && prevInput.value.trim()) {
+            const prevVal = prevInput.value.trim();
+            const match = prevVal.match(/^(.*?)(\d+)$/);
+            if (match) {
+              const prefix = match[1];
+              const numStr = match[2];
+              const numLength = numStr.length;
+              const nextNum = parseInt(numStr, 10) + (currentIndex - j);
+              const formattedNum = String(nextNum).padStart(numLength, '0');
+              currentInput.value = prefix + formattedNum;
+            }
+            break;
+          }
+        }
+      }
+    }
+
+    function submitBatch(role) {
+      if (!loggedInUser) return;
+      const timeStr = new Date().toLocaleTimeString('vi-VN', {hour:'2-digit', minute:'2-digit'});
+      let count = 0;
+      let updates = {};
+
+      for (let i = 0; i < 20; i++) {
+        const dateStr = document.getElementById(`date-${i}`).value.trim();
+        const rawStaff = document.getElementById(`staff-${i}`).value.trim();
+        const ticket = document.getElementById(`t-${i}`).value.trim();
+        const plate = document.getElementById(`p-${i}`).value.trim().toUpperCase();
+        const dest = document.getElementById(`d-${i}`).value.trim();
+        const totalFare = parseFloat(document.getElementById(`f-${i}`).value.replace(/[^0-9]/g, '')) || 0;
+        const carType = document.getElementById(`c-${i}`).value;
+        const source = document.getElementById(`src-${i}`).value;
+        const pickup = document.getElementById(`pick-${i}`).value;
+        const pay = document.getElementById(`m-${i}`).value;
+        const note = document.getElementById(`note-${i}`).value.trim();
+
+        if (rawStaff && ticket && plate && dest) {
+          const baseTimestamp = Date.now() + i;
+
+          const staffNames = rawStaff.split(/[+,]+/).map(s => s.trim()).filter(Boolean);
+          const splitCount = staffNames.length > 1 ? staffNames.length : 1;
+          const splitFare = Math.round(totalFare / splitCount);
+
+          staffNames.forEach((staffName, sIdx) => {
+            const subId = 'X' + baseTimestamp + '_' + sIdx;
+            const subTicket = splitCount > 1 ? `${ticket}-${sIdx + 1}/${splitCount}` : ticket;
+
+            const tripData = {
+              id: subId, dateStr, timeStr, ticketNumber: subTicket, originalTicket: ticket, plateNumber: plate,
+              carType, source, pickup, destination: dest, totalFare: splitFare, originalTotalFare: totalFare, paymentMethod: pay,
+              note: note, staff: staffName, role: loggedInUser.role, createdBy: loggedInUser.user, timestamp: baseTimestamp + sIdx
+            };
+
+            updates[`users_trips/${loggedInUser.user}/${subId}`] = tripData;
+            updates[`trips/${subId}`] = tripData;
+          });
+          count++;
+        }
+      }
+
+      if (count > 0) {
+        rtdb.ref().update(updates).then(() => {
+          alert(`Đã lưu thành công và phân tách hoa hồng cho ${count} đơn!`);
+          renderBatchRows(role);
+        }).catch(err => {
+          alert("Lỗi lưu dữ liệu: " + err.message);
+        });
+      } else {
+        alert("Vui lòng điền đầy đủ Tên Nhân Sự, Số Phiếu, Biển Số và Điểm Đến!");
+      }
+    }
+
+    function renderManagerDashboard() {
+      document.getElementById('main-container').innerHTML = `
+        <div class="space-y-6 pb-24 w-full">
+          <div class="bg-white p-4 sm:p-5 rounded-3xl shadow-md border border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-3">
+            <h3 class="text-xs sm:text-sm font-extrabold text-slate-900 uppercase">📊 Quản Lý Hệ Thống & Cấu Hình</h3>
+            <button onclick="exportCustomExcel()" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-sm">📥 Xuất Excel (Đã Lọc & Có Thanh Toán, Ghi Chú)</button>
+          </div>
+
+          <!-- MỤC 0: CẤU HÌNH GIỜ KHÓA ĐƠN -->
+          <div class="bg-indigo-50 border border-indigo-200 p-4 sm:p-5 rounded-3xl shadow-sm space-y-3">
+            <h4 class="text-xs font-extrabold text-indigo-900 uppercase">⏰ Cấu Hình Giờ Khóa Sửa/Xóa Đơn (Mặc định 8h sáng hôm sau)</h4>
+            <div class="flex items-center space-x-3 text-xs">
+              <span class="font-bold text-slate-700">Khóa đơn vào lúc:</span>
+              <input type="number" id="lock-hour-input" min="0" max="23" value="${lockHourSetting}" class="w-20 p-2 bg-white border rounded-xl font-bold text-center">
+              <span class="font-bold text-slate-700">:00 sáng của ngày hôm sau</span>
+              <button onclick="saveLockHour()" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow-sm">💾 Lưu Cấu Hình Giờ</button>
+            </div>
+          </div>
+
+          <!-- MỤC 1: QUẢN LÝ NGUỒN ĐƠN -->
+          <div class="bg-white rounded-3xl shadow-md border border-slate-200 p-4 sm:p-5 space-y-3">
+            <h4 class="text-xs font-extrabold text-blue-900 uppercase">🏢 Quản Lý Nguồn Đơn / Đối Tác</h4>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+              <div class="space-y-2">
+                <input type="text" id="new-source-name" autocomplete="off" placeholder="Thêm 1 nguồn đơn..." class="w-full p-2.5 bg-slate-50 border rounded-xl font-bold">
+                <button onclick="addNewSource()" class="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold">+ Thêm Một Nguồn</button>
+              </div>
+              <div class="space-y-2">
+                <textarea id="bulk-source-text" placeholder="Dán danh sách nguồn đơn dạng cột vào đây..." class="w-full p-2 bg-slate-50 border rounded-xl font-bold h-16 text-xs"></textarea>
+                <button onclick="addBulkSource()" class="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold">📥 Thêm Hàng Loạt Từ Cột</button>
+              </div>
+            </div>
+            <div class="flex flex-wrap gap-2 pt-2" id="sources-tag-list"></div>
+          </div>
+
+          <!-- MỤC 2: QUẢN LÝ TÊN NHÂN SỰ -->
+          <div class="bg-white rounded-3xl shadow-md border border-slate-200 p-4 sm:p-5 space-y-3">
+            <h4 class="text-xs font-extrabold text-blue-900 uppercase">👤 Quản Lý Danh Sách Tên Nhân Sự</h4>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+              <div class="space-y-2">
+                <input type="text" id="new-staff-name" autocomplete="off" placeholder="Thêm 1 tên nhân sự (có dấu)..." class="w-full p-2.5 bg-slate-50 border rounded-xl font-bold">
+                <button onclick="addNewStaff()" class="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold">+ Thêm Một Nhân Sự</button>
+              </div>
+              <div class="space-y-2">
+                <textarea id="bulk-staff-text" placeholder="Dán danh sách nhân sự dạng cột vào đây..." class="w-full p-2 bg-slate-50 border rounded-xl font-bold h-16 text-xs"></textarea>
+                <button onclick="addBulkStaff()" class="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold">📥 Thêm Hàng Loạt Từ Cột</button>
+              </div>
+            </div>
+            <div class="flex flex-wrap gap-2 pt-2" id="staff-tag-list"></div>
+          </div>
+
+          <!-- MỤC 3: QUẢN LÝ LOẠI XE -->
+          <div class="bg-white rounded-3xl shadow-md border border-slate-200 p-4 sm:p-5 space-y-3">
+            <h4 class="text-xs font-extrabold text-blue-900 uppercase">🚗 Quản Lý Loại Xe</h4>
+            <div class="flex gap-2 text-xs">
+              <input type="text" id="new-cartype-name" autocomplete="off" placeholder="Tên loại xe mới..." class="p-2.5 bg-slate-50 border rounded-xl font-bold flex-1">
+              <button onclick="addNewCarType()" class="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold shadow-sm">+ Thêm Loại Xe</button>
+            </div>
+            <div class="flex flex-wrap gap-2 pt-2" id="cartype-tag-list"></div>
+          </div>
+
+          <!-- MỤC 4: QUẢN LÝ HÌNH THỨC THANH TOÁN -->
+          <div class="bg-white rounded-3xl shadow-md border border-slate-200 p-4 sm:p-5 space-y-3">
+            <h4 class="text-xs font-extrabold text-blue-900 uppercase">💳 Quản Lý Hình Thức Thanh Toán</h4>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+              <div class="space-y-2">
+                <input type="text" id="new-payment-name" autocomplete="off" placeholder="Thêm 1 hình thức thanh toán..." class="w-full p-2.5 bg-slate-50 border rounded-xl font-bold">
+                <button onclick="addNewPayment()" class="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold">+ Thêm Một Hình Thức</button>
+              </div>
+              <div class="space-y-2">
+                <textarea id="bulk-payment-text" placeholder="Dán danh sách hình thức thanh toán dạng cột vào đây..." class="w-full p-2 bg-slate-50 border rounded-xl font-bold h-16 text-xs"></textarea>
+                <button onclick="addBulkPayment()" class="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold">📥 Thêm Hàng Loạt Từ Cột</button>
+              </div>
+            </div>
+            <div class="flex flex-wrap gap-2 pt-2" id="payment-tag-list"></div>
+          </div>
+
+          <!-- MỤC 5: QUẢN LÝ TÀI KHOẢN -->
+          <div class="bg-white rounded-3xl shadow-md border border-slate-200 p-4 sm:p-5 space-y-3">
+            <h4 class="text-xs font-extrabold text-blue-900 uppercase">🔑 Cấp Phát Tài Khoản & Mật Khẩu (Đồng Bộ Firebase Cloud)</h4>
+            <input type="hidden" id="edit-user-idx" value="-1">
+            <div class="grid grid-cols-1 sm:grid-cols-4 gap-2 text-xs">
+              <input type="text" id="new-user" autocomplete="off" placeholder="Tài khoản (TSS01)..." class="p-2.5 bg-slate-50 border rounded-xl font-bold">
+              <input type="text" id="new-pass" autocomplete="off" placeholder="Mật khẩu..." class="p-2.5 bg-slate-50 border rounded-xl font-bold">
+              <select id="new-role" class="p-2.5 bg-slate-50 border rounded-xl font-bold"><option value="pos">Bán Vé (Quầy)</option><option value="driver">Cổng Chủ Xe</option></select>
+              <button onclick="saveAccount()" class="p-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold shadow-sm" id="btn-save-acc">+ Thêm Tài Khoản</button>
+            </div>
+            <div class="overflow-x-auto pt-2">
+              <table class="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr class="bg-slate-900 text-white font-bold uppercase tracking-wider">
+                    <th class="p-3">Tài Khoản</th>
+                    <th class="p-3">Mật Khẩu</th>
+                    <th class="p-3">Phân Vùng</th>
+                    <th class="p-3 text-center">Thao Tác</th>
+                  </tr>
+                </thead>
+                <tbody id="tbody-acc" class="divide-y divide-slate-200"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- MỤC 6: BẢNG ĐỐI SOÁT ĐƠN HÀNG -->
+          <div class="bg-white rounded-3xl shadow-md border border-slate-200 overflow-hidden p-4 sm:p-5 space-y-3">
+            <div class="flex flex-col sm:flex-row items-center justify-between border-b pb-3 gap-3">
+              <h4 class="text-xs sm:text-sm font-extrabold text-slate-800 uppercase">🔍 Bảng Đối Soát Đơn Hàng & Bộ Lọc Dữ Liệu</h4>
+              <div class="w-full sm:w-72">
+                <input type="text" id="audit-search-input" autocomplete="off" placeholder="🔍 Lọc nhanh theo từ khóa bất kỳ..." class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl font-bold text-xs" oninput="updateManagerAuditTable()">
+              </div>
+            </div>
+            <div class="overflow-x-auto custom-scrollbar max-h-[550px]">
+              <table class="w-full text-left border-collapse text-xs min-w-[1200px]">
+                <thead class="sticky top-0 z-20">
+                  <tr class="bg-slate-900 text-white font-bold uppercase tracking-wider text-[11px]">
+                    <th class="p-3">Ngày</th>
+                    <th class="p-3">Phân Vùng</th>
+                    <th class="p-3">Nhân Sự</th>
+                    <th class="p-3">Số Phiếu</th>
+                    <th class="p-3">Biển Số</th>
+                    <th class="p-3">Điểm Đến</th>
+                    <th class="p-3">Thanh Toán</th>
+                    <th class="p-3">Ghi Chú</th>
+                    <th class="p-3 text-right">Tổng Tiền</th>
+                    <th class="p-3 text-center">Trạng Thái Đối Soát</th>
+                    <th class="p-3 text-center">Admin Xóa</th>
+                  </tr>
+                </thead>
+                <tbody id="tbody-mgr" class="divide-y divide-slate-200"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      `;
+      renderAccountsTable();
+      renderSourcesTable();
+      renderStaffTable();
+      renderCarTypesTable();
+      renderPaymentsTable();
+      updateManagerAuditTable();
+    }
+
+    function renderSourcesTable() {
+      const container = document.getElementById('sources-tag-list');
+      if (!container) return;
+      container.innerHTML = sourceOptions.map((src, idx) => `
+        <span class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 text-slate-800 rounded-xl font-bold text-xs border">
+          🏢 ${src}
+          <button onclick="deleteSource(${idx})" class="text-rose-500 hover:text-rose-700 font-extrabold ml-1">×</button>
+        </span>
+      `).join('');
+    }
+    function addNewSource() {
+      const input = document.getElementById('new-source-name');
+      const val = input ? input.value.trim() : '';
+      if (!val) { alert("Vui lòng nhập tên nguồn đơn!"); return; }
+      if (sourceOptions.includes(val)) { alert("Nguồn đơn này đã tồn tại!"); return; }
+      sourceOptions.push(val);
+      rtdb.ref('settings/sources').set(sourceOptions).then(() => { input.value = ''; renderSourcesTable(); });
+    }
+    function addBulkSource() {
+      const textarea = document.getElementById('bulk-source-text');
+      const raw = textarea ? textarea.value.trim() : '';
+      if (!raw) { alert("Vui lòng dán danh sách nguồn đơn vào ô!"); return; }
+      const lines = raw.split('\n').map(l => l.trim()).filter(Boolean);
+      let added = 0;
+      lines.forEach(src => {
+        if (!sourceOptions.includes(src)) { sourceOptions.push(src); added++; }
+      });
+      rtdb.ref('settings/sources').set(sourceOptions).then(() => {
+        textarea.value = '';
+        renderSourcesTable();
+        alert(`Đã thêm thành công ${added} nguồn đơn mới!`);
+      });
+    }
+    function deleteSource(idx) {
+      if (sourceOptions.length <= 1) { alert("Cần giữ lại ít nhất 1 nguồn đơn!"); return; }
+      if (confirm(`Bạn có chắc muốn xóa nguồn "${sourceOptions[idx]}" không?`)) {
+        sourceOptions.splice(idx, 1);
+        rtdb.ref('settings/sources').set(sourceOptions).then(() => { renderSourcesTable(); });
+      }
+    }
+
+    function renderStaffTable() {
+      const container = document.getElementById('staff-tag-list');
+      if (!container) return;
+      container.innerHTML = staffOptions.map((name, idx) => `
+        <span class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 text-indigo-800 rounded-xl font-bold text-xs border border-indigo-200">
+          👤 ${name}
+          <button onclick="deleteStaff(${idx})" class="text-rose-500 hover:text-rose-700 font-extrabold ml-1">×</button>
+        </span>
+      `).join('');
+    }
+    function addNewStaff() {
+      const input = document.getElementById('new-staff-name');
+      const val = input ? input.value.trim() : '';
+      if (!val) { alert("Vui lòng nhập tên nhân sự!"); return; }
+      if (staffOptions.includes(val)) { alert("Tên nhân sự này đã tồn tại!"); return; }
+      staffOptions.push(val);
+      rtdb.ref('settings/staff').set(staffOptions).then(() => { input.value = ''; renderStaffTable(); });
+    }
+    function addBulkStaff() {
+      const textarea = document.getElementById('bulk-staff-text');
+      const raw = textarea ? textarea.value.trim() : '';
+      if (!raw) { alert("Vui lòng dán danh sách nhân sự vào ô!"); return; }
+      const lines = raw.split('\n').map(l => l.trim()).filter(Boolean);
+      let added = 0;
+      lines.forEach(name => {
+        if (!staffOptions.includes(name)) { staffOptions.push(name); added++; }
+      });
+      rtdb.ref('settings/staff').set(staffOptions).then(() => {
+        textarea.value = '';
+        renderStaffTable();
+        alert(`Đã thêm thành công ${added} nhân sự mới!`);
+      });
+    }
+    function deleteStaff(idx) {
+      if (staffOptions.length <= 1) { alert("Cần giữ lại ít nhất 1 nhân sự!"); return; }
+      if (confirm(`Bạn có chắc muốn xóa nhân sự "${staffOptions[idx]}" không?`)) {
+        staffOptions.splice(idx, 1);
+        rtdb.ref('settings/staff').set(staffOptions).then(() => { renderStaffTable(); });
+      }
+    }
+
+    function renderCarTypesTable() {
+      const container = document.getElementById('cartype-tag-list');
+      if (!container) return;
+      container.innerHTML = carTypeOptions.map((ct, idx) => `
+        <span class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 text-amber-900 rounded-xl font-bold text-xs border border-amber-200">
+          🚗 ${ct}
+          <button onclick="deleteCarType(${idx})" class="text-rose-500 hover:text-rose-700 font-extrabold ml-1">×</button>
+        </span>
+      `).join('');
+    }
+    function addNewCarType() {
+      const input = document.getElementById('new-cartype-name');
+      const val = input ? input.value.trim() : '';
+      if (!val) { alert("Vui lòng nhập tên loại xe!"); return; }
+      if (carTypeOptions.includes(val)) { alert("Loại xe này đã tồn tại!"); return; }
+      carTypeOptions.push(val);
+      rtdb.ref('settings/carTypes').set(carTypeOptions).then(() => { input.value = ''; renderCarTypesTable(); });
+    }
+    function deleteCarType(idx) {
+      if (carTypeOptions.length <= 1) { alert("Cần giữ lại ít nhất 1 loại xe!"); return; }
+      if (confirm(`Bạn có chắc muốn xóa loại xe "${carTypeOptions[idx]}" không?`)) {
+        carTypeOptions.splice(idx, 1);
+        rtdb.ref('settings/carTypes').set(carTypeOptions).then(() => { renderCarTypesTable(); });
+      }
+    }
+
+    function renderPaymentsTable() {
+      const container = document.getElementById('payment-tag-list');
+      if (!container) return;
+      container.innerHTML = paymentOptions.map((pt, idx) => `
+        <span class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 text-emerald-900 rounded-xl font-bold text-xs border border-emerald-200">
+          💳 ${pt}
+          <button onclick="deletePayment(${idx})" class="text-rose-500 hover:text-rose-700 font-extrabold ml-1">×</button>
+        </span>
+      `).join('');
+    }
+    function addNewPayment() {
+      const input = document.getElementById('new-payment-name');
+      const val = input ? input.value.trim() : '';
+      if (!val) { alert("Vui lòng nhập hình thức thanh toán!"); return; }
+      if (paymentOptions.includes(val)) { alert("Hình thức thanh toán này đã tồn tại!"); return; }
+      paymentOptions.push(val);
+      rtdb.ref('settings/payments').set(paymentOptions).then(() => { input.value = ''; renderPaymentsTable(); });
+    }
+    function addBulkPayment() {
+      const textarea = document.getElementById('bulk-payment-text');
+      const raw = textarea ? textarea.value.trim() : '';
+      if (!raw) { alert("Vui lòng dán danh sách hình thức thanh toán vào ô!"); return; }
+      const lines = raw.split('\n').map(l => l.trim()).filter(Boolean);
+      let added = 0;
+      lines.forEach(pt => {
+        if (!paymentOptions.includes(pt)) { paymentOptions.push(pt); added++; }
+      });
+      rtdb.ref('settings/payments').set(paymentOptions).then(() => {
+        textarea.value = '';
+        renderPaymentsTable();
+        alert(`Đã thêm thành công ${added} hình thức thanh toán mới!`);
+      });
+    }
+    function deletePayment(idx) {
+      if (paymentOptions.length <= 1) { alert("Cần giữ lại ít nhất 1 hình thức thanh toán!"); return; }
+      if (confirm(`Bạn có chắc muốn xóa hình thức "${paymentOptions[idx]}" không?`)) {
+        paymentOptions.splice(idx, 1);
+        rtdb.ref('settings/payments').set(paymentOptions).then(() => { renderPaymentsTable(); });
+      }
+    }
+
+    function updateManagerAuditTable() {
+      const tb = document.getElementById('tbody-mgr');
+      if (!tb) return;
+      if (allCompanyTrips.length === 0) {
+        tb.innerHTML = `<tr><td colspan="11" class="p-4 text-center text-slate-400">Chưa có dữ liệu đơn hàng.</td></tr>`;
+        return;
+      }
+
+      const keyword = document.getElementById('audit-search-input') ? document.getElementById('audit-search-input').value.trim().toLowerCase() : '';
+
+      let pairMap = {};
+      allCompanyTrips.forEach(t => {
+        const ticketKey = (t.originalTicket || t.ticketNumber || '').trim().toUpperCase();
+        const plate = (t.plateNumber || '').trim().toUpperCase();
+        if (ticketKey && plate) {
+          const baseTicket = ticketKey.split('-')[0];
+          const key = `${baseTicket}_${plate}`;
+          if (!pairMap[key]) pairMap[key] = [];
+          pairMap[key].push(t);
+        } else {
+          const singleKey = 'single_' + t.id;
+          pairMap[singleKey] = [t];
+        }
+      });
+
+      let rowsHtml = '';
+      Object.values(pairMap).forEach(group => {
+        group.sort((a, b) => (a.role === 'pos' ? -1 : 1));
+
+        const posTrips = group.filter(x => x.role === 'pos');
+        const driverTrips = group.filter(x => x.role === 'driver');
+
+        let statusHtml = '<span class="px-2 py-1 bg-slate-100 text-slate-600 font-bold rounded-lg text-[10px]">⏳ Đơn Lẻ</span>';
+        if (posTrips.length > 0 && driverTrips.length > 0) {
+          const sumPos = posTrips.reduce((acc, x) => acc + Number(x.totalFare || 0), 0);
+          const sumDriver = driverTrips.reduce((acc, x) => acc + Number(x.totalFare || 0), 0);
+          
+          const defaultPay = paymentOptions[0] || 'Nhân Viên Quầy Thu';
+          const posPay = posTrips[0].paymentMethod || defaultPay;
+          const driverPay = driverTrips[0].paymentMethod || defaultPay;
+          const isPayMatch = (posPay === driverPay);
+
+          if (Math.abs(sumPos - sumDriver) < 1000 && isPayMatch) {
+            statusHtml = '<span class="px-2 py-1 bg-emerald-100 text-emerald-800 font-extrabold rounded-lg text-[10px]">🟢 Trùng Khớp</span>';
+          } else {
+            statusHtml = '<span class="px-2 py-1 bg-rose-100 text-rose-800 font-extrabold rounded-lg animate-pulse text-[10px]">🔴 Lệch (Tiền / Thanh Toán)</span>';
+          }
+        }
+
+        group.forEach((t, idx) => {
+          const defaultPay = paymentOptions[0] || 'Nhân Viên Quầy Thu';
+          const rowString = `${t.dateStr} ${t.role} ${t.staff} ${t.ticketNumber} ${t.plateNumber} ${t.destination} ${t.paymentMethod || defaultPay} ${t.note || ''} ${t.totalFare}`.toLowerCase();
+          if (keyword && !rowString.includes(keyword)) return;
+
+          const isPos = t.role === 'pos';
+          const roleBadge = isPos 
+            ? `<span class="px-2 py-0.5 bg-blue-100 text-blue-800 rounded-md font-extrabold text-[10px]">🚖 Bán Vé</span>` 
+            : `<span class="px-2 py-0.5 bg-amber-100 text-amber-800 rounded-md font-extrabold text-[10px]">🚗 Tài Xế</span>`;
+          const rowBg = isPos ? 'bg-blue-50/30' : 'bg-amber-50/30';
+
+          const deleteBtn = `<button onclick="adminDeleteTrip('${t.id}', '${t.createdBy}')" class="px-2 py-0.5 bg-rose-50 hover:bg-rose-100 text-rose-600 font-bold rounded-md text-[10px]">🗑️ Xóa</button>`;
+
+          const auditCell = (idx === 0) ? `<td class="p-3 text-center align-middle" rowspan="${group.length}">${statusHtml}</td>` : '';
+          const borderClass = (idx === group.length - 1) ? 'border-b-2 border-slate-300' : 'border-b';
+
+          rowsHtml += `
+            <tr class="${rowBg} hover:bg-slate-100/80 transition-all ${borderClass}">
+              <td class="p-2.5">${t.dateStr || '--'}</td>
+              <td class="p-2.5">${roleBadge}</td>
+              <td class="p-2.5 font-extrabold text-slate-800">${t.staff || 'N/A'}</td>
+              <td class="p-2.5 font-mono font-bold text-blue-600">${t.ticketNumber || '--'}</td>
+              <td class="p-2.5 font-mono font-bold uppercase">${t.plateNumber || '--'}</td>
+              <td class="p-2.5">${t.destination || '--'}</td>
+              <td class="p-2.5 font-bold text-slate-700">${t.paymentMethod || defaultPay}</td>
+              <td class="p-2.5 text-slate-600">${t.note || '--'}</td>
+              <td class="p-2.5 text-right font-bold text-emerald-600">${Number(t.totalFare || 0).toLocaleString('vi-VN')} ₫</td>
+              ${auditCell}
+              <td class="p-2.5 text-center align-middle">${deleteBtn}</td>
+            </tr>
+          `;
+        });
+      });
+
+      tb.innerHTML = rowsHtml || `<tr><td colspan="11" class="p-4 text-center text-slate-400">Không tìm thấy dữ liệu khớp với từ khóa.</td></tr>`;
+    }
+
+    function exportCustomExcel() {
+      if (allCompanyTrips.length === 0) { alert("Không có dữ liệu xuất đi!"); return; }
+
+      const keyword = document.getElementById('audit-search-input') ? document.getElementById('audit-search-input').value.trim().toLowerCase() : '';
+
+      let pairMap = {};
+      allCompanyTrips.forEach(t => {
+        const ticketKey = (t.originalTicket || t.ticketNumber || '').trim().toUpperCase();
+        const plate = (t.plateNumber || '').trim().toUpperCase();
+        if (ticketKey && plate) {
+          const baseTicket = ticketKey.split('-')[0];
+          const key = `${baseTicket}_${plate}`;
+          if (!pairMap[key]) pairMap[key] = [];
+          pairMap[key].push(t);
+        } else {
+          pairMap['single_' + t.id] = [t];
+        }
+      });
+
+      let sortedExcelRows = [];
+      Object.values(pairMap).forEach(group => {
+        group.sort((a, b) => (a.role === 'pos' ? -1 : 1));
+
+        const posTrips = group.filter(x => x.role === 'pos');
+        const driverTrips = group.filter(x => x.role === 'driver');
+
+        let auditStatusStr = 'Đơn Lẻ';
+        if (posTrips.length > 0 && driverTrips.length > 0) {
+          const sumPos = posTrips.reduce((acc, x) => acc + Number(x.totalFare || 0), 0);
+          const sumDriver = driverTrips.reduce((acc, x) => acc + Number(x.totalFare || 0), 0);
+          
+          const defaultPay = paymentOptions[0] || 'Nhân Viên Quầy Thu';
+          const posPay = posTrips[0].paymentMethod || defaultPay;
+          const driverPay = driverTrips[0].paymentMethod || defaultPay;
+          const isPayMatch = (posPay === driverPay);
+
+          if (Math.abs(sumPos - sumDriver) < 1000 && isPayMatch) {
+            auditStatusStr = 'Trùng Khớp';
+          } else {
+            auditStatusStr = 'Không Trùng Khớp';
+          }
+        }
+
+        let groupRows = [];
+        group.forEach(t => {
+          const defaultPay = paymentOptions[0] || 'Nhân Viên Quầy Thu';
+          const rowString = `${t.dateStr} ${t.role} ${t.staff} ${t.ticketNumber} ${t.plateNumber} ${t.destination} ${t.paymentMethod || defaultPay} ${t.note || ''} ${t.totalFare}`.toLowerCase();
+          if (!keyword || rowString.includes(keyword)) {
+            groupRows.push({
+              "Ngày": t.dateStr || '--',
+              "Phân Vùng": t.role === 'pos' ? 'Bán Vé (Quầy)' : 'Cổng Chủ Xe',
+              "Nhân Sự": t.staff || 'N/A',
+              "Số Phiếu": t.ticketNumber || '--',
+              "Biển Số": t.plateNumber || '--',
+              "Điểm Đến": t.destination || '--',
+              "Hình Thức Thanh Toán": t.paymentMethod || defaultPay,
+              "Ghi Chú": t.note || '',
+              "Tổng Tiền": Number(t.totalFare || 0),
+              "Trạng Thái Đối Soát": auditStatusStr
+            });
+          }
+        });
+
+        if (groupRows.length > 0) {
+          sortedExcelRows.push(...groupRows);
+          sortedExcelRows.push({
+            "Ngày": "", "Phân Vùng": "", "Nhân Sự": "", "Số Phiếu": "", "Biển Số": "", "Điểm Đến": "", "Hình Thức Thanh Toán": "", "Ghi Chú": "", "Tổng Tiền": "", "Trạng Thái Đối Soát": ""
+          });
+        }
+      });
+
+      if (sortedExcelRows.length === 0) { alert("Không có dữ liệu khớp với bộ lọc để xuất!"); return; }
+
+      const worksheet = XLSX.utils.json_to_sheet(sortedExcelRows);
+      worksheet['!cols'] = [
+        {wch: 14}, {wch: 18}, {wch: 16}, {wch: 14}, {wch: 14}, {wch: 28}, {wch: 22}, {wch: 22}, {wch: 18}, {wch: 22}
+      ];
+
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, "DoiSoatTSS");
+      XLSX.writeFile(workbook, "Bao_Cao_Doi_Soat_TSS.xlsx");
+    }
+
+    function adminDeleteTrip(id, ownerUser) {
+      if (confirm(`[ADMIN] Bạn có chắc muốn xóa vĩnh viễn đơn hàng này của tài khoản (${ownerUser}) không?`)) {
+        let updates = {};
+        updates[`trips/${id}`] = null;
+        if (ownerUser) {
+          updates[`users_trips/${ownerUser}/${id}`] = null;
+        }
+        rtdb.ref().update(updates).then(() => {
+          alert("Admin đã xóa đơn hàng thành công!");
+        });
+      }
+    }
+
+    function formatCurrSmartInput(el) {
+      let raw = el.value.replace(/[^0-9]/g, '');
+      if (!raw) { el.value = ''; return; }
+      let num = parseInt(raw, 10);
+      if (num < 10000) { num = num * 1000; }
+      el.value = num.toLocaleString('vi-VN');
+    }
+
+    function renderAccountsTable() {
+      const tb = document.getElementById('tbody-acc');
+      if (!tb) return;
+      if (userAccounts.length === 0) {
+        tb.innerHTML = `<tr><td colspan="4" class="p-4 text-center text-slate-400">Chưa có tài khoản nào.</td></tr>`;
+        return;
+      }
+      tb.innerHTML = userAccounts.map((x, i) => `
+        <tr>
+          <td class="p-3 font-mono font-bold text-blue-700">${x.user}</td>
+          <td class="p-3 font-mono font-bold text-slate-700">${x.pass}</td>
+          <td class="p-3 font-bold">${x.role === 'pos' ? 'Bán Vé' : 'Cổng Chủ Xe'}</td>
+          <td class="p-3 text-center space-x-1">
+            <button onclick="editAccount(${i})" class="px-2.5 py-1 bg-blue-50 text-blue-600 rounded-lg font-bold">Sửa</button>
+            <button onclick="deleteAccount(${i})" class="px-2.5 py-1 bg-rose-50 text-rose-600 rounded-lg font-bold">Xóa</button>
+          </td>
+        </tr>
+      `).join('');
+    }
+
+    function saveAccount() {
+      const idx = parseInt(document.getElementById('edit-user-idx').value, 10);
+      const u = document.getElementById('new-user').value.trim().toUpperCase();
+      const p = document.getElementById('new-pass').value.trim();
+      const r = document.getElementById('new-role').value;
+      if (!u || !p) { alert("Vui lòng điền tài khoản và mật khẩu!"); return; }
+
+      if (idx >= 0) {
+        userAccounts[idx] = { user: u, pass: p, role: r };
+      } else {
+        if (userAccounts.some(acc => acc.user === u)) {
+          alert("Tài khoản này đã tồn tại trong hệ thống!");
+          return;
+        }
+        userAccounts.push({ user: u, pass: p, role: r });
+      }
+
+      saveCloudAccounts();
+      renderAccountsTable();
+      document.getElementById('edit-user-idx').value = '-1';
+      document.getElementById('new-user').value = '';
+      document.getElementById('new-pass').value = '';
+      document.getElementById('btn-save-acc').innerText = "+ Thêm Tài Khoản";
+      alert("Đã lưu tài khoản lên Cloud thành công!");
+    }
+
+    function editAccount(i) {
+      const a = userAccounts[i];
+      document.getElementById('edit-user-idx').value = i;
+      document.getElementById('new-user').value = a.user;
+      document.getElementById('new-pass').value = a.pass;
+      document.getElementById('new-role').value = a.role;
+      document.getElementById('btn-save-acc').innerText = "💾 Cập Nhật";
+    }
+
+    function deleteAccount(i) {
+      if (confirm(`Bạn có chắc chắn muốn xóa tài khoản ${userAccounts[i].user} không?`)) {
+        userAccounts.splice(i, 1);
+        saveCloudAccounts();
+        renderAccountsTable();
+      }
+    }
+  </script>
+</body>
+</html>

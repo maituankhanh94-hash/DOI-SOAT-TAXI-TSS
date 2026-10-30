@@ -59,6 +59,7 @@
     let loggedInUser = null; 
     let personalTrips = []; 
     let allCompanyTrips = []; 
+    let deletedTripsMap = {}; // Lưu trữ danh sách đơn đã xóa để khôi phục
     
     let userAccounts = [
       { user: 'TSS01', pass: '123', role: 'pos' },
@@ -70,9 +71,7 @@
     let carTypeOptions = ["Xe 4 Chỗ", "Xe 7 Chỗ", "Xe 16 Chỗ"];
     let paymentOptions = ["Nhân Viên Quầy Thu", "Thẻ", "Kế Hoạch", "Tài Xế Thu"];
     
-    // Giờ khóa sửa/xóa đơn mặc định (Ví dụ: 8 giờ sáng)
     let lockHourSetting = 8; 
-
     const TERMINAL_OPTIONS = ["T2", "T1", "T3"];
 
     window.addEventListener('DOMContentLoaded', () => {
@@ -158,6 +157,12 @@
         } else {
           rtdb.ref('settings/lockHour').set(lockHourSetting);
         }
+      });
+
+      // Lắng nghe thùng rác đơn đã xóa trên Cloud
+      rtdb.ref('deleted_trips').on('value', snap => {
+        deletedTripsMap = snap.val() || {};
+        if (loggedInUser && loggedInUser.role === 'manager') renderDeletedTripsTable();
       });
     }
 
@@ -296,7 +301,7 @@
       const isPos = role === 'pos';
       document.getElementById('main-container').innerHTML = `
         <div class="space-y-4 pb-20 w-full">
-          <!-- BẢNG 1: TỔNG KẾT DOANH THU CÓ THỂ CHỌN NGÀY TÙY CHỌN -->
+          <!-- BẢNG 1: TỔNG KẾT DOANH THU CÓ CHỌN NGÀY -->
           <div class="bg-white p-4 sm:p-5 rounded-3xl shadow-md border border-slate-200 space-y-3">
             <div class="flex flex-col sm:flex-row items-center justify-between border-b pb-3 gap-3">
               <h3 class="text-xs sm:text-sm font-extrabold ${isPos ? 'text-blue-900' : 'text-amber-800'} uppercase">📊 Tổng Kết Doanh Thu Theo Ngày (${loggedInUser.user})</h3>
@@ -371,7 +376,6 @@
       `;
       renderBatchRows(role);
 
-      // Gán giá trị mặc định ngày hôm nay cho cả 2 ô chọn ngày (Tổng kết & Lịch sử)
       const todayObj = new Date();
       const yyyy = todayObj.getFullYear();
       const mm = String(todayObj.getMonth() + 1).padStart(2, '0');
@@ -485,7 +489,6 @@
       document.getElementById('main-container').insertAdjacentHTML('beforeend', html);
     }
 
-    // Cập nhật tổng kết doanh thu theo ngày người dùng chọn trên input date
     function updatePersonalSummary() {
       if (!loggedInUser || loggedInUser.role === 'manager') return;
 
@@ -600,9 +603,11 @@
         let updates = {};
         updates[`users_trips/${loggedInUser.user}/${id}`] = null;
         updates[`trips/${id}`] = null;
+        // Lưu vào thùng rác trên Cloud để có thể khôi phục
+        updates[`deleted_trips/${id}`] = { ...trip, deletedAt: Date.now(), deletedBy: loggedInUser.user };
 
         rtdb.ref().update(updates).then(() => {
-          alert("Đã xóa đơn hàng thành công!");
+          alert("Đã chuyển đơn hàng vào thùng rác!");
         });
       }
     }
@@ -766,7 +771,20 @@
             </div>
           </div>
 
-          <!-- MỤC 1: QUẢN LÝ NGUỒN ĐƠN -->
+          <!-- MỤC 1: THÙNG RÁC / KHÔI PHỤC ĐƠN ĐÃ XÓA -->
+          <div class="bg-rose-50 border border-rose-200 p-4 sm:p-5 rounded-3xl shadow-sm space-y-3">
+            <h4 class="text-xs font-extrabold text-rose-900 uppercase">🗑️ Thùng Rác / Khôi Phục Đơn Hàng Đã Xóa Nhầm</h4>
+            <div class="overflow-x-auto custom-scrollbar max-h-48 bg-white rounded-2xl border p-2">
+              <table class="w-full text-left text-xs">
+                <thead><tr class="bg-slate-100 font-bold"><th class="p-2">Ngày</th><th class="p-2">Nhân Sự</th><th class="p-2">Số Phiếu</th><th class="p-2">Biển Số</th><th class="p-2 text-right">Tổng Tiền</th><th class="p-2 text-center">Khôi Phục</th></tr></thead>
+                <tbody id="tbody-deleted-trips">
+                  <tr><td colspan="6" class="p-3 text-center text-slate-400">Không có đơn hàng nào trong thùng rác.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- MỤC 2: QUẢN LÝ NGUỒN ĐƠN -->
           <div class="bg-white rounded-3xl shadow-md border border-slate-200 p-4 sm:p-5 space-y-3">
             <h4 class="text-xs font-extrabold text-blue-900 uppercase">🏢 Quản Lý Nguồn Đơn / Đối Tác</h4>
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
@@ -782,7 +800,7 @@
             <div class="flex flex-wrap gap-2 pt-2" id="sources-tag-list"></div>
           </div>
 
-          <!-- MỤC 2: QUẢN LÝ TÊN NHÂN SỰ -->
+          <!-- MỤC 3: QUẢN LÝ TÊN NHÂN SỰ -->
           <div class="bg-white rounded-3xl shadow-md border border-slate-200 p-4 sm:p-5 space-y-3">
             <h4 class="text-xs font-extrabold text-blue-900 uppercase">👤 Quản Lý Danh Sách Tên Nhân Sự</h4>
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
@@ -798,7 +816,7 @@
             <div class="flex flex-wrap gap-2 pt-2" id="staff-tag-list"></div>
           </div>
 
-          <!-- MỤC 3: QUẢN LÝ LOẠI XE -->
+          <!-- MỤC 4: QUẢN LÝ LOẠI XE -->
           <div class="bg-white rounded-3xl shadow-md border border-slate-200 p-4 sm:p-5 space-y-3">
             <h4 class="text-xs font-extrabold text-blue-900 uppercase">🚗 Quản Lý Loại Xe</h4>
             <div class="flex gap-2 text-xs">
@@ -808,7 +826,7 @@
             <div class="flex flex-wrap gap-2 pt-2" id="cartype-tag-list"></div>
           </div>
 
-          <!-- MỤC 4: QUẢN LÝ HÌNH THỨC THANH TOÁN -->
+          <!-- MỤC 5: QUẢN LÝ HÌNH THỨC THANH TOÁN -->
           <div class="bg-white rounded-3xl shadow-md border border-slate-200 p-4 sm:p-5 space-y-3">
             <h4 class="text-xs font-extrabold text-blue-900 uppercase">💳 Quản Lý Hình Thức Thanh Toán</h4>
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
@@ -824,7 +842,7 @@
             <div class="flex flex-wrap gap-2 pt-2" id="payment-tag-list"></div>
           </div>
 
-          <!-- MỤC 5: QUẢN LÝ TÀI KHOẢN -->
+          <!-- MỤC 6: QUẢN LÝ TÀI KHOẢN -->
           <div class="bg-white rounded-3xl shadow-md border border-slate-200 p-4 sm:p-5 space-y-3">
             <h4 class="text-xs font-extrabold text-blue-900 uppercase">🔑 Cấp Phát Tài Khoản & Mật Khẩu (Đồng Bộ Firebase Cloud)</h4>
             <input type="hidden" id="edit-user-idx" value="-1">
@@ -849,12 +867,14 @@
             </div>
           </div>
 
-          <!-- MỤC 6: BẢNG ĐỐI SOÁT ĐƠN HÀNG -->
+          <!-- MỤC 7: BẢNG ĐỐI SOÁT ĐƠN HÀNG -->
           <div class="bg-white rounded-3xl shadow-md border border-slate-200 overflow-hidden p-4 sm:p-5 space-y-3">
             <div class="flex flex-col sm:flex-row items-center justify-between border-b pb-3 gap-3">
-              <h4 class="text-xs sm:text-sm font-extrabold text-slate-800 uppercase">🔍 Bảng Đối Soát Đơn Hàng & Bộ Lọc Dữ Liệu</h4>
-              <div class="w-full sm:w-72">
-                <input type="text" id="audit-search-input" autocomplete="off" placeholder="🔍 Lọc nhanh theo từ khóa bất kỳ..." class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl font-bold text-xs" oninput="updateManagerAuditTable()">
+              <h4 class="text-xs sm:text-sm font-extrabold text-slate-800 uppercase">🔍 Bảng Đối Soát Đơn Hàng & Chọn Ngày Xem</h4>
+              <div class="flex flex-wrap items-center gap-2">
+                <input type="date" id="audit-date-picker" class="px-3 py-1.5 bg-slate-50 border rounded-xl font-mono text-xs font-bold" onchange="updateManagerAuditTable()">
+                <button onclick="resetAuditDateToAll()" class="px-2.5 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl text-xs font-bold">Xem Tất Cả</button>
+                <input type="text" id="audit-search-input" autocomplete="off" placeholder="🔍 Lọc từ khóa..." class="px-3 py-1.5 bg-slate-50 border rounded-xl font-bold text-xs w-48" oninput="updateManagerAuditTable()">
               </div>
             </div>
             <div class="overflow-x-auto custom-scrollbar max-h-[550px]">
@@ -871,7 +891,7 @@
                     <th class="p-3">Ghi Chú</th>
                     <th class="p-3 text-right">Tổng Tiền</th>
                     <th class="p-3 text-center">Trạng Thái Đối Soát</th>
-                    <th class="p-3 text-center">Admin Xóa</th>
+                    <th class="p-3 text-center">Quản Lý Xóa</th>
                   </tr>
                 </thead>
                 <tbody id="tbody-mgr" class="divide-y divide-slate-200"></tbody>
@@ -880,11 +900,69 @@
           </div>
         </div>
       `;
+
+      const todayObj = new Date();
+      const yyyy = todayObj.getFullYear();
+      const mm = String(todayObj.getMonth() + 1).padStart(2, '0');
+      const dd = String(todayObj.getDate()).padStart(2, '0');
+      const auditDateInp = document.getElementById('audit-date-picker');
+      if(auditDateInp) auditDateInp.value = `${yyyy}-${mm}-${dd}`;
+
       renderAccountsTable();
       renderSourcesTable();
       renderStaffTable();
       renderCarTypesTable();
       renderPaymentsTable();
+      renderDeletedTripsTable();
+      updateManagerAuditTable();
+    }
+
+    function renderDeletedTripsTable() {
+      const tb = document.getElementById('tbody-deleted-trips');
+      if (!tb) return;
+      const keys = Object.keys(deletedTripsMap);
+      if (keys.length === 0) {
+        tb.innerHTML = `<tr><td colspan="6" class="p-3 text-center text-slate-400">Không có đơn hàng nào trong thùng rác.</td></tr>`;
+        return;
+      }
+
+      tb.innerHTML = Object.entries(deletedTripsMap).map(([id, t]) => `
+        <tr class="border-b hover:bg-slate-50">
+          <td class="p-2">${t.dateStr || '--'}</td>
+          <td class="p-2 font-bold">${t.staff || '--'}</td>
+          <td class="p-2 font-mono font-bold text-blue-600">${t.ticketNumber || '--'}</td>
+          <td class="p-2 font-mono font-bold uppercase">${t.plateNumber || '--'}</td>
+          <td class="p-2 text-right font-extrabold text-emerald-700">${Number(t.totalFare || 0).toLocaleString('vi-VN')} ₫</td>
+          <td class="p-2 text-center">
+            <button onclick="restoreTrip('${id}')" class="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-extrabold text-[11px]">🔄 Khôi Phục</button>
+          </td>
+        </tr>
+      `).join('');
+    }
+
+    function restoreTrip(id) {
+      const trip = deletedTripsMap[id];
+      if (!trip) return;
+
+      let updates = {};
+      // Khôi phục lại vào bảng trips chung và bảng users_trips của người tạo
+      updates[`trips/${id}`] = trip;
+      if (trip.createdBy) {
+        updates[`users_trips/${trip.createdBy}/${id}`] = trip;
+      }
+      // Xóa khỏi thùng rác
+      updates[`deleted_trips/${id}`] = null;
+
+      rtdb.ref().update(updates).then(() => {
+        alert("Đã khôi phục đơn hàng thành công!");
+      }).catch(err => {
+        alert("Lỗi khôi phục: " + err.message);
+      });
+    }
+
+    function resetAuditDateToAll() {
+      const auditDateInp = document.getElementById('audit-date-picker');
+      if(auditDateInp) auditDateInp.value = '';
       updateManagerAuditTable();
     }
 
@@ -1045,10 +1123,21 @@
         return;
       }
 
+      const auditDateInp = document.getElementById('audit-date-picker');
+      let targetDateStr = '';
+      if (auditDateInp && auditDateInp.value) {
+        const parts = auditDateInp.value.split('-');
+        if (parts.length === 3) {
+          targetDateStr = `${parts[2]}/${parts[1]}/${parts[0]}`;
+        }
+      }
+
       const keyword = document.getElementById('audit-search-input') ? document.getElementById('audit-search-input').value.trim().toLowerCase() : '';
 
       let pairMap = {};
       allCompanyTrips.forEach(t => {
+        if (targetDateStr && t.dateStr !== targetDateStr) return;
+
         const ticketKey = (t.originalTicket || t.ticketNumber || '').trim().toUpperCase();
         const plate = (t.plateNumber || '').trim().toUpperCase();
         if (ticketKey && plate) {
@@ -1120,16 +1209,27 @@
         });
       });
 
-      tb.innerHTML = rowsHtml || `<tr><td colspan="11" class="p-4 text-center text-slate-400">Không tìm thấy dữ liệu khớp với từ khóa.</td></tr>`;
+      tb.innerHTML = rowsHtml || `<tr><td colspan="11" class="p-4 text-center text-slate-400">Không tìm thấy dữ liệu đối soát phù hợp.</td></tr>`;
     }
 
     function exportCustomExcel() {
       if (allCompanyTrips.length === 0) { alert("Không có dữ liệu xuất đi!"); return; }
 
+      const auditDateInp = document.getElementById('audit-date-picker');
+      let targetDateStr = '';
+      if (auditDateInp && auditDateInp.value) {
+        const parts = auditDateInp.value.split('-');
+        if (parts.length === 3) {
+          targetDateStr = `${parts[2]}/${parts[1]}/${parts[0]}`;
+        }
+      }
+
       const keyword = document.getElementById('audit-search-input') ? document.getElementById('audit-search-input').value.trim().toLowerCase() : '';
 
       let pairMap = {};
       allCompanyTrips.forEach(t => {
+        if (targetDateStr && t.dateStr !== targetDateStr) return;
+
         const ticketKey = (t.originalTicket || t.ticketNumber || '').trim().toUpperCase();
         const plate = (t.plateNumber || '').trim().toUpperCase();
         if (ticketKey && plate) {
@@ -1194,7 +1294,7 @@
         }
       });
 
-      if (sortedExcelRows.length === 0) { alert("Không có dữ liệu khớp với bộ lọc để xuất!"); return; }
+      if (sortedExcelRows.length === 0) { alert("Không có dữ liệu khớp với ngày và từ khóa để xuất!"); return; }
 
       const worksheet = XLSX.utils.json_to_sheet(sortedExcelRows);
       worksheet['!cols'] = [
@@ -1208,13 +1308,18 @@
 
     function adminDeleteTrip(id, ownerUser) {
       if (confirm(`[ADMIN] Bạn có chắc muốn xóa vĩnh viễn đơn hàng này của tài khoản (${ownerUser}) không?`)) {
+        let tripToDelete = allCompanyTrips.find(x => x.id === id);
         let updates = {};
         updates[`trips/${id}`] = null;
         if (ownerUser) {
           updates[`users_trips/${ownerUser}/${id}`] = null;
         }
+        if (tripToDelete) {
+          updates[`deleted_trips/${id}`] = { ...tripToDelete, deletedAt: Date.now(), deletedBy: loggedInUser.user };
+        }
+
         rtdb.ref().update(updates).then(() => {
-          alert("Admin đã xóa đơn hàng thành công!");
+          alert("Đã chuyển đơn hàng vào thùng rác quản trị!");
         });
       }
     }

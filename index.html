@@ -929,25 +929,29 @@
             </div>
           </div>
 
-          <!-- MỤC 6: BẢNG ĐỐI SOÁT ĐƠN HÀNG (CÓ TÍCH CHỌN XÓA HÀNG LOẠT, THỜI GIAN NỘP ĐƠN VÀ CHỈNH SỬA NGAY TẠI Ô) -->
+          <!-- MỤC 6: BẢNG ĐỐI SOÁT ĐƠN HÀNG (CÓ TÍCH CHỌN XÓA HÀNG LOẠT, THỜI GIAN NỘP ĐƠN VÀ BỘ LỌC KHOẢNG THỜI GIAN) -->
           <div class="bg-white rounded-3xl shadow-md border border-slate-200 overflow-hidden p-4 sm:p-5 space-y-3">
-            <div class="flex flex-col sm:flex-row items-center justify-between border-b pb-3 gap-3">
+            <div class="flex flex-col lg:flex-row items-center justify-between border-b pb-3 gap-3">
               <div class="flex items-center space-x-3">
-                <h4 class="text-xs sm:text-sm font-extrabold text-slate-800 uppercase">🔍 Bảng Đối Soát Đơn Hàng & Chọn Ngày Xem</h4>
+                <h4 class="text-xs sm:text-sm font-extrabold text-slate-800 uppercase">🔍 Bảng Đối Soát Đơn Hàng & Chọn Mốc Thời Gian</h4>
                 <button onclick="deleteSelectedManagerTrips()" class="px-3 py-1 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-xs shadow-sm">🗑️ Xóa Các Đơn Đã Chọn</button>
               </div>
               <div class="flex flex-wrap items-center gap-2">
-                <input type="date" id="audit-date-picker" class="px-3 py-1.5 bg-slate-50 border rounded-xl font-mono text-xs font-bold" onchange="updateManagerAuditTable()">
+                <div class="flex items-center space-x-1 text-xs">
+                  <span class="font-bold text-slate-600">Từ:</span>
+                  <input type="date" id="audit-start-date" class="px-2 py-1.5 bg-slate-50 border rounded-xl font-mono text-xs font-bold" onchange="updateManagerAuditTable()">
+                  <span class="font-bold text-slate-600">Đến:</span>
+                  <input type="date" id="audit-end-date" class="px-2 py-1.5 bg-slate-50 border rounded-xl font-mono text-xs font-bold" onchange="updateManagerAuditTable()">
+                </div>
                 <button onclick="resetAuditDateToAll()" class="px-2.5 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl text-xs font-bold">Xem Tất Cả</button>
                 
-                <!-- BỘ LỌC PHÂN VÙNG: TẤT CẢ / BÁN VÉ / TÀI XẾ -->
                 <select id="audit-role-filter" class="px-3 py-1.5 bg-slate-50 border rounded-xl font-bold text-xs text-slate-800" onchange="updateManagerAuditTable()">
                   <option value="all">📂 Tất Cả Phân Vùng</option>
                   <option value="pos">🚖 Chỉ Bán Vé</option>
                   <option value="driver">🚗 Chỉ Tài Xế</option>
                 </select>
 
-                <input type="text" id="audit-search-input" autocomplete="off" placeholder="🔍 Lọc từ khóa (VD: 711, khớp, lệch)..." class="px-3 py-1.5 bg-slate-50 border rounded-xl font-bold text-xs w-64" oninput="updateManagerAuditTable()">
+                <input type="text" id="audit-search-input" autocomplete="off" placeholder="🔍 Lọc từ khóa..." class="px-3 py-1.5 bg-slate-50 border rounded-xl font-bold text-xs w-44" oninput="updateManagerAuditTable()">
               </div>
             </div>
             <div class="overflow-x-auto custom-scrollbar max-h-[550px]">
@@ -984,8 +988,10 @@
       const dd = String(todayObj.getDate()).padStart(2, '0');
       const todayFormatted = `${yyyy}-${mm}-${dd}`;
 
-      const auditDateInp = document.getElementById('audit-date-picker');
-      if(auditDateInp) auditDateInp.value = todayFormatted;
+      const auditStartInp = document.getElementById('audit-start-date');
+      const auditEndInp = document.getElementById('audit-end-date');
+      if(auditStartInp) auditStartInp.value = todayFormatted;
+      if(auditEndInp) auditEndInp.value = todayFormatted;
 
       const revDateInp = document.getElementById('revenue-date-picker');
       if(revDateInp) revDateInp.value = todayFormatted;
@@ -1024,7 +1030,6 @@
         }
       }
 
-      // Lọc các đơn hàng thuộc ngày được chọn (dành cho quản lý tính tổng doanh thu công ty)
       const selectedTrips = allCompanyTrips.filter(t => {
         if (!targetDateStr) return true;
         return t.dateStr === targetDateStr;
@@ -1176,8 +1181,10 @@
     }
 
     function resetAuditDateToAll() {
-      const auditDateInp = document.getElementById('audit-date-picker');
-      if(auditDateInp) auditDateInp.value = '';
+      const startInp = document.getElementById('audit-start-date');
+      const endInp = document.getElementById('audit-end-date');
+      if(startInp) startInp.value = '';
+      if(endInp) endInp.value = '';
       updateManagerAuditTable();
     }
 
@@ -1338,22 +1345,28 @@
         return;
       }
 
-      const auditDateInp = document.getElementById('audit-date-picker');
-      let targetDateStr = '';
-      if (auditDateInp && auditDateInp.value) {
-        const parts = auditDateInp.value.split('-');
-        if (parts.length === 3) {
-          targetDateStr = `${parts[2]}/${parts[1]}/${parts[0]}`;
-        }
-      }
+      const startInp = document.getElementById('audit-start-date');
+      const endInp = document.getElementById('audit-end-date');
+      
+      let startDate = startInp && startInp.value ? new Date(startInp.value) : null;
+      let endDate = endInp && endInp.value ? new Date(endInp.value) : null;
 
       const roleFilter = document.getElementById('audit-role-filter') ? document.getElementById('audit-role-filter').value : 'all';
       const keyword = document.getElementById('audit-search-input') ? document.getElementById('audit-search-input').value.trim().toLowerCase() : '';
 
       let pairMap = {};
       allCompanyTrips.forEach(t => {
-        if (targetDateStr && t.dateStr !== targetDateStr) return;
         if (roleFilter !== 'all' && t.role !== roleFilter) return;
+
+        // Kiểm tra khoảng thời gian (Định dạng ngày đơn: DD/MM/YYYY)
+        if (t.dateStr && (startDate || endDate)) {
+          const p = t.dateStr.split('/');
+          if (p.length === 3) {
+            const tDate = new Date(`${p[2]}-${p[1]}-${p[0]}`);
+            if (startDate && tDate < startDate) return;
+            if (endDate && tDate > endDate) return;
+          }
+        }
 
         const ticketKey = (t.originalTicket || t.ticketNumber || '').trim().toUpperCase();
         const plate = (t.plateNumber || '').trim().toUpperCase();
@@ -1467,22 +1480,27 @@
     function exportCustomExcel() {
       if (allCompanyTrips.length === 0) { alert("Không có dữ liệu xuất đi!"); return; }
 
-      const auditDateInp = document.getElementById('audit-date-picker');
-      let targetDateStr = '';
-      if (auditDateInp && auditDateInp.value) {
-        const parts = auditDateInp.value.split('-');
-        if (parts.length === 3) {
-          targetDateStr = `${parts[2]}/${parts[1]}/${parts[0]}`;
-        }
-      }
+      const startInp = document.getElementById('audit-start-date');
+      const endInp = document.getElementById('audit-end-date');
+      
+      let startDate = startInp && startInp.value ? new Date(startInp.value) : null;
+      let endDate = endInp && endInp.value ? new Date(endInp.value) : null;
 
       const roleFilter = document.getElementById('audit-role-filter') ? document.getElementById('audit-role-filter').value : 'all';
       const keyword = document.getElementById('audit-search-input') ? document.getElementById('audit-search-input').value.trim().toLowerCase() : '';
 
       let pairMap = {};
       allCompanyTrips.forEach(t => {
-        if (targetDateStr && t.dateStr !== targetDateStr) return;
         if (roleFilter !== 'all' && t.role !== roleFilter) return;
+
+        if (t.dateStr && (startDate || endDate)) {
+          const p = t.dateStr.split('/');
+          if (p.length === 3) {
+            const tDate = new Date(`${p[2]}-${p[1]}-${p[0]}`);
+            if (startDate && tDate < startDate) return;
+            if (endDate && tDate > endDate) return;
+          }
+        }
 
         const ticketKey = (t.originalTicket || t.ticketNumber || '').trim().toUpperCase();
         const plate = (t.plateNumber || '').trim().toUpperCase();

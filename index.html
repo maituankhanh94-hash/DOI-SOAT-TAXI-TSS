@@ -17,6 +17,7 @@
     .local-dropdown { position: absolute; z-index: 999999; background: white; border: 2px solid #2563eb; border-radius: 12px; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.15); max-height: 200px; overflow-y: auto; width: 100%; margin-top: 4px; left: 0; }
     .local-item { padding: 8px 12px; font-size: 11px; font-weight: 700; color: #1e293b; cursor: pointer; border-bottom: 1px solid #f1f5f9; }
     .local-item:hover { background: #eff6ff; color: #1d4ed8; }
+    .inline-edit-input { background: #fff; border: 1px solid #3b82f6; border-radius: 6px; padding: 2px 6px; font-size: 11px; width: 100%; font-weight: 700; }
   </style>
 </head>
 <body class="h-full bg-slate-100 flex flex-col overflow-hidden">
@@ -26,7 +27,6 @@
     <div class="flex items-center space-x-3">
       <span class="font-extrabold text-sm">✈️ TSS POS</span>
       <span id="header-status" class="text-xs bg-blue-700 px-2.5 py-1 rounded-lg">Màn hình đăng nhập</span>
-      <!-- FIREBASE LIVE STATUS INDICATOR -->
       <div id="firebase-status-badge" class="px-2.5 py-1 bg-emerald-500 text-white text-[10px] font-extrabold rounded-lg shadow-sm flex items-center space-x-1.5 transition-all">
         <span id="firebase-dot" class="w-2 h-2 rounded-full bg-white animate-ping"></span>
         <span id="firebase-status-text">🟢 Cloud Đang Kết Nối</span>
@@ -59,7 +59,7 @@
     let loggedInUser = null; 
     let personalTrips = []; 
     let allCompanyTrips = []; 
-    let lastDeletedTripBackup = null; // Lưu trữ tạm đơn vừa xóa để khôi phục nhanh
+    let lastDeletedTripBackup = null;
     
     let userAccounts = [
       { user: 'TSS01', pass: '123', role: 'pos' },
@@ -640,7 +640,6 @@
       }
     }
 
-    // Nút thông báo kèm Khôi phục nhanh
     function showUndoAlert(message, undoCallback) {
       const oldAlert = document.getElementById('floating-undo-banner');
       if (oldAlert) oldAlert.remove();
@@ -914,7 +913,7 @@
             </div>
           </div>
 
-          <!-- MỤC 6: BẢNG ĐỐI SOÁT ĐƠN HÀNG (CÓ TÍCH CHỌN XÓA HÀNG LOẠT & CỘT THỜI GIAN NỘP ĐƠN) -->
+          <!-- MỤC 6: BẢNG ĐỐI SOÁT ĐƠN HÀNG (CÓ TÍCH CHỌN XÓA HÀNG LOẠT, THỜI GIAN NỘP ĐƠN VÀ CHỈNH SỬA NGAY TẠI Ô) -->
           <div class="bg-white rounded-3xl shadow-md border border-slate-200 overflow-hidden p-4 sm:p-5 space-y-3">
             <div class="flex flex-col sm:flex-row items-center justify-between border-b pb-3 gap-3">
               <div class="flex items-center space-x-3">
@@ -928,21 +927,23 @@
               </div>
             </div>
             <div class="overflow-x-auto custom-scrollbar max-h-[550px]">
-              <table class="w-full text-left border-collapse text-xs min-w-[1300px]">
+              <table class="w-full text-left border-collapse text-xs min-w-[1500px]">
                 <thead class="sticky top-0 z-20">
                   <tr class="bg-slate-900 text-white font-bold uppercase tracking-wider text-[11px]">
                     <th class="p-3 text-center w-10"><input type="checkbox" id="select-all-manager" onclick="toggleSelectAllManager(this)"></th>
                     <th class="p-3">Ngày</th>
-                    <th class="p-3">Thời Gian Nộp Đơn</th>
+                    <th class="p-3">Thời Gian Nộp</th>
                     <th class="p-3">Phân Vùng</th>
                     <th class="p-3">Nhân Sự</th>
                     <th class="p-3">Số Phiếu</th>
                     <th class="p-3">Biển Số</th>
+                    <th class="p-3">Loại Xe</th>
+                    <th class="p-3">Nguồn Đơn</th>
                     <th class="p-3">Điểm Đến</th>
                     <th class="p-3">Thanh Toán</th>
                     <th class="p-3">Ghi Chú</th>
                     <th class="p-3 text-right">Tổng Tiền</th>
-                    <th class="p-3 text-center">Trạng Thái Đối Soát</th>
+                    <th class="p-3 text-center">Trạng Thái</th>
                     <th class="p-3 text-center">Xóa</th>
                   </tr>
                 </thead>
@@ -997,6 +998,29 @@
           showUndoAlert(`Đã xóa ${deletedList.length} đơn hàng!`, restoreDeletedTrips);
         });
       }
+    }
+
+    function updateInlineTripField(tripId, field, value) {
+      let trip = allCompanyTrips.find(x => x.id === tripId);
+      if (!trip) return;
+
+      if (field === 'totalFare') {
+        value = parseFloat(value.replace(/[^0-9]/g, '')) || 0;
+      }
+
+      trip[field] = value;
+
+      let updates = {};
+      updates[`trips/${tripId}`] = trip;
+      if (trip.createdBy) {
+        updates[`users_trips/${trip.createdBy}/${tripId}`] = trip;
+      }
+
+      rtdb.ref().update(updates).then(() => {
+        // Cập nhật ngầm thành công
+      }).catch(err => {
+        alert("Lỗi cập nhật: " + err.message);
+      });
     }
 
     function resetAuditDateToAll() {
@@ -1158,7 +1182,7 @@
       const tb = document.getElementById('tbody-mgr');
       if (!tb) return;
       if (allCompanyTrips.length === 0) {
-        tb.innerHTML = `<tr><td colspan="13" class="p-4 text-center text-slate-400">Chưa có dữ liệu đơn hàng.</td></tr>`;
+        tb.innerHTML = `<tr><td colspan="15" class="p-4 text-center text-slate-400">Chưa có dữ liệu đơn hàng.</td></tr>`;
         return;
       }
 
@@ -1216,7 +1240,7 @@
 
         group.forEach((t, idx) => {
           const defaultPay = paymentOptions[0] || 'Nhân Viên Quầy Thu';
-          const rowString = `${t.dateStr} ${t.timeStr} ${t.role} ${t.staff} ${t.ticketNumber} ${t.plateNumber} ${t.destination} ${t.paymentMethod || defaultPay} ${t.note || ''} ${t.totalFare}`.toLowerCase();
+          const rowString = `${t.dateStr} ${t.timeStr} ${t.role} ${t.staff} ${t.ticketNumber} ${t.plateNumber} ${t.carType || ''} ${t.source || ''} ${t.destination} ${t.paymentMethod || defaultPay} ${t.note || ''} ${t.totalFare}`.toLowerCase();
           if (keyword && !rowString.includes(keyword)) return;
 
           const isPos = t.role === 'pos';
@@ -1238,12 +1262,26 @@
               <td class="p-2.5 font-mono font-bold text-slate-600">${t.timeStr || '--'}</td>
               <td class="p-2.5">${roleBadge}</td>
               <td class="p-2.5 font-extrabold text-slate-800">${t.staff || 'N/A'}</td>
-              <td class="p-2.5 font-mono font-bold text-blue-600">${t.ticketNumber || '--'}</td>
-              <td class="p-2.5 font-mono font-bold uppercase">${t.plateNumber || '--'}</td>
-              <td class="p-2.5">${t.destination || '--'}</td>
-              <td class="p-2.5 font-bold text-slate-700">${t.paymentMethod || defaultPay}</td>
-              <td class="p-2.5 text-slate-600">${t.note || '--'}</td>
-              <td class="p-2.5 text-right font-bold text-emerald-600">${Number(t.totalFare || 0).toLocaleString('vi-VN')} ₫</td>
+              <td class="p-2.5"><input type="text" value="${t.ticketNumber || ''}" class="inline-edit-input w-24 text-blue-600" onblur="updateInlineTripField('${t.id}', 'ticketNumber', this.value)"></td>
+              <td class="p-2.5"><input type="text" value="${t.plateNumber || ''}" class="inline-edit-input w-28 uppercase" onblur="updateInlineTripField('${t.id}', 'plateNumber', this.value)"></td>
+              <td class="p-2.5">
+                <select class="inline-edit-input w-28" onchange="updateInlineTripField('${t.id}', 'carType', this.value)">
+                  ${carTypeOptions.map(ct => `<option value="${ct}" ${t.carType === ct ? 'selected' : ''}>${ct}</option>`).join('')}
+                </select>
+              </td>
+              <td class="p-2.5">
+                <select class="inline-edit-input w-28" onchange="updateInlineTripField('${t.id}', 'source', this.value)">
+                  ${sourceOptions.map(s => `<option value="${s}" ${t.source === s ? 'selected' : ''}>${s}</option>`).join('')}
+                </select>
+              </td>
+              <td class="p-2.5"><input type="text" value="${t.destination || ''}" class="inline-edit-input w-36" onblur="updateInlineTripField('${t.id}', 'destination', this.value)"></td>
+              <td class="p-2.5">
+                <select class="inline-edit-input w-32 font-bold" onchange="updateInlineTripField('${t.id}', 'paymentMethod', this.value)">
+                  ${paymentOptions.map(opt => `<option value="${opt}" ${(t.paymentMethod || defaultPay) === opt ? 'selected' : ''}>${opt}</option>`).join('')}
+                </select>
+              </td>
+              <td class="p-2.5"><input type="text" value="${t.note || ''}" class="inline-edit-input w-32" onblur="updateInlineTripField('${t.id}', 'note', this.value)"></td>
+              <td class="p-2.5 text-right"><input type="text" value="${Number(t.totalFare || 0).toLocaleString('vi-VN')}" class="inline-edit-input w-28 text-right font-extrabold text-emerald-700" onblur="updateInlineTripField('${t.id}', 'totalFare', this.value)"></td>
               ${auditCell}
               <td class="p-2.5 text-center align-middle">${deleteBtn}</td>
             </tr>
@@ -1251,7 +1289,7 @@
         });
       });
 
-      tb.innerHTML = rowsHtml || `<tr><td colspan="13" class="p-4 text-center text-slate-400">Không tìm thấy dữ liệu đối soát phù hợp.</td></tr>`;
+      tb.innerHTML = rowsHtml || `<tr><td colspan="15" class="p-4 text-center text-slate-400">Không tìm thấy dữ liệu đối soát phù hợp.</td></tr>`;
     }
 
     function exportCustomExcel() {
@@ -1311,7 +1349,7 @@
         let groupRows = [];
         group.forEach(t => {
           const defaultPay = paymentOptions[0] || 'Nhân Viên Quầy Thu';
-          const rowString = `${t.dateStr} ${t.timeStr} ${t.role} ${t.staff} ${t.ticketNumber} ${t.plateNumber} ${t.destination} ${t.paymentMethod || defaultPay} ${t.note || ''} ${t.totalFare}`.toLowerCase();
+          const rowString = `${t.dateStr} ${t.timeStr} ${t.role} ${t.staff} ${t.ticketNumber} ${t.plateNumber} ${t.carType || ''} ${t.source || ''} ${t.destination} ${t.paymentMethod || defaultPay} ${t.note || ''} ${t.totalFare}`.toLowerCase();
           if (!keyword || rowString.includes(keyword)) {
             groupRows.push({
               "Ngày": t.dateStr || '--',
@@ -1320,6 +1358,8 @@
               "Nhân Sự": t.staff || 'N/A',
               "Số Phiếu": t.ticketNumber || '--',
               "Biển Số": t.plateNumber || '--',
+              "Loại Xe": t.carType || '--',
+              "Nguồn Đơn": t.source || '--',
               "Điểm Đến": t.destination || '--',
               "Hình Thức Thanh Toán": t.paymentMethod || defaultPay,
               "Ghi Chú": t.note || '',
@@ -1332,7 +1372,7 @@
         if (groupRows.length > 0) {
           sortedExcelRows.push(...groupRows);
           sortedExcelRows.push({
-            "Ngày": "", "Thời Gian Nộp": "", "Phân Vùng": "", "Nhân Sự": "", "Số Phiếu": "", "Biển Số": "", "Điểm Đến": "", "Hình Thức Thanh Toán": "", "Ghi Chú": "", "Tổng Tiền": "", "Trạng Thái Đối Soát": ""
+            "Ngày": "", "Thời Gian Nộp": "", "Phân Vùng": "", "Nhân Sự": "", "Số Phiếu": "", "Biển Số": "", "Loại Xe": "", "Nguồn Đơn": "", "Điểm Đến": "", "Hình Thức Thanh Toán": "", "Ghi Chú": "", "Tổng Tiền": "", "Trạng Thái Đối Soát": ""
           });
         }
       });
@@ -1340,29 +1380,17 @@
       if (sortedExcelRows.length === 0) { alert("Không có dữ liệu khớp với ngày và từ khóa để xuất!"); return; }
 
       const worksheet = XLSX.utils.json_to_sheet(sortedExcelRows);
+      
+      // Bật cơ chế lọc (AutoFilter) sẵn sàng trong file Excel
+      worksheet['!autofilter'] = { ref: XLSX.utils.encode_range(XLSX.utils.decode_range(worksheet['!ref'])) };
+
       worksheet['!cols'] = [
-        {wch: 14}, {wch: 16}, {wch: 18}, {wch: 16}, {wch: 14}, {wch: 14}, {wch: 28}, {wch: 22}, {wch: 22}, {wch: 18}, {wch: 22}
+        {wch: 14}, {wch: 16}, {wch: 16}, {wch: 18}, {wch: 14}, {wch: 14}, {wch: 16}, {wch: 16}, {wch: 28}, {wch: 22}, {wch: 22}, {wch: 18}, {wch: 22}
       ];
 
       const workbook = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(workbook, worksheet, "DoiSoatTSS");
       XLSX.writeFile(workbook, "Bao_Cao_Doi_Soat_TSS.xlsx");
-    }
-
-    function adminDeleteTrip(id, ownerUser) {
-      if (confirm(`[ADMIN] Bạn có chắc muốn xóa vĩnh viễn đơn hàng này của tài khoản (${ownerUser}) không?`)) {
-        let tripToDelete = allCompanyTrips.find(x => x.id === id);
-        let updates = {};
-        updates[`trips/${id}`] = null;
-        if (ownerUser) {
-          updates[`users_trips/${ownerUser}/${id}`] = null;
-        }
-
-        rtdb.ref().update(updates).then(() => {
-          if (tripToDelete) lastDeletedTripBackup = [tripToDelete];
-          showUndoAlert("Đã xóa đơn hàng!", restoreDeletedTrips);
-        });
-      }
     }
 
     function formatCurrSmartInput(el) {

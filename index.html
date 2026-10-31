@@ -614,7 +614,7 @@
 
         rtdb.ref().update(updates).then(() => {
           lastDeletedTripBackup = deletedList;
-          showUndoAlert(`Đã xóa ${deletedList.length} đơn hàng!`, restoreDeletedTrips);
+          showUndoButton(`Đã xóa ${deletedList.length} đơn hàng!`);
         });
       }
     }
@@ -635,25 +635,25 @@
 
         rtdb.ref().update(updates).then(() => {
           lastDeletedTripBackup = [trip];
-          showUndoAlert("Đã xóa đơn hàng!", restoreDeletedTrips);
+          showUndoButton("Đã xóa đơn hàng!");
         });
       }
     }
 
-    function showUndoAlert(message, undoCallback) {
-      const oldAlert = document.getElementById('floating-undo-banner');
-      if (oldAlert) oldAlert.remove();
+    function showUndoButton(message) {
+      const existingBtn = document.getElementById('floating-undo-container');
+      if (existingBtn) existingBtn.remove();
 
-      const banner = document.createElement('div');
-      banner.id = 'floating-undo-banner';
-      banner.className = 'fixed bottom-5 right-5 z-50 bg-slate-900 text-white px-4 py-3 rounded-2xl shadow-2xl flex items-center space-x-3 text-xs font-bold animate-bounce';
-      banner.innerHTML = `
+      const container = document.createElement('div');
+      container.id = 'floating-undo-container';
+      container.className = 'fixed bottom-5 right-5 z-50 flex items-center space-x-2 bg-slate-900 text-white px-4 py-3 rounded-2xl shadow-2xl text-xs font-bold animate-bounce';
+      container.innerHTML = `
         <span>🗑️ ${message}</span>
-        <button onclick="(${undoCallback.toString()})(); document.getElementById('floating-undo-banner').remove();" class="px-3 py-1 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl shadow">🔄 Khôi Phục Ngay</button>
+        <button onclick="restoreDeletedTrips()" class="px-3 py-1.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl shadow font-bold transition-all">🔄 Khôi Phục Đơn Vừa Xóa Gần Nhất</button>
         <button onclick="this.parentElement.remove()" class="text-slate-400 hover:text-white px-1">✕</button>
       `;
-      document.body.appendChild(banner);
-      setTimeout(() => { if(banner) banner.remove(); }, 8000);
+      document.body.appendChild(container);
+      setTimeout(() => { if(container) container.remove(); }, 10000);
     }
 
     function restoreDeletedTrips() {
@@ -668,6 +668,8 @@
       rtdb.ref().update(updates).then(() => {
         alert("Đã khôi phục đơn hàng thành công!");
         lastDeletedTripBackup = null;
+        const container = document.getElementById('floating-undo-container');
+        if (container) container.remove();
       });
     }
 
@@ -923,7 +925,15 @@
               <div class="flex flex-wrap items-center gap-2">
                 <input type="date" id="audit-date-picker" class="px-3 py-1.5 bg-slate-50 border rounded-xl font-mono text-xs font-bold" onchange="updateManagerAuditTable()">
                 <button onclick="resetAuditDateToAll()" class="px-2.5 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl text-xs font-bold">Xem Tất Cả</button>
-                <input type="text" id="audit-search-input" autocomplete="off" placeholder="🔍 Lọc từ khóa..." class="px-3 py-1.5 bg-slate-50 border rounded-xl font-bold text-xs w-48" oninput="updateManagerAuditTable()">
+                
+                <!-- BỘ LỌC PHÂN VÙNG: TẤT CẢ / BÁN VÉ / TÀI XẾ -->
+                <select id="audit-role-filter" class="px-3 py-1.5 bg-slate-50 border rounded-xl font-bold text-xs text-slate-800" onchange="updateManagerAuditTable()">
+                  <option value="all">📂 Tất Cả Phân Vùng</option>
+                  <option value="pos">🚖 Chỉ Bán Vé</option>
+                  <option value="driver">🚗 Chỉ Tài Xế</option>
+                </select>
+
+                <input type="text" id="audit-search-input" autocomplete="off" placeholder="🔍 Lọc từ khóa (VD: 711, khớp, lệch)..." class="px-3 py-1.5 bg-slate-50 border rounded-xl font-bold text-xs w-64" oninput="updateManagerAuditTable()">
               </div>
             </div>
             <div class="overflow-x-auto custom-scrollbar max-h-[550px]">
@@ -974,11 +984,47 @@
       checkboxes.forEach(cb => cb.checked = masterCheckbox.checked);
     }
 
+    function verifyAndDelete(callback) {
+      const existingModal = document.getElementById('custom-pwd-modal');
+      if (existingModal) existingModal.remove();
+
+      const modalHtml = `
+        <div id="custom-pwd-modal" class="fixed inset-0 bg-slate-900/80 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+          <div class="bg-white rounded-3xl shadow-2xl max-w-xs w-full p-6 text-center space-y-4">
+            <div class="bg-rose-600 text-white w-12 h-12 rounded-2xl flex items-center justify-center mx-auto text-xl font-bold">🔒</div>
+            <h3 class="text-sm font-bold text-slate-900">Xác Nhận Xóa Đơn Hàng</h3>
+            <p class="text-xs text-slate-500">Vui lòng nhập mật khẩu quản trị để tiếp tục:</p>
+            <input type="password" id="custom-pwd-input" autocomplete="new-password" placeholder="Mật khẩu..." class="w-full px-3 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-center" onkeydown="if(event.key==='Enter') submitCustomPwd()">
+            <div class="flex space-x-2 pt-1">
+              <button onclick="submitCustomPwd()" class="w-full py-2.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold">Xác Nhận Xóa</button>
+              <button onclick="document.getElementById('custom-pwd-modal').remove()" class="w-full py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold">Hủy</button>
+            </div>
+          </div>
+        </div>
+      `;
+      document.body.insertAdjacentHTML('beforeend', modalHtml);
+      setTimeout(() => {
+        const inp = document.getElementById('custom-pwd-input');
+        if (inp) inp.focus();
+      }, 100);
+
+      window.submitCustomPwd = function() {
+        const inp = document.getElementById('custom-pwd-input');
+        const val = inp ? inp.value.trim() : '';
+        document.getElementById('custom-pwd-modal').remove();
+        if (val === "0105") {
+          callback();
+        } else {
+          alert("Mật khẩu bảo mật không chính xác! Hủy thao tác xóa.");
+        }
+      };
+    }
+
     function deleteSelectedManagerTrips() {
       const checkboxes = document.querySelectorAll('.manager-trip-checkbox:checked');
       if (checkboxes.length === 0) { alert("Vui lòng tích chọn ít nhất một đơn hàng để xóa!"); return; }
 
-      if (confirm(`[ADMIN] Bạn có chắc muốn xóa vĩnh viễn ${checkboxes.length} đơn hàng đã chọn không?`)) {
+      verifyAndDelete(() => {
         let updates = {};
         let deletedList = [];
         checkboxes.forEach(cb => {
@@ -995,9 +1041,27 @@
 
         rtdb.ref().update(updates).then(() => {
           lastDeletedTripBackup = deletedList;
-          showUndoAlert(`Đã xóa ${deletedList.length} đơn hàng!`, restoreDeletedTrips);
+          showUndoButton(`Đã xóa ${deletedList.length} đơn hàng!`);
         });
-      }
+      });
+    }
+
+    function adminDeleteTrip(id, createdBy) {
+      verifyAndDelete(() => {
+        let trip = allCompanyTrips.find(x => x.id === id);
+        if (!trip) return;
+
+        let updates = {};
+        updates[`trips/${id}`] = null;
+        if (createdBy) {
+          updates[`users_trips/${createdBy}/${id}`] = null;
+        }
+
+        rtdb.ref().update(updates).then(() => {
+          lastDeletedTripBackup = [trip];
+          showUndoButton("Đã xóa đơn hàng!");
+        });
+      });
     }
 
     function updateInlineTripField(tripId, field, value) {
@@ -1195,11 +1259,13 @@
         }
       }
 
+      const roleFilter = document.getElementById('audit-role-filter') ? document.getElementById('audit-role-filter').value : 'all';
       const keyword = document.getElementById('audit-search-input') ? document.getElementById('audit-search-input').value.trim().toLowerCase() : '';
 
       let pairMap = {};
       allCompanyTrips.forEach(t => {
         if (targetDateStr && t.dateStr !== targetDateStr) return;
+        if (roleFilter !== 'all' && t.role !== roleFilter) return;
 
         const ticketKey = (t.originalTicket || t.ticketNumber || '').trim().toUpperCase();
         const plate = (t.plateNumber || '').trim().toUpperCase();
@@ -1221,7 +1287,9 @@
         const posTrips = group.filter(x => x.role === 'pos');
         const driverTrips = group.filter(x => x.role === 'driver');
 
+        let statusType = 'single'; 
         let statusHtml = '<span class="px-2 py-1 bg-slate-100 text-slate-600 font-bold rounded-lg text-[10px]">⏳ Đơn Lẻ</span>';
+        
         if (posTrips.length > 0 && driverTrips.length > 0) {
           const sumPos = posTrips.reduce((acc, x) => acc + Number(x.totalFare || 0), 0);
           const sumDriver = driverTrips.reduce((acc, x) => acc + Number(x.totalFare || 0), 0);
@@ -1232,17 +1300,33 @@
           const isPayMatch = (posPay === driverPay);
 
           if (Math.abs(sumPos - sumDriver) < 1000 && isPayMatch) {
+            statusType = 'match';
             statusHtml = '<span class="px-2 py-1 bg-emerald-100 text-emerald-800 font-extrabold rounded-lg text-[10px]">🟢 Trùng Khớp</span>';
           } else {
+            statusType = 'mismatch';
             statusHtml = '<span class="px-2 py-1 bg-rose-100 text-rose-800 font-extrabold rounded-lg animate-pulse text-[10px]">🔴 Lệch (Tiền / Thanh Toán)</span>';
           }
         }
 
+        let groupPassesKeyword = true;
+        if (keyword) {
+          if (keyword === 'khớp' || keyword === 'trùng khớp') {
+            groupPassesKeyword = (statusType === 'match');
+          } else if (keyword === 'lệch' || keyword === 'không khớp') {
+            groupPassesKeyword = (statusType === 'mismatch');
+          } else {
+            groupPassesKeyword = group.some(t => {
+              const defaultPay = paymentOptions[0] || 'Nhân Viên Quầy Thu';
+              const rowString = `${t.dateStr} ${t.timeStr} ${t.role} ${t.staff} ${t.ticketNumber} ${t.plateNumber} ${t.carType || ''} ${t.source || ''} ${t.destination} ${t.paymentMethod || defaultPay} ${t.note || ''} ${t.totalFare}`.toLowerCase();
+              return rowString.includes(keyword);
+            });
+          }
+        }
+
+        if (!groupPassesKeyword) return;
+
         group.forEach((t, idx) => {
           const defaultPay = paymentOptions[0] || 'Nhân Viên Quầy Thu';
-          const rowString = `${t.dateStr} ${t.timeStr} ${t.role} ${t.staff} ${t.ticketNumber} ${t.plateNumber} ${t.carType || ''} ${t.source || ''} ${t.destination} ${t.paymentMethod || defaultPay} ${t.note || ''} ${t.totalFare}`.toLowerCase();
-          if (keyword && !rowString.includes(keyword)) return;
-
           const isPos = t.role === 'pos';
           const roleBadge = isPos 
             ? `<span class="px-2 py-0.5 bg-blue-100 text-blue-800 rounded-md font-extrabold text-[10px]">🚖 Bán Vé</span>` 
@@ -1304,11 +1388,13 @@
         }
       }
 
+      const roleFilter = document.getElementById('audit-role-filter') ? document.getElementById('audit-role-filter').value : 'all';
       const keyword = document.getElementById('audit-search-input') ? document.getElementById('audit-search-input').value.trim().toLowerCase() : '';
 
       let pairMap = {};
       allCompanyTrips.forEach(t => {
         if (targetDateStr && t.dateStr !== targetDateStr) return;
+        if (roleFilter !== 'all' && t.role !== roleFilter) return;
 
         const ticketKey = (t.originalTicket || t.ticketNumber || '').trim().toUpperCase();
         const plate = (t.plateNumber || '').trim().toUpperCase();
@@ -1330,6 +1416,7 @@
         const driverTrips = group.filter(x => x.role === 'driver');
 
         let auditStatusStr = 'Đơn Lẻ';
+        let statusType = 'single';
         if (posTrips.length > 0 && driverTrips.length > 0) {
           const sumPos = posTrips.reduce((acc, x) => acc + Number(x.totalFare || 0), 0);
           const sumDriver = driverTrips.reduce((acc, x) => acc + Number(x.totalFare || 0), 0);
@@ -1341,32 +1428,48 @@
 
           if (Math.abs(sumPos - sumDriver) < 1000 && isPayMatch) {
             auditStatusStr = 'Trùng Khớp';
+            statusType = 'match';
           } else {
             auditStatusStr = 'Không Trùng Khớp';
+            statusType = 'mismatch';
           }
         }
+
+        let groupPassesKeyword = true;
+        if (keyword) {
+          if (keyword === 'khớp' || keyword === 'trùng khớp') {
+            groupPassesKeyword = (statusType === 'match');
+          } else if (keyword === 'lệch' || keyword === 'không khớp') {
+            groupPassesKeyword = (statusType === 'mismatch');
+          } else {
+            groupPassesKeyword = group.some(t => {
+              const defaultPay = paymentOptions[0] || 'Nhân Viên Quầy Thu';
+              const rowString = `${t.dateStr} ${t.timeStr} ${t.role} ${t.staff} ${t.ticketNumber} ${t.plateNumber} ${t.carType || ''} ${t.source || ''} ${t.destination} ${t.paymentMethod || defaultPay} ${t.note || ''} ${t.totalFare}`.toLowerCase();
+              return rowString.includes(keyword);
+            });
+          }
+        }
+
+        if (!groupPassesKeyword) return;
 
         let groupRows = [];
         group.forEach(t => {
           const defaultPay = paymentOptions[0] || 'Nhân Viên Quầy Thu';
-          const rowString = `${t.dateStr} ${t.timeStr} ${t.role} ${t.staff} ${t.ticketNumber} ${t.plateNumber} ${t.carType || ''} ${t.source || ''} ${t.destination} ${t.paymentMethod || defaultPay} ${t.note || ''} ${t.totalFare}`.toLowerCase();
-          if (!keyword || rowString.includes(keyword)) {
-            groupRows.push({
-              "Ngày": t.dateStr || '--',
-              "Thời Gian Nộp": t.timeStr || '--',
-              "Phân Vùng": t.role === 'pos' ? 'Bán Vé (Quầy)' : 'Cổng Chủ Xe',
-              "Nhân Sự": t.staff || 'N/A',
-              "Số Phiếu": t.ticketNumber || '--',
-              "Biển Số": t.plateNumber || '--',
-              "Loại Xe": t.carType || '--',
-              "Nguồn Đơn": t.source || '--',
-              "Điểm Đến": t.destination || '--',
-              "Hình Thức Thanh Toán": t.paymentMethod || defaultPay,
-              "Ghi Chú": t.note || '',
-              "Tổng Tiền": Number(t.totalFare || 0),
-              "Trạng Thái Đối Soát": auditStatusStr
-            });
-          }
+          groupRows.push({
+            "Ngày": t.dateStr || '--',
+            "Thời Gian Nộp": t.timeStr || '--',
+            "Phân Vùng": t.role === 'pos' ? 'Bán Vé (Quầy)' : 'Cổng Chủ Xe',
+            "Nhân Sự": t.staff || 'N/A',
+            "Số Phiếu": t.ticketNumber || '--',
+            "Biển Số": t.plateNumber || '--',
+            "Loại Xe": t.carType || '--',
+            "Nguồn Đơn": t.source || '--',
+            "Điểm Đến": t.destination || '--',
+            "Hình Thức Thanh Toán": t.paymentMethod || defaultPay,
+            "Ghi Chú": t.note || '',
+            "Tổng Tiền": Number(t.totalFare || 0),
+            "Trạng Thái Đối Soát": auditStatusStr
+          });
         });
 
         if (groupRows.length > 0) {
@@ -1381,7 +1484,6 @@
 
       const worksheet = XLSX.utils.json_to_sheet(sortedExcelRows);
       
-      // Bật cơ chế lọc (AutoFilter) sẵn sàng trong file Excel
       worksheet['!autofilter'] = { ref: XLSX.utils.encode_range(XLSX.utils.decode_range(worksheet['!ref'])) };
 
       worksheet['!cols'] = [

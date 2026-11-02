@@ -293,15 +293,34 @@
       return now < limitDate.getTime();
     }
 
-    // HÀM SẮP XẾP CHUẨN ĐA TẦNG: ƯU TIÊN NGÀY THÁNG NĂM (MỚI NHẤT TRƯỚC), SAU ĐÓ ĐẾN GIỜ TRONG NGÀY
+    // HÀM CHUẨN HÓA ĐỊNH DẠNG NGÀY THÁNG LUN LUÔN LÀ DD/MM/YYYY (VD: 01/11/2026)
+    function normalizeDateInput(rawDate) {
+      if (!rawDate) return '';
+      if (rawDate.includes('-')) {
+        const p = rawDate.split('-');
+        if (p.length === 3) {
+          return `${String(p[2]).padStart(2, '0')}/${String(p[1]).padStart(2, '0')}/${p[0]}`;
+        }
+      } else if (rawDate.includes('/')) {
+        const p = rawDate.split('/');
+        if (p.length === 3) {
+          return `${String(p[0]).padStart(2, '0')}/${String(p[1]).padStart(2, '0')}/${p[2]}`;
+        }
+      }
+      return rawDate;
+    }
+
+    // HÀM SẮP XẾP ĐA TẦNG: ƯU TIÊN NGÀY THÁNG NĂM (MỚI NHẤT TRƯỚC), SAU ĐÓ ĐẾN GIỜ TRONG NGÀY
     function sortTripsByDateAndTime(trips) {
       return trips.sort((a, b) => {
-        let dateA_parts = (a.dateStr || '').split('/');
-        let dateB_parts = (b.dateStr || '').split('/');
+        let normA = normalizeDateInput(a.dateStr);
+        let normB = normalizeDateInput(b.dateStr);
+        let dateA_parts = normA.split('/');
+        let dateB_parts = normB.split('/');
 
         if (dateA_parts.length === 3 && dateB_parts.length === 3) {
-          let numA = parseInt(`${dateA_parts[2]}${dateA_parts[1].padStart(2, '0')}${dateA_parts[0].padStart(2, '0')}`, 10);
-          let numB = parseInt(`${dateB_parts[2]}${dateB_parts[1].padStart(2, '0')}${dateB_parts[0].padStart(2, '0')}`, 10);
+          let numA = parseInt(`${dateA_parts[2]}${dateA_parts[1]}${dateA_parts[0]}`, 10);
+          let numB = parseInt(`${dateB_parts[2]}${dateB_parts[1]}${dateB_parts[0]}`, 10);
           
           if (numA !== numB) {
             return numB - numA; // Ngày mới nhất xếp trước
@@ -314,7 +333,7 @@
         let numTB = parseInt(tB, 10) || 0;
 
         if (numTA !== numTB) {
-          return numTB - numTA; // Thời gian muộn hơn trong ngày xếp trước
+          return numTB - numTA; 
         }
 
         return (b.timestamp || 0) - (a.timestamp || 0);
@@ -368,7 +387,7 @@
             </div>
           </div>
 
-          <!-- BẢNG 3: LỊCH SỬ ĐƠN HÀNG (ĐÃ ĐỒNG BỘ ĐẦY ĐỦ CÁC CỘT GIỐNG BẢNG ĐIỀN ĐƠN) -->
+          <!-- BẢNG 3: LỊCH SỬ ĐƠN HÀNG -->
           <div class="bg-white p-4 sm:p-6 rounded-3xl shadow-xl border border-slate-200 space-y-3">
             <div class="flex flex-col sm:flex-row items-center justify-between border-b pb-3 gap-2">
               <div class="flex items-center space-x-3">
@@ -456,7 +475,8 @@
 
       let monthTrips = personalTrips.filter(t => {
         if (!t.dateStr) return false;
-        const parts = t.dateStr.split('/');
+        const norm = normalizeDateInput(t.dateStr);
+        const parts = norm.split('/');
         if (parts.length === 3) {
           return parseInt(parts[1]) === currentMonth && parseInt(parts[2]) === currentYear;
         }
@@ -537,7 +557,7 @@
 
       const selectedItems = personalTrips.filter(t => {
         if (!targetDateStr) return true;
-        return t.dateStr === targetDateStr;
+        return normalizeDateInput(t.dateStr) === normalizeDateInput(targetDateStr);
       });
 
       const totalSum = selectedItems.reduce((acc, t) => acc + (Number(t.totalFare) || 0), 0);
@@ -595,7 +615,7 @@
 
       const filteredTrips = personalTrips.filter(t => {
         if (!targetDateStr) return true;
-        return t.dateStr === targetDateStr;
+        return normalizeDateInput(t.dateStr) === normalizeDateInput(targetDateStr);
       });
 
       if (filteredTrips.length === 0) {
@@ -814,19 +834,7 @@
 
       for (let i = 0; i < 20; i++) {
         let rawDate = document.getElementById(`date-${i}`).value.trim();
-        let formattedDate = rawDate;
-        if (rawDate.includes('-')) {
-          const parts = rawDate.split('-');
-          if (parts.length === 3) formattedDate = `${parts[2]}/${parts[1]}/${parts[0]}`;
-        } else if (rawDate.includes('/')) {
-          const parts = rawDate.split('/');
-          if (parts.length === 3) {
-            const d = String(parts[0]).padStart(2, '0');
-            const m = String(parts[1]).padStart(2, '0');
-            const y = parts[2];
-            formattedDate = `${d}/${m}/${y}`;
-          }
-        }
+        let formattedDate = normalizeDateInput(rawDate);
 
         const rawStaff = document.getElementById(`staff-${i}`).value.trim();
         const ticket = document.getElementById(`t-${i}`).value.trim();
@@ -891,7 +899,7 @@
             <button onclick="exportCustomExcel()" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-sm">📥 Xuất Excel (Đã Lọc & Có Thanh Toán, Ghi Chú)</button>
           </div>
 
-          <!-- MỤC 0: BẢNG BÁO CÁO TỔNG DOANH THU TRONG NGÀY (CÓ NÚT HÔM NAY) -->
+          <!-- MỤC 0: BÁO CÁO TỔNG DOANH THU TRONG NGÀY (CÓ NÚT HÔM NAY) -->
           <div class="bg-white p-4 sm:p-6 rounded-3xl shadow-md border border-slate-200 space-y-4">
             <div class="flex flex-col sm:flex-row items-center justify-between border-b pb-3 gap-3">
               <h4 class="text-xs sm:text-sm font-extrabold text-slate-900 uppercase">💰 Báo Cáo Tổng Doanh Thu Theo Ngày</h4>
@@ -998,7 +1006,7 @@
             </div>
           </div>
 
-          <!-- MỤC 6: BẢNG ĐỐI SOÁT ĐƠN HÀNG (ĐỐI SOÁT CHÉO, GÔM CẶP & SẮP XẾP ƯU TIÊN NGÀY THÁNG) -->
+          <!-- MỤC 6: BẢNG ĐỐI SOÁT ĐƠN HÀNG -->
           <div class="bg-white rounded-3xl shadow-md border border-slate-200 overflow-hidden p-4 sm:p-5 space-y-3">
             <div class="flex flex-col lg:flex-row items-center justify-between border-b pb-3 gap-3">
               <div class="flex items-center space-x-3">
@@ -1116,7 +1124,7 @@
 
       const selectedTrips = allCompanyTrips.filter(t => {
         if (!targetDateStr) return true;
-        return t.dateStr === targetDateStr;
+        return normalizeDateInput(t.dateStr) === normalizeDateInput(targetDateStr);
       });
 
       const totalSum = selectedTrips.reduce((acc, t) => acc + (Number(t.totalFare) || 0), 0);
@@ -1421,7 +1429,6 @@
       }
     }
 
-    // BẢNG ĐỐI SOÁT CHÉO: GÔM CẶP QUẦY + TÀI XẾ CÓ CHUNG SỐ PHIẾU + BIỂN SỐ
     function updateManagerAuditTable() {
       const tb = document.getElementById('tbody-mgr');
       if (!tb) return;
@@ -1439,19 +1446,17 @@
       const roleFilter = document.getElementById('audit-role-filter') ? document.getElementById('audit-role-filter').value : 'all';
       const keyword = document.getElementById('audit-search-input') ? document.getElementById('audit-search-input').value.trim().toLowerCase() : '';
 
-      // Gom cặp theo Số Phiếu + Biển Số
       let pairMap = {};
       allCompanyTrips.forEach(t => {
         if (roleFilter !== 'all' && t.role !== roleFilter) return;
 
         if (t.dateStr && (startDateVal || endDateVal)) {
-          const p = t.dateStr.split('/');
+          const norm = normalizeDateInput(t.dateStr);
+          const p = norm.split('/');
           if (p.length === 3) {
-            const tFormatted = `${p[2]}-${String(p[1]).padStart(2, '0')}-${String(p[0]).padStart(2, '0')}`;
+            const tFormatted = `${p[2]}-${p[1]}-${p[0]}`;
             if (startDateVal && tFormatted < startDateVal) return;
             if (endDateVal && tFormatted > endDateVal) return;
-          } else {
-            return;
           }
         }
 
@@ -1459,7 +1464,7 @@
         const plate = (t.plateNumber || '').trim().toUpperCase();
         if (ticketKey && plate) {
           const baseTicket = ticketKey.split('-')[0];
-          const key = `${baseTicket}_${plate}_${t.dateStr || ''}`;
+          const key = `${baseTicket}_${plate}_${normalizeDateInput(t.dateStr)}`;
           if (!pairMap[key]) pairMap[key] = [];
           pairMap[key].push(t);
         } else {
@@ -1468,26 +1473,22 @@
       });
 
       let groupList = Object.values(pairMap);
-
       if (groupList.length === 0) {
-        tb.innerHTML = `<tr><td colspan="15" class="p-4 text-center text-slate-400">Không tìm thấy dữ liệu đối soát phù hợp trong khoảng thời gian này.</td></tr>`;
+        tb.innerHTML = `<tr><td colspan="15" class="p-4 text-center text-slate-400">Không tìm thấy dữ liệu đối soát phù hợp.</td></tr>`;
         return;
       }
 
-      // SẮP XẾP CÁC NHÓM ĐƠN: ƯU TIÊN NGÀY THÁNG NĂM MỚI NHẤT LÊN TRÊN, SAU ĐÓ ĐẾN THỜI GIAN
       groupList.sort((groupA, groupB) => {
         let sampleA = groupA[0] || {};
         let sampleB = groupB[0] || {};
+        let partsA = normalizeDateInput(sampleA.dateStr).split('/');
+        let partsB = normalizeDateInput(sampleB.dateStr).split('/');
 
-        let dateA_parts = (sampleA.dateStr || '').split('/');
-        let dateB_parts = (sampleB.dateStr || '').split('/');
-
-        if (dateA_parts.length === 3 && dateB_parts.length === 3) {
-          let numA = parseInt(`${dateA_parts[2]}${dateA_parts[1].padStart(2, '0')}${dateA_parts[0].padStart(2, '0')}`, 10);
-          let numB = parseInt(`${dateB_parts[2]}${dateB_parts[1].padStart(2, '0')}${dateB_parts[0].padStart(2, '0')}`, 10);
+        if (partsA.length === 3 && partsB.length === 3) {
+          let numA = parseInt(`${partsA[2]}${partsA[1]}${partsA[0]}`, 10);
+          let numB = parseInt(`${partsB[2]}${partsB[1]}${partsB[0]}`, 10);
           if (numA !== numB) return numB - numA;
         }
-
         return (sampleB.timestamp || 0) - (sampleA.timestamp || 0);
       });
 
@@ -1508,9 +1509,8 @@
           const defaultPay = paymentOptions[0] || 'Nhân Viên Quầy Thu';
           const posPay = posTrips[0].paymentMethod || defaultPay;
           const driverPay = driverTrips[0].paymentMethod || defaultPay;
-          const isPayMatch = (posPay === driverPay);
 
-          if (Math.abs(sumPos - sumDriver) < 1000 && isPayMatch) {
+          if (Math.abs(sumPos - sumDriver) < 1000 && posPay === driverPay) {
             statusType = 'match';
             statusHtml = '<span class="px-2 py-1 bg-emerald-100 text-emerald-800 font-extrabold rounded-lg text-[10px]">🟢 Trùng Khớp</span>';
           } else {
@@ -1546,7 +1546,6 @@
 
           const checkboxHtml = `<input type="checkbox" class="manager-trip-checkbox" value="${t.id}">`;
           const deleteBtn = `<button onclick="adminDeleteTrip('${t.id}', '${t.createdBy}')" class="px-2 py-0.5 bg-rose-50 hover:bg-rose-100 text-rose-600 font-bold rounded-md text-[10px]">🗑️ Xóa</button>`;
-
           const auditCell = (idx === 0) ? `<td class="p-3 text-center align-middle" rowspan="${group.length}">${statusHtml}</td>` : '';
           const borderClass = (idx === group.length - 1) ? 'border-b-2 border-slate-300' : 'border-b';
 
@@ -1585,183 +1584,6 @@
       });
 
       tb.innerHTML = rowsHtml;
-    }
-
-    function exportCustomExcel() {
-      if (allCompanyTrips.length === 0) { alert("Không có dữ liệu xuất đi!"); return; }
-
-      const startInp = document.getElementById('audit-start-date');
-      const endInp = document.getElementById('audit-end-date');
-      
-      let startDateVal = startInp && startInp.value ? startInp.value : '';
-      let endDateVal = endInp && endInp.value ? endInp.value : '';
-
-      const roleFilter = document.getElementById('audit-role-filter') ? document.getElementById('audit-role-filter').value : 'all';
-      const keyword = document.getElementById('audit-search-input') ? document.getElementById('audit-search-input').value.trim().toLowerCase() : '';
-
-      let pairMap = {};
-      allCompanyTrips.forEach(t => {
-        if (roleFilter !== 'all' && t.role !== roleFilter) return;
-
-        if (t.dateStr && (startDateVal || endDateVal)) {
-          const p = t.dateStr.split('/');
-          if (p.length === 3) {
-            const tFormatted = `${p[2]}-${String(p[1]).padStart(2, '0')}-${String(p[0]).padStart(2, '0')}`;
-            if (startDateVal && tFormatted < startDateVal) return;
-            if (endDateVal && tFormatted > endDateVal) return;
-          }
-        }
-
-        const ticketKey = (t.originalTicket || t.ticketNumber || '').trim().toUpperCase();
-        const plate = (t.plateNumber || '').trim().toUpperCase();
-        if (ticketKey && plate) {
-          const baseTicket = ticketKey.split('-')[0];
-          const key = `${baseTicket}_${plate}_${t.dateStr || ''}`;
-          if (!pairMap[key]) pairMap[key] = [];
-          pairMap[key].push(t);
-        } else {
-          pairMap['single_' + t.id] = [t];
-        }
-      });
-
-      let sortedExcelRows = [];
-      Object.values(pairMap).forEach(group => {
-        group.sort((a, b) => (a.role === 'pos' ? -1 : 1));
-
-        const posTrips = group.filter(x => x.role === 'pos');
-        const driverTrips = group.filter(x => x.role === 'driver');
-
-        let auditStatusStr = 'Đơn Lẻ';
-        if (posTrips.length > 0 && driverTrips.length > 0) {
-          const sumPos = posTrips.reduce((acc, x) => acc + Number(x.totalFare || 0), 0);
-          const sumDriver = driverTrips.reduce((acc, x) => acc + Number(x.totalFare || 0), 0);
-          
-          const defaultPay = paymentOptions[0] || 'Nhân Viên Quầy Thu';
-          const posPay = posTrips[0].paymentMethod || defaultPay;
-          const driverPay = driverTrips[0].paymentMethod || defaultPay;
-          const isPayMatch = (posPay === driverPay);
-
-          if (Math.abs(sumPos - sumDriver) < 1000 && isPayMatch) {
-            auditStatusStr = 'Trùng Khớp';
-          } else {
-            auditStatusStr = 'Không Trùng Khớp';
-          }
-        }
-
-        let groupRows = [];
-        group.forEach(t => {
-          const defaultPay = paymentOptions[0] || 'Nhân Viên Quầy Thu';
-          const rowString = `${t.dateStr} ${t.timeStr} ${t.role} ${t.staff} ${t.ticketNumber} ${t.plateNumber} ${t.carType || ''} ${t.source || ''} ${t.destination} ${t.paymentMethod || defaultPay} ${t.note || ''} ${t.totalFare}`.toLowerCase();
-          
-          if (!keyword || rowString.includes(keyword)) {
-            groupRows.push({
-              "Ngày": t.dateStr || '--',
-              "Thời Gian Nộp": t.timeStr || '--',
-              "Phân Vùng": t.role === 'pos' ? 'Bán Vé (Quầy)' : 'Cổng Chủ Xe',
-              "Nhân Sự": t.staff || 'N/A',
-              "Số Phiếu": t.ticketNumber || '--',
-              "Biển Số": t.plateNumber || '--',
-              "Loại Xe": t.carType || '--',
-              "Nguồn Đơn": t.source || '--',
-              "Điểm Đến": t.destination || '--',
-              "Hình Thức Thanh Toán": t.paymentMethod || defaultPay,
-              "Ghi Chú": t.note || '',
-              "Tổng Tiền": Number(t.totalFare || 0),
-              "Trạng Thái Đối Soát": auditStatusStr
-            });
-          }
-        });
-
-        if (groupRows.length > 0) {
-          sortedExcelRows.push(...groupRows);
-          sortedExcelRows.push({
-            "Ngày": "", "Thời Gian Nộp": "", "Phân Vùng": "", "Nhân Sự": "", "Số Phiếu": "", "Biển Số": "", "Loại Xe": "", "Nguồn Đơn": "", "Điểm Đến": "", "Hình Thức Thanh Toán": "", "Ghi Chú": "", "Tổng Tiền": "", "Trạng Thái Đối Soát": ""
-          });
-        }
-      });
-
-      if (sortedExcelRows.length === 0) { alert("Không có dữ liệu khớp với khoảng thời gian và từ khóa để xuất!"); return; }
-
-      const worksheet = XLSX.utils.json_to_sheet(sortedExcelRows);
-      worksheet['!autofilter'] = { ref: XLSX.utils.encode_range(XLSX.utils.decode_range(worksheet['!ref'])) };
-      worksheet['!cols'] = [
-        {wch: 14}, {wch: 16}, {wch: 16}, {wch: 18}, {wch: 14}, {wch: 14}, {wch: 16}, {wch: 16}, {wch: 28}, {wch: 22}, {wch: 22}, {wch: 18}, {wch: 22}
-      ];
-
-      const workbook = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(workbook, worksheet, "DoiSoatTSS");
-      XLSX.writeFile(workbook, "Bao_Cao_Doi_Soat_TSS.xlsx");
-    }
-
-    function formatCurrSmartInput(el) {
-      let raw = el.value.replace(/[^0-9]/g, '');
-      if (!raw) { el.value = ''; return; }
-      let num = parseInt(raw, 10);
-      if (num < 10000) { num = num * 1000; }
-      el.value = num.toLocaleString('vi-VN');
-    }
-
-    function renderAccountsTable() {
-      const tb = document.getElementById('tbody-acc');
-      if (!tb) return;
-      if (userAccounts.length === 0) {
-        tb.innerHTML = `<tr><td colspan="4" class="p-4 text-center text-slate-400">Chưa có tài khoản nào.</td></tr>`;
-        return;
-      }
-      tb.innerHTML = userAccounts.map((x, i) => `
-        <tr>
-          <td class="p-3 font-mono font-bold text-blue-700">${x.user}</td>
-          <td class="p-3 font-mono font-bold text-slate-700">${x.pass}</td>
-          <td class="p-3 font-bold">${x.role === 'pos' ? 'Bán Vé' : 'Cổng Chủ Xe'}</td>
-          <td class="p-3 text-center space-x-1">
-            <button onclick="editAccount(${i})" class="px-2.5 py-1 bg-blue-50 text-blue-600 rounded-lg font-bold">Sửa</button>
-            <button onclick="deleteAccount(${i})" class="px-2.5 py-1 bg-rose-50 text-rose-600 rounded-lg font-bold">Xóa</button>
-          </td>
-        </tr>
-      `).join('');
-    }
-
-    function saveAccount() {
-      const idx = parseInt(document.getElementById('edit-user-idx').value, 10);
-      const u = document.getElementById('new-user').value.trim().toUpperCase();
-      const p = document.getElementById('new-pass').value.trim();
-      const r = document.getElementById('new-role').value;
-      if (!u || !p) { alert("Vui lòng điền tài khoản và mật khẩu!"); return; }
-
-      if (idx >= 0) {
-        userAccounts[idx] = { user: u, pass: p, role: r };
-      } else {
-        if (userAccounts.some(acc => acc.user === u)) {
-          alert("Tài khoản này đã tồn tại trong hệ thống!");
-          return;
-        }
-        userAccounts.push({ user: u, pass: p, role: r });
-      }
-
-      saveCloudAccounts();
-      renderAccountsTable();
-      document.getElementById('edit-user-idx').value = '-1';
-      document.getElementById('new-user').value = '';
-      document.getElementById('new-pass').value = '';
-      document.getElementById('btn-save-acc').innerText = "+ Thêm Tài Khoản";
-      alert("Đã lưu tài khoản lên Cloud thành công!");
-    }
-
-    function editAccount(i) {
-      const a = userAccounts[i];
-      document.getElementById('edit-user-idx').value = i;
-      document.getElementById('new-user').value = a.user;
-      document.getElementById('new-pass').value = a.pass;
-      document.getElementById('new-role').value = a.role;
-      document.getElementById('btn-save-acc').innerText = "💾 Cập Nhật";
-    }
-
-    function deleteAccount(i) {
-      if (confirm(`Bạn có chắc chắn muốn xóa tài khoản ${userAccounts[i].user} không?`)) {
-        userAccounts.splice(i, 1);
-        saveCloudAccounts();
-        renderAccountsTable();
-      }
     }
   </script>
 </body>

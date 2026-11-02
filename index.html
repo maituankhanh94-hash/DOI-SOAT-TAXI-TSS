@@ -43,6 +43,12 @@
     <!-- Nội dung render động -->
   </main>
 
+  <!-- FLOATING WARNING NOTIFICATION BANNER -->
+  <div id="floating-warning-banner" class="fixed top-20 left-1/2 transform -translate-x-1/2 z-50 bg-amber-500 text-white px-5 py-3 rounded-2xl shadow-2xl text-xs font-extrabold flex items-center space-x-3 hidden transition-all duration-300">
+    <span id="floating-warning-text">⚠️ Cảnh báo trùng lặp đơn hàng!</span>
+    <button onclick="document.getElementById('floating-warning-banner').classList.add('hidden')" class="bg-amber-600 hover:bg-amber-700 text-white px-2 py-1 rounded-xl text-[10px]">Đóng</button>
+  </div>
+
   <script>
     const firebaseConfig = {
       apiKey: "AIzaSyB9rTrGArG5WUfUMfznab5YjblCv4Amg4M",
@@ -172,6 +178,16 @@
       });
     }
 
+    function showFloatingWarning(msg) {
+      const banner = document.getElementById('floating-warning-banner');
+      const text = document.getElementById('floating-warning-text');
+      if (banner && text) {
+        text.innerText = "⚠️ " + msg;
+        banner.classList.remove('hidden');
+        setTimeout(() => { banner.classList.add('hidden'); }, 6000);
+      }
+    }
+
     function renderHomeSelection() {
       loggedInUser = null;
       document.getElementById('header-status').innerText = "Chọn phân vùng đăng nhập";
@@ -293,7 +309,6 @@
       return now < limitDate.getTime();
     }
 
-    // HÀM CHUẨN HÓA ĐỊNH DẠNG NGÀY THÁNG LUN LUÔN LÀ DD/MM/YYYY (VD: 01/11/2026)
     function normalizeDateInput(rawDate) {
       if (!rawDate) return '';
       if (rawDate.includes('-')) {
@@ -310,7 +325,6 @@
       return rawDate;
     }
 
-    // HÀM SẮP XẾP ĐA TẦNG: ƯU TIÊN NGÀY THÁNG NĂM (MỚI NHẤT TRƯỚC), SAU ĐÓ ĐẾN GIỜ TRONG NGÀY
     function sortTripsByDateAndTime(trips) {
       return trips.sort((a, b) => {
         let normA = normalizeDateInput(a.dateStr);
@@ -319,11 +333,11 @@
         let dateB_parts = normB.split('/');
 
         if (dateA_parts.length === 3 && dateB_parts.length === 3) {
-          let numA = parseInt(`${dateA_parts[2]}${dateA_parts[1]}${dateA_parts[0]}`, 10);
-          let numB = parseInt(`${dateB_parts[2]}${dateB_parts[1]}${dateB_parts[0]}`, 10);
+          let numA = parseInt(dateA_parts[2] + dateA_parts[1] + dateA_parts[0], 10);
+          let numB = parseInt(dateB_parts[2] + dateB_parts[1] + dateB_parts[0], 10);
           
           if (numA !== numB) {
-            return numB - numA; // Ngày mới nhất xếp trước
+            return numB - numA;
           }
         }
 
@@ -629,7 +643,7 @@
         const isDeletable = canDeleteTrip(t.timestamp);
         const checkboxHtml = isDeletable ? `<input type="checkbox" class="personal-trip-checkbox" value="${t.id}">` : `<span title="Đã khóa">🔒</span>`;
         const deleteBtn = isDeletable 
-          ? `<button onclick="deletePersonalTrip('${t.id}')" class="px-2.5 py-1 bg-rose-50 hover:bg-rose-100 text-rose-600 font-bold rounded-lg text-[11px]">🗑️ Xóa</button>`
+          ? `<button type="button" onclick="deletePersonalTrip('${t.id}')" class="px-2.5 py-1 bg-rose-50 hover:bg-rose-100 text-rose-600 font-bold rounded-lg text-[11px] cursor-pointer">🗑️ Xóa</button>`
           : `<span class="text-slate-400 font-semibold italic text-[11px]">Đã Khóa</span>`;
 
         return `
@@ -683,24 +697,29 @@
     }
 
     function deletePersonalTrip(id) {
-      const trip = personalTrips.find(t => t.id === id);
-      if (!trip) return;
+      if (!loggedInUser) return;
+      
+      rtdb.ref(`users_trips/${loggedInUser.user}/${id}`).once('value', snap => {
+        const trip = snap.val();
+        
+        if (trip && !canDeleteTrip(trip.timestamp)) {
+          alert(`Đã quá giờ quy định của ngày hôm sau, đơn hàng đã bị khóa và không thể xóa!`);
+          return;
+        }
 
-      if (!canDeleteTrip(trip.timestamp)) {
-        alert(`Đã quá giờ quy định của ngày hôm sau, đơn hàng đã bị khóa và không thể xóa!`);
-        return;
-      }
+        if (confirm("Bạn có chắc chắn muốn xóa đơn hàng này không?")) {
+          let updates = {};
+          updates[`users_trips/${loggedInUser.user}/${id}`] = null;
+          updates[`trips/${id}`] = null;
 
-      if (confirm("Bạn có chắc chắn muốn xóa đơn hàng này không?")) {
-        let updates = {};
-        updates[`users_trips/${loggedInUser.user}/${id}`] = null;
-        updates[`trips/${id}`] = null;
-
-        rtdb.ref().update(updates).then(() => {
-          lastDeletedTripBackup = [trip];
-          showUndoButton("Đã xóa đơn hàng!");
-        });
-      }
+          rtdb.ref().update(updates).then(() => {
+            lastDeletedTripBackup = [trip || { id }];
+            showUndoButton("Đã xóa đơn hàng!");
+          }).catch(err => {
+            alert("Lỗi khi xóa: " + err.message);
+          });
+        }
+      });
     }
 
     function showUndoButton(message) {
@@ -831,6 +850,7 @@
       const timeStr = new Date().toLocaleTimeString('vi-VN', {hour:'2-digit', minute:'2-digit'});
       let count = 0;
       let updates = {};
+      let duplicateCount = 0;
 
       for (let i = 0; i < 20; i++) {
         let rawDate = document.getElementById(`date-${i}`).value.trim();
@@ -848,6 +868,18 @@
         const note = document.getElementById(`note-${i}`).value.trim();
 
         if (rawStaff && ticket && plate && dest) {
+          const isDuplicate = personalTrips.some(t => {
+            const existingTicket = (t.originalTicket || t.ticketNumber || '').trim().toUpperCase();
+            const existingPlate = (t.plateNumber || '').trim().toUpperCase();
+            const existingDate = normalizeDateInput(t.dateStr);
+            return existingTicket === ticket.trim().toUpperCase() && existingPlate === plate && existingDate === formattedDate;
+          });
+
+          if (isDuplicate) {
+            duplicateCount++;
+            continue;
+          }
+
           const baseTimestamp = Date.now() + i;
 
           const staffNames = rawStaff.split(/[+,]+/).map(s => s.trim()).filter(Boolean);
@@ -871,24 +903,32 @@
         }
       }
 
+      if (duplicateCount > 0) {
+        showFloatingWarning(`Phát hiện ${duplicateCount} đơn hàng bị trùng số phiếu và biển số đã lưu trước đó nên đã được bỏ qua!`);
+      }
+
       if (count > 0) {
         rtdb.ref().update(updates).then(() => {
           alert(`Đã lưu thành công và phân tách hoa hồng cho ${count} đơn!`);
           renderBatchRows(role);
           const histInput = document.getElementById('filter-history-date');
           if (histInput) {
-            const parts = formattedDate.split('/');
-            if (parts.length === 3) {
-              histInput.value = `${parts[2]}-${parts[1]}-${parts[0]}`;
-              renderActiveWorksheetTrips();
-            }
+            const parts = formatDateForInput(formattedDate);
+            if (parts) histInput.value = parts;
+            renderActiveWorksheetTrips();
           }
         }).catch(err => {
           alert("Lỗi lưu dữ liệu: " + err.message);
         });
-      } else {
+      } else if (duplicateCount === 0) {
         alert("Vui lòng điền đầy đủ Tên Nhân Sự, Số Phiếu, Biển Số và Điểm Đến!");
       }
+    }
+
+    function formatDateForInput(dateStr) {
+      const p = dateStr.split('/');
+      if (p.length === 3) return `${p[2]}-${p[1]}-${p[0]}`;
+      return '';
     }
 
     function renderManagerDashboard() {

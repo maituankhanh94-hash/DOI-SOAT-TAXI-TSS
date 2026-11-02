@@ -1585,6 +1585,183 @@
 
       tb.innerHTML = rowsHtml;
     }
+
+    function exportCustomExcel() {
+      if (allCompanyTrips.length === 0) { alert("Không có dữ liệu xuất đi!"); return; }
+
+      const startInp = document.getElementById('audit-start-date');
+      const endInp = document.getElementById('audit-end-date');
+      
+      let startDateVal = startInp && startInp.value ? startInp.value : '';
+      let endDateVal = endInp && endInp.value ? endInp.value : '';
+
+      const roleFilter = document.getElementById('audit-role-filter') ? document.getElementById('audit-role-filter').value : 'all';
+      const keyword = document.getElementById('audit-search-input') ? document.getElementById('audit-search-input').value.trim().toLowerCase() : '';
+
+      let pairMap = {};
+      allCompanyTrips.forEach(t => {
+        if (roleFilter !== 'all' && t.role !== roleFilter) return;
+
+        if (t.dateStr && (startDateVal || endDateVal)) {
+          const norm = normalizeDateInput(t.dateStr);
+          const p = norm.split('/');
+          if (p.length === 3) {
+            const tFormatted = `${p[2]}-${p[1]}-${p[0]}`;
+            if (startDateVal && tFormatted < startDateVal) return;
+            if (endDateVal && tFormatted > endDateVal) return;
+          }
+        }
+
+        const ticketKey = (t.originalTicket || t.ticketNumber || '').trim().toUpperCase();
+        const plate = (t.plateNumber || '').trim().toUpperCase();
+        if (ticketKey && plate) {
+          const baseTicket = ticketKey.split('-')[0];
+          const key = `${baseTicket}_${plate}_${normalizeDateInput(t.dateStr)}`;
+          if (!pairMap[key]) pairMap[key] = [];
+          pairMap[key].push(t);
+        } else {
+          pairMap['single_' + t.id] = [t];
+        }
+      });
+
+      let sortedExcelRows = [];
+      Object.values(pairMap).forEach(group => {
+        group.sort((a, b) => (a.role === 'pos' ? -1 : 1));
+
+        const posTrips = group.filter(x => x.role === 'pos');
+        const driverTrips = group.filter(x => x.role === 'driver');
+
+        let auditStatusStr = 'Đơn Lẻ';
+        if (posTrips.length > 0 && driverTrips.length > 0) {
+          const sumPos = posTrips.reduce((acc, x) => acc + Number(x.totalFare || 0), 0);
+          const sumDriver = driverTrips.reduce((acc, x) => acc + Number(x.totalFare || 0), 0);
+          
+          const defaultPay = paymentOptions[0] || 'Nhân Viên Quầy Thu';
+          const posPay = posTrips[0].paymentMethod || defaultPay;
+          const driverPay = driverTrips[0].paymentMethod || defaultPay;
+
+          if (Math.abs(sumPos - sumDriver) < 1000 && posPay === driverPay) {
+            auditStatusStr = 'Trùng Khớp';
+          } else {
+            auditStatusStr = 'Không Trùng Khớp';
+          }
+        }
+
+        let groupRows = [];
+        group.forEach(t => {
+          const defaultPay = paymentOptions[0] || 'Nhân Viên Quầy Thu';
+          const rowString = `${t.dateStr} ${t.timeStr} ${t.role} ${t.staff} ${t.ticketNumber} ${t.plateNumber} ${t.carType || ''} ${t.source || ''} ${t.destination} ${t.paymentMethod || defaultPay} ${t.note || ''} ${t.totalFare}`.toLowerCase();
+          
+          if (!keyword || rowString.includes(keyword)) {
+            groupRows.push({
+              "Ngày": t.dateStr || '--',
+              "Thời Gian Nộp": t.timeStr || '--',
+              "Phân Vùng": t.role === 'pos' ? 'Bán Vé (Quầy)' : 'Cổng Chủ Xe',
+              "Nhân Sự": t.staff || 'N/A',
+              "Số Phiếu": t.ticketNumber || '--',
+              "Biển Số": t.plateNumber || '--',
+              "Loại Xe": t.carType || '--',
+              "Nguồn Đơn": t.source || '--',
+              "Điểm Đến": t.destination || '--',
+              "Hình Thức Thanh Toán": t.paymentMethod || defaultPay,
+              "Ghi Chú": t.note || '',
+              "Tổng Tiền": Number(t.totalFare || 0),
+              "Trạng Thái Đối Soát": auditStatusStr
+            });
+          }
+        });
+
+        if (groupRows.length > 0) {
+          sortedExcelRows.push(...groupRows);
+          sortedExcelRows.push({
+            "Ngày": "", "Thời Gian Nộp": "", "Phân Vùng": "", "Nhân Sự": "", "Số Phiếu": "", "Biển Số": "", "Loại Xe": "", "Nguồn Đơn": "", "Điểm Đến": "", "Hình Thức Thanh Toán": "", "Ghi Chú": "", "Tổng Tiền": "", "Trạng Thái Đối Soát": ""
+          });
+        }
+      });
+
+      if (sortedExcelRows.length === 0) { alert("Không có dữ liệu khớp với khoảng thời gian và từ khóa để xuất!"); return; }
+
+      const worksheet = XLSX.utils.json_to_sheet(sortedExcelRows);
+      worksheet['!autofilter'] = { ref: XLSX.utils.encode_range(XLSX.utils.decode_range(worksheet['!ref'])) };
+      worksheet['!cols'] = [
+        {wch: 14}, {wch: 16}, {wch: 16}, {wch: 18}, {wch: 14}, {wch: 14}, {wch: 16}, {wch: 16}, {wch: 28}, {wch: 22}, {wch: 22}, {wch: 18}, {wch: 22}
+      ];
+
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, "DoiSoatTSS");
+      XLSX.writeFile(workbook, "Bao_Cao_Doi_Soat_TSS.xlsx");
+    }
+
+    function formatCurrSmartInput(el) {
+      let raw = el.value.replace(/[^0-9]/g, '');
+      if (!raw) { el.value = ''; return; }
+      let num = parseInt(raw, 10);
+      if (num < 10000) { num = num * 1000; }
+      el.value = num.toLocaleString('vi-VN');
+    }
+
+    function renderAccountsTable() {
+      const tb = document.getElementById('tbody-acc');
+      if (!tb) return;
+      if (userAccounts.length === 0) {
+        tb.innerHTML = `<tr><td colspan="4" class="p-4 text-center text-slate-400">Chưa có tài khoản nào.</td></tr>`;
+        return;
+      }
+      tb.innerHTML = userAccounts.map((x, i) => `
+        <tr>
+          <td class="p-3 font-mono font-bold text-blue-700">${x.user}</td>
+          <td class="p-3 font-mono font-bold text-slate-700">${x.pass}</td>
+          <td class="p-3 font-bold">${x.role === 'pos' ? 'Bán Vé' : 'Cổng Chủ Xe'}</td>
+          <td class="p-3 text-center space-x-1">
+            <button onclick="editAccount(${i})" class="px-2.5 py-1 bg-blue-50 text-blue-600 rounded-lg font-bold">Sửa</button>
+            <button onclick="deleteAccount(${i})" class="px-2.5 py-1 bg-rose-50 text-rose-600 rounded-lg font-bold">Xóa</button>
+          </td>
+        </tr>
+      `).join('');
+    }
+
+    function saveAccount() {
+      const idx = parseInt(document.getElementById('edit-user-idx').value, 10);
+      const u = document.getElementById('new-user').value.trim().toUpperCase();
+      const p = document.getElementById('new-pass').value.trim();
+      const r = document.getElementById('new-role').value;
+      if (!u || !p) { alert("Vui lòng điền tài khoản và mật khẩu!"); return; }
+
+      if (idx >= 0) {
+        userAccounts[idx] = { user: u, pass: p, role: r };
+      } else {
+        if (userAccounts.some(acc => acc.user === u)) {
+          alert("Tài khoản này đã tồn tại trong hệ thống!");
+          return;
+        }
+        userAccounts.push({ user: u, pass: p, role: r });
+      }
+
+      saveCloudAccounts();
+      renderAccountsTable();
+      document.getElementById('edit-user-idx').value = '-1';
+      document.getElementById('new-user').value = '';
+      document.getElementById('new-pass').value = '';
+      document.getElementById('btn-save-acc').innerText = "+ Thêm Tài Khoản";
+      alert("Đã lưu tài khoản lên Cloud thành công!");
+    }
+
+    function editAccount(i) {
+      const a = userAccounts[i];
+      document.getElementById('edit-user-idx').value = i;
+      document.getElementById('new-user').value = a.user;
+      document.getElementById('new-pass').value = a.pass;
+      document.getElementById('new-role').value = a.role;
+      document.getElementById('btn-save-acc').innerText = "💾 Cập Nhật";
+    }
+
+    function deleteAccount(i) {
+      if (confirm(`Bạn có chắc chắn muốn xóa tài khoản ${userAccounts[i].user} không?`)) {
+        userAccounts.splice(i, 1);
+        saveCloudAccounts();
+        renderAccountsTable();
+      }
+    }
   </script>
 </body>
 </html>

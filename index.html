@@ -757,8 +757,12 @@
         const isDeletable = canDeleteTrip(t.timestamp);
         const checkboxHtml = isDeletable ? `<input type="checkbox" class="personal-trip-checkbox" value="${t.id}">` : `<span title="Đã khóa">🔒</span>`;
         const deleteBtn = isDeletable 
-          ? `<button type="button" onclick="deletePersonalTrip('${t.id}')" class="px-2.5 py-1 bg-rose-50 hover:bg-rose-100 text-rose-600 font-bold rounded-lg text-[11px] cursor-pointer">🗑️ Xóa</button>`
+          ? `<button type="button" onclick="deletePersonalTrip('${t.id}')" class="px-2 py-1 bg-rose-50 hover:bg-rose-100 text-rose-600 font-bold rounded-lg text-[11px] cursor-pointer">🗑️ Xóa</button>`
           : `<span class="text-slate-400 font-semibold italic text-[11px]">Đã Khóa</span>`;
+        
+        const editBtn = isDeletable
+          ? `<button type="button" onclick="openEditTripModal('${t.id}')" class="px-2 py-1 bg-blue-50 hover:bg-blue-100 text-blue-600 font-bold rounded-lg text-[11px] cursor-pointer ml-1">✏️ Sửa</button>`
+          : '';
 
         return `
           <tr class="hover:bg-slate-50">
@@ -775,15 +779,154 @@
             <td class="p-2.5 font-bold text-slate-700">${t.paymentMethod || paymentOptions[0]}</td>
             <td class="p-2.5 text-slate-600">${t.note || '--'}</td>
             <td class="p-2.5 text-right font-bold text-emerald-600">${Number(t.totalFare || 0).toLocaleString('vi-VN')} ₫</td>
-            <td class="p-2.5 text-center">${deleteBtn}</td>
+            <td class="p-2.5 text-center whitespace-nowrap">${editBtn} ${deleteBtn}</td>
           </tr>
         `;
       }).join('');
     }
 
-    function toggleSelectAllPersonal(masterCheckbox) {
-      const checkboxes = document.querySelectorAll('.personal-trip-checkbox');
-      checkboxes.forEach(cb => cb.checked = masterCheckbox.checked);
+    function openEditTripModal(id) {
+      const trip = personalTrips.find(x => x.id === id);
+      if (!trip) return;
+
+      if (!canDeleteTrip(trip.timestamp)) {
+        alert("Đã quá giờ quy định của ngày hôm sau, đơn hàng đã bị khóa và không thể sửa!");
+        return;
+      }
+
+      const existingModal = document.getElementById('edit-trip-modal');
+      if (existingModal) existingModal.remove();
+
+      let parts = normalizeDateInput(trip.dateStr).split('/');
+      let dateInputVal = parts.length === 3 ? `${parts[2]}-${parts[1]}-${parts[0]}` : '';
+
+      const modalHtml = `
+        <div id="edit-trip-modal" class="fixed inset-0 bg-slate-900/80 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+          <div class="bg-white rounded-3xl shadow-2xl max-w-md w-full p-6 space-y-4">
+            <div class="flex items-center justify-between border-b pb-3">
+              <h3 class="text-sm font-extrabold text-slate-900 uppercase">✏️ Chỉnh Sửa Đơn Hàng (${trip.ticketNumber})</h3>
+              <button onclick="document.getElementById('edit-trip-modal').remove()" class="text-slate-400 hover:text-slate-600 font-bold">✕</button>
+            </div>
+            
+            <div class="space-y-3 text-xs">
+              <div>
+                <label class="font-bold text-slate-600">Ngày Tháng:</label>
+                <input type="date" id="edit-modal-date" value="${dateInputVal}" class="w-full mt-1 p-2.5 bg-slate-50 border rounded-xl font-bold">
+              </div>
+              <div class="grid grid-cols-2 gap-2">
+                <div>
+                  <label class="font-bold text-slate-600">Số Phiếu:</label>
+                  <input type="text" id="edit-modal-ticket" value="${trip.ticketNumber || ''}" class="w-full mt-1 p-2.5 bg-slate-50 border rounded-xl font-bold">
+                </div>
+                <div>
+                  <label class="font-bold text-slate-600">Biển Số Xe:</label>
+                  <input type="text" id="edit-modal-plate" value="${trip.plateNumber || ''}" class="w-full mt-1 p-2.5 bg-slate-50 border rounded-xl font-bold uppercase">
+                </div>
+              </div>
+              <div class="grid grid-cols-2 gap-2">
+                <div>
+                  <label class="font-bold text-slate-600">Nhân Sự:</label>
+                  <input type="text" id="edit-modal-staff" value="${trip.staff || ''}" class="w-full mt-1 p-2.5 bg-slate-50 border rounded-xl font-bold">
+                </div>
+                <div>
+                  <label class="font-bold text-slate-600">Loại Xe:</label>
+                  <select id="edit-modal-cartype" class="w-full mt-1 p-2.5 bg-slate-50 border rounded-xl font-bold">
+                    ${carTypeOptions.map(ct => `<option value="${ct}" ${trip.carType === ct ? 'selected' : ''}>${ct}</option>`).join('')}
+                  </select>
+                </div>
+              </div>
+              <div class="grid grid-cols-2 gap-2">
+                <div>
+                  <label class="font-bold text-slate-600">Nguồn Đơn:</label>
+                  <select id="edit-modal-source" class="w-full mt-1 p-2.5 bg-slate-50 border rounded-xl font-bold">
+                    ${sourceOptions.map(s => `<option value="${s}" ${trip.source === s ? 'selected' : ''}>${s}</option>`).join('')}
+                  </select>
+                </div>
+                <div>
+                  <label class="font-bold text-slate-600">Điểm Đón:</label>
+                  <select id="edit-modal-pickup" class="w-full mt-1 p-2.5 bg-slate-50 border rounded-xl font-bold">
+                    ${TERMINAL_OPTIONS.map(t => `<option value="${t}" ${trip.pickup === t ? 'selected' : ''}>Ga ${t}</option>`).join('')}
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label class="font-bold text-slate-600">Điểm Đến:</label>
+                <input type="text" id="edit-modal-dest" value="${trip.destination || ''}" class="w-full mt-1 p-2.5 bg-slate-50 border rounded-xl font-bold">
+              </div>
+              <div class="grid grid-cols-2 gap-2">
+                <div>
+                  <label class="font-bold text-slate-600">Tổng Tiền:</label>
+                  <input type="text" id="edit-modal-fare" value="${Number(trip.totalFare || 0).toLocaleString('vi-VN')}" onblur="formatCurrSmartInput(this)" class="w-full mt-1 p-2.5 bg-emerald-50 border border-emerald-300 rounded-xl font-extrabold text-emerald-800 text-right">
+                </div>
+                <div>
+                  <label class="font-bold text-slate-600">Thanh Toán:</label>
+                  <select id="edit-modal-payment" class="w-full mt-1 p-2.5 bg-slate-50 border rounded-xl font-bold">
+                    ${paymentOptions.map(opt => `<option value="${opt}" ${(trip.paymentMethod || paymentOptions[0]) === opt ? 'selected' : ''}>${opt}</option>`).join('')}
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label class="font-bold text-slate-600">Ghi Chú:</label>
+                <input type="text" id="edit-modal-note" value="${trip.note || ''}" class="w-full mt-1 p-2.5 bg-slate-50 border rounded-xl">
+              </div>
+            </div>
+
+            <div class="flex space-x-2 pt-2">
+              <button onclick="saveEditedTrip('${trip.id}')" class="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-xs">💾 Lưu Thay Đổi</button>
+              <button onclick="document.getElementById('edit-trip-modal').remove()" class="w-full py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold text-xs">Hủy</button>
+            </div>
+          </div>
+        </div>
+      `;
+      document.body.insertAdjacentHTML('beforeend', modalHtml);
+    }
+
+    function saveEditedTrip(id) {
+      const trip = personalTrips.find(x => x.id === id);
+      if (!trip) return;
+
+      const rawDate = document.getElementById('edit-modal-date').value;
+      const formattedDate = normalizeDateInput(rawDate);
+      const ticket = document.getElementById('edit-modal-ticket').value.trim();
+      const plate = document.getElementById('edit-modal-plate').value.trim().toUpperCase();
+      const staff = document.getElementById('edit-modal-staff').value.trim();
+      const carType = document.getElementById('edit-modal-cartype').value;
+      const source = document.getElementById('edit-modal-source').value;
+      const pickup = document.getElementById('edit-modal-pickup').value;
+      const destination = document.getElementById('edit-modal-dest').value.trim();
+      const totalFare = parseFloat(document.getElementById('edit-modal-fare').value.replace(/[^0-9]/g, '')) || 0;
+      const paymentMethod = document.getElementById('edit-modal-payment').value;
+      const note = document.getElementById('edit-modal-note').value.trim();
+
+      if (!ticket || !plate || !destination || !staff) {
+        alert("Vui lòng điền đầy đủ Số Phiếu, Biển Số, Nhân Sự và Điểm Đến!");
+        return;
+      }
+
+      trip.dateStr = formattedDate;
+      trip.ticketNumber = ticket;
+      trip.plateNumber = plate;
+      trip.staff = staff;
+      trip.carType = carType;
+      trip.source = source;
+      trip.pickup = pickup;
+      trip.destination = destination;
+      trip.totalFare = totalFare;
+      trip.paymentMethod = paymentMethod;
+      trip.note = note;
+
+      let updates = {};
+      updates[`users_trips/${loggedInUser.user}/${id}`] = trip;
+      updates[`trips/${id}`] = trip;
+
+      rtdb.ref().update(updates).then(() => {
+        alert("Đã cập nhật đơn hàng thành công!");
+        document.getElementById('edit-trip-modal').remove();
+        updatePersonalSummary();
+        renderActiveWorksheetTrips();
+      }).catch(err => {
+        alert("Lỗi khi cập nhật: " + err.message);
+      });
     }
 
     function deleteSelectedPersonalTrips() {

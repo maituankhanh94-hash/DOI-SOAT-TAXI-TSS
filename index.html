@@ -74,7 +74,7 @@
     ];
 
     let sourceOptions = ["SQ", "G1", "VTO", "Khách Quầy", "City Tour", "ThanhLong", "JOVIA", "VDT", "MONICA", "NOVEMBER", "STELLAR", "SANNA", "LA SIESTA"];
-    let staffOptions = ["Mai Tuấn Khanh", "Nguyễn Văn An", "Trần Thị Tâm", "Lê Văn Liên", "Hoàng Đức Tài"];
+    let staffOptions = ["Mai Tuấn Khanh", "Nguyễn Văn An", "Trần Thị Tâm", "Lê Văn Liên", "Hoàng Đức Tài", "Lê Chí Bình", "Mẫn"];
     let carTypeOptions = ["Xe 4 Chỗ", "Xe 7 Chỗ", "Xe 16 Chỗ"];
     let paymentOptions = ["Nhân Viên Quầy Thu", "Thẻ", "Kế Hoạch", "Tài Xế Thu"];
     let planPaymentOptions = ["Chuyển Khoản", "Công Nợ", "Tiền Mặt"];
@@ -502,13 +502,15 @@
       const defaultDate = `${dd}/${mm}/${yyyy}`;
 
       const activePayments = (role === 'plan') ? planPaymentOptions : paymentOptions;
+      const defaultCarType = carTypeOptions.includes("Xe 7 Chỗ") ? "Xe 7 Chỗ" : (carTypeOptions[0] || "Xe 4 Chỗ");
 
       let html = '';
       for (let i = 0; i < 20; i++) {
+        const dateInputHandler = (i === 0) ? `oninput="syncBatchDates(this.value)"` : ``;
         html += `
           <tr>
             <td class="p-2.5 text-center font-bold">${i+1}</td>
-            <td class="p-2.5"><input type="text" id="date-${i}" autocomplete="off" value="${defaultDate}" class="w-full p-2 bg-slate-50 border rounded-xl font-mono text-xs"></td>
+            <td class="p-2.5"><input type="text" id="date-${i}" autocomplete="off" value="${defaultDate}" ${dateInputHandler} class="w-full p-2 bg-slate-50 border rounded-xl font-mono text-xs"></td>
             <td class="p-2.5 relative">
               <input type="text" id="staff-${i}" autocomplete="off" value="" placeholder="Gõ tên để đề xuất..." class="w-full p-2 bg-slate-50 border rounded-xl font-bold text-xs" oninput="showStaffSuggestions(this, 'staff-drop-${i}')" onfocus="showStaffSuggestions(this, 'staff-drop-${i}')">
               <div id="staff-drop-${i}"></div>
@@ -517,7 +519,7 @@
             <td class="p-2.5"><input type="text" id="p-${i}" autocomplete="off" placeholder="51H-..." class="w-full p-2 bg-slate-50 border rounded-xl font-mono font-bold uppercase text-xs"></td>
             <td class="p-2.5">
               <select id="c-${i}" class="w-full p-2 bg-slate-50 border rounded-xl font-bold text-xs">
-                ${carTypeOptions.map(ct => `<option value="${ct}">${ct}</option>`).join('')}
+                ${carTypeOptions.map(ct => `<option value="${ct}" ${ct === defaultCarType ? 'selected' : ''}>${ct}</option>`).join('')}
               </select>
             </td>
             <td class="p-2.5">
@@ -546,6 +548,15 @@
         `;
       }
       tb.innerHTML = html;
+    }
+
+    function syncBatchDates(val) {
+      for (let i = 1; i < 20; i++) {
+        const inp = document.getElementById(`date-${i}`);
+        if (inp) {
+          inp.value = val;
+        }
+      }
     }
 
     function openSnapshotReportModal(role) {
@@ -1180,7 +1191,7 @@
 
           staffNames.forEach((staffName, sIdx) => {
             const subId = 'X' + baseTimestamp + '_' + sIdx;
-            const subTicket = splitCount > 1 ? `${ticket}-${sIdx + 1}/${splitCount}` : ticket;
+            const subTicket = splitCount > 1 ? `${ticket}/${sIdx + 1}` : ticket;
 
             const tripData = {
               id: subId, dateStr: formattedDate, timeStr, ticketNumber: subTicket, originalTicket: ticket, plateNumber: plate,
@@ -1844,7 +1855,7 @@
       const roleFilter = document.getElementById('audit-role-filter') ? document.getElementById('audit-role-filter').value : 'all';
       const keyword = document.getElementById('audit-search-input') ? document.getElementById('audit-search-input').value.trim().toLowerCase() : '';
 
-      let pairMap = {};
+      let expandedTrips = [];
       allCompanyTrips.forEach(t => {
         if (roleFilter !== 'all' && t.role !== roleFilter) return;
 
@@ -1858,10 +1869,29 @@
           }
         }
 
-        const ticketKey = (t.originalTicket || t.ticketNumber || '').trim().toUpperCase();
+        const rawStaff = t.staff || '';
+        if (rawStaff.includes('+') || rawStaff.includes(',')) {
+          const names = rawStaff.split(/[+,]+/).map(s => s.trim()).filter(Boolean);
+          const splitFare = Math.round((Number(t.totalFare) || 0) / names.length);
+          names.forEach((name, nIdx) => {
+            let cloned = Object.assign({}, t);
+            cloned.staff = name;
+            cloned.totalFare = splitFare;
+            cloned.ticketNumber = `${(t.originalTicket || t.ticketNumber).split('/')[0]}/${nIdx + 1}`;
+            expandedTrips.push(cloned);
+          });
+        } else {
+          expandedTrips.push(t);
+        }
+      });
+
+      let pairMap = {};
+      expandedTrips.forEach(t => {
+        const rawTicket = (t.originalTicket || t.ticketNumber || '').trim().toUpperCase();
+        const baseTicket = rawTicket.split('/')[0].trim();
         const plate = (t.plateNumber || '').trim().toUpperCase();
-        if (ticketKey && plate) {
-          const baseTicket = ticketKey.split('-')[0];
+
+        if (baseTicket && plate) {
           const key = `${baseTicket}_${plate}_${normalizeDateInput(t.dateStr)}`;
           if (!pairMap[key]) pairMap[key] = [];
           pairMap[key].push(t);
@@ -1894,7 +1924,7 @@
       groupList.forEach(group => {
         group.sort((a, b) => (a.role === 'pos' ? -1 : 1));
 
-        const posTrips = group.filter(x => x.role === 'pos');
+        const posTrips = group.filter(x => x.role === 'pos' || x.role === 'plan');
         const driverTrips = group.filter(x => x.role === 'driver');
 
         let statusHtml = '<span class="px-2 py-1 bg-slate-100 text-slate-600 font-bold rounded-lg text-[10px]">⏳ Đơn Lẻ</span>';
@@ -2002,7 +2032,7 @@
       const roleFilter = document.getElementById('audit-role-filter') ? document.getElementById('audit-role-filter').value : 'all';
       const keyword = document.getElementById('audit-search-input') ? document.getElementById('audit-search-input').value.trim().toLowerCase() : '';
 
-      let pairMap = {};
+      let expandedTrips = [];
       allCompanyTrips.forEach(t => {
         if (roleFilter !== 'all' && t.role !== roleFilter) return;
 
@@ -2016,10 +2046,29 @@
           }
         }
 
-        const ticketKey = (t.originalTicket || t.ticketNumber || '').trim().toUpperCase();
+        const rawStaff = t.staff || '';
+        if (rawStaff.includes('+') || rawStaff.includes(',')) {
+          const names = rawStaff.split(/[+,]+/).map(s => s.trim()).filter(Boolean);
+          const splitFare = Math.round((Number(t.totalFare) || 0) / names.length);
+          names.forEach((name, nIdx) => {
+            let cloned = Object.assign({}, t);
+            cloned.staff = name;
+            cloned.totalFare = splitFare;
+            cloned.ticketNumber = `${(t.originalTicket || t.ticketNumber).split('/')[0]}/${nIdx + 1}`;
+            expandedTrips.push(cloned);
+          });
+        } else {
+          expandedTrips.push(t);
+        }
+      });
+
+      let pairMap = {};
+      expandedTrips.forEach(t => {
+        const rawTicket = (t.originalTicket || t.ticketNumber || '').trim().toUpperCase();
+        const baseTicket = rawTicket.split('/')[0].trim();
         const plate = (t.plateNumber || '').trim().toUpperCase();
-        if (ticketKey && plate) {
-          const baseTicket = ticketKey.split('-')[0];
+
+        if (baseTicket && plate) {
           const key = `${baseTicket}_${plate}_${normalizeDateInput(t.dateStr)}`;
           if (!pairMap[key]) pairMap[key] = [];
           pairMap[key].push(t);
@@ -2032,7 +2081,7 @@
       Object.values(pairMap).forEach(group => {
         group.sort((a, b) => (a.role === 'pos' ? -1 : 1));
 
-        const posTrips = group.filter(x => x.role === 'pos');
+        const posTrips = group.filter(x => x.role === 'pos' || x.role === 'plan');
         const driverTrips = group.filter(x => x.role === 'driver');
 
         let auditStatusStr = 'Đơn Lẻ';

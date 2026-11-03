@@ -69,13 +69,15 @@
     
     let userAccounts = [
       { user: 'TSS01', pass: '123', role: 'pos' },
-      { user: 'TSS02', pass: '123', role: 'driver' }
+      { user: 'TSS02', pass: '123', role: 'driver' },
+      { user: 'TSS03', pass: '123', role: 'plan' }
     ];
 
     let sourceOptions = ["SQ", "G1", "VTO", "Khách Quầy", "City Tour", "ThanhLong", "JOVIA", "VDT", "MONICA", "NOVEMBER", "STELLAR", "SANNA", "LA SIESTA"];
     let staffOptions = ["Mai Tuấn Khanh", "Nguyễn Văn An", "Trần Thị Tâm", "Lê Văn Liên", "Hoàng Đức Tài"];
     let carTypeOptions = ["Xe 4 Chỗ", "Xe 7 Chỗ", "Xe 16 Chỗ"];
     let paymentOptions = ["Nhân Viên Quầy Thu", "Thẻ", "Kế Hoạch", "Tài Xế Thu"];
+    let planPaymentOptions = ["Chuyển Khoản", "Công Nợ", "Tiền Mặt"];
     
     let lockHourSetting = 8; 
     const TERMINAL_OPTIONS = ["T2", "T1", "T3"];
@@ -155,6 +157,16 @@
         }
       });
 
+      rtdb.ref('settings/planPayments').on('value', snap => {
+        if (snap.val()) {
+          const val = snap.val();
+          planPaymentOptions = Array.isArray(val) ? val : Object.values(val);
+          if (loggedInUser && loggedInUser.role === 'manager') renderPlanPaymentsTable();
+        } else {
+          rtdb.ref('settings/planPayments').set(planPaymentOptions);
+        }
+      });
+
       rtdb.ref('settings/lockHour').on('value', snap => {
         if (snap.val() !== null) {
           lockHourSetting = parseInt(snap.val(), 10);
@@ -202,9 +214,10 @@
             <h1 class="text-2xl font-extrabold text-slate-900">HỆ THỐNG ĐIỀU XE SÂN BAY TSS</h1>
             <p class="text-xs text-slate-500 max-w-sm mx-auto">Chọn phân vùng làm việc của bạn bên dưới:</p>
           </div>
-          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 w-full max-w-md">
+          <div class="grid grid-cols-1 sm:grid-cols-4 gap-3 w-full max-w-2xl">
             <button onclick="promptLogin('pos')" class="p-4 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-2xl shadow-lg">🚖 Bán Vé (Quầy)</button>
             <button onclick="promptLogin('driver')" class="p-4 bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs rounded-2xl shadow-lg">🚗 Cổng Chủ Xe</button>
+            <button onclick="promptLogin('plan')" class="p-4 bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs rounded-2xl shadow-lg">📋 Team Kế Hoạch</button>
             <button onclick="promptLogin('manager')" class="p-4 bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs rounded-2xl shadow-lg">📊 Trang Quản Lý</button>
           </div>
         </div>
@@ -255,14 +268,19 @@
     }
 
     function promptUserLoginModal(role) {
-      const title = `Đăng Nhập ${role === 'pos' ? 'Bán Vé' : 'Tài Xế'}`;
+      const roleTitles = {
+        'pos': 'Bán Vé',
+        'driver': 'Tài Xế',
+        'plan': 'Team Kế Hoạch'
+      };
+      const title = `Đăng Nhập ${roleTitles[role] || role}`;
       const html = `
         <div class="fixed inset-0 bg-slate-900/80 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
           <div class="bg-white rounded-3xl shadow-2xl max-w-xs w-full p-6 text-center space-y-4">
             <div class="bg-blue-600 text-white w-12 h-12 rounded-2xl flex items-center justify-center mx-auto text-xl font-bold">🔐</div>
             <h3 class="text-sm font-bold text-slate-900">${title}</h3>
             <div class="space-y-2 text-left">
-              <input type="text" id="modal-user" autocomplete="off" placeholder="Tài khoản (VD: TSS01)..." class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold">
+              <input type="text" id="modal-user" autocomplete="off" placeholder="Tài khoản..." class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold">
               <input type="password" id="modal-pwd" autocomplete="off" placeholder="Mật khẩu..." class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold" onkeydown="if(event.key==='Enter') executeUserLogin('${role}')">
             </div>
             <div class="flex space-x-2 pt-1">
@@ -282,13 +300,14 @@
       const found = userAccounts.find(x => x.user === u && x.pass === p && x.role === role);
       if (found) {
         loggedInUser = found;
-        document.getElementById('header-status').innerText = `${role === 'pos' ? 'Bán Vé' : 'Tài Xế'}: ${found.user}`;
+        const roleLabels = { 'pos': 'Bán Vé', 'driver': 'Tài Xế', 'plan': 'Team Kế Hoạch' };
+        document.getElementById('header-status').innerText = `${roleLabels[role] || role}: ${found.user}`;
         document.getElementById('btn-logout').classList.remove('hidden');
 
         rtdb.ref(`users_trips/${loggedInUser.user}`).on('value', s => {
           personalTrips = s.val() ? Object.values(s.val()) : [];
-          updatePersonalSummary();
-          renderActiveWorksheetTrips();
+          updatePersonalSummary(role);
+          renderActiveWorksheetTrips(role);
         });
 
         renderWorksheetView(role);
@@ -356,6 +375,10 @@
 
     function renderWorksheetView(role) {
       const isPos = role === 'pos';
+      const isPlan = role === 'plan';
+      const themeColorClass = isPlan ? 'text-purple-900' : (isPos ? 'text-blue-900' : 'text-amber-800');
+      const btnThemeClass = isPlan ? 'bg-purple-600 hover:bg-purple-700' : (isPos ? 'bg-blue-600 hover:bg-blue-700' : 'bg-amber-600 hover:bg-amber-700');
+
       document.getElementById('main-container').innerHTML = `
         <div class="space-y-4 pb-20 w-full">
           <!-- NÚT BÁO CÁO NHANH ĐẦU TRANG -->
@@ -364,7 +387,7 @@
               <h2 class="text-sm font-extrabold uppercase">📸 Báo Cáo Nhanh & Lịch Sử Hàng Ngày</h2>
               <p class="text-[11px] opacity-90">Bấm nút bên cạnh để mở bảng chụp hình báo cáo theo ngày tùy chọn.</p>
             </div>
-            <button onclick="openSnapshotReportModal()" class="px-5 py-2.5 bg-white text-blue-700 hover:bg-slate-100 font-extrabold text-xs rounded-xl shadow transition-all flex items-center space-x-2">
+            <button onclick="openSnapshotReportModal('${role}')" class="px-5 py-2.5 bg-white text-blue-700 hover:bg-slate-100 font-extrabold text-xs rounded-xl shadow transition-all flex items-center space-x-2">
               <span>📸 Xem Lịch Sử Đơn Hàng & Doanh Thu Theo Ngày</span>
             </button>
           </div>
@@ -372,12 +395,12 @@
           <!-- BẢNG 1: TỔNG KẾT DOANH THU CÓ CHỌN NGÀY -->
           <div class="bg-white p-4 sm:p-5 rounded-3xl shadow-md border border-slate-200 space-y-3">
             <div class="flex flex-col sm:flex-row items-center justify-between border-b pb-3 gap-3">
-              <h3 class="text-xs sm:text-sm font-extrabold ${isPos ? 'text-blue-900' : 'text-amber-800'} uppercase">📊 Tổng Kết Doanh Thu Theo Ngày (${loggedInUser.user})</h3>
+              <h3 class="text-xs sm:text-sm font-extrabold ${themeColorClass} uppercase">📊 Tổng Kết Doanh Thu Theo Ngày (${loggedInUser.user})</h3>
               <div class="flex items-center space-x-2">
                 <label class="text-xs font-bold text-slate-600">Chọn ngày xem:</label>
-                <input type="date" id="summary-date-picker" class="px-3 py-1.5 bg-slate-50 border rounded-xl font-mono text-xs font-bold" onchange="updatePersonalSummary()">
-                <button onclick="resetSummaryDateToToday()" class="px-2.5 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl text-xs font-bold">Hôm nay</button>
-                <button onclick="openMonthlyHistoryModal()" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-sm">📅 Xem Tháng</button>
+                <input type="date" id="summary-date-picker" class="px-3 py-1.5 bg-slate-50 border rounded-xl font-mono text-xs font-bold" onchange="updatePersonalSummary('${role}')">
+                <button onclick="resetSummaryDateToToday('${role}')" class="px-2.5 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl text-xs font-bold">Hôm nay</button>
+                <button onclick="openMonthlyHistoryModal('${role}')" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-sm">📅 Xem Tháng</button>
               </div>
             </div>
             <div class="grid grid-cols-1 sm:grid-cols-5 gap-3" id="summary-cards-container"></div>
@@ -386,8 +409,8 @@
           <!-- BẢNG 2: NHẬP HÀNG LOẠT 20 ĐƠN -->
           <div class="bg-white p-4 sm:p-6 rounded-3xl shadow-xl border border-slate-200 space-y-4">
             <div class="flex flex-col sm:flex-row items-center justify-between gap-3 border-b pb-4">
-              <h3 class="text-xs sm:text-sm font-extrabold uppercase ${isPos ? 'text-blue-900' : 'text-amber-800'}">📋 Nhập Hàng Loạt 20 Dòng Nhanh</h3>
-              <button onclick="submitBatch('${role}')" class="px-5 py-2.5 ${isPos ? 'bg-blue-600 hover:bg-blue-700' : 'bg-amber-600 hover:bg-amber-700'} text-white font-extrabold text-xs rounded-xl shadow-lg transition-all">🚀 Lưu Đơn Lên Cloud</button>
+              <h3 class="text-xs sm:text-sm font-extrabold uppercase ${themeColorClass}">📋 Nhập Hàng Loạt 20 Dòng Nhanh</h3>
+              <button onclick="submitBatch('${role}')" class="px-5 py-2.5 ${btnThemeClass} text-white font-extrabold text-xs rounded-xl shadow-lg transition-all">🚀 Lưu Đơn Lên Cloud</button>
             </div>
             <div class="overflow-x-auto custom-scrollbar max-h-[450px]">
               <table class="w-full text-left border-collapse min-w-[1700px]">
@@ -421,8 +444,8 @@
               </div>
               <div class="flex items-center space-x-2">
                 <label class="text-xs font-bold text-slate-600">Chọn ngày xem:</label>
-                <input type="date" id="filter-history-date" class="px-3 py-1.5 bg-slate-50 border rounded-xl font-mono text-xs font-bold" onchange="renderActiveWorksheetTrips()">
-                <button onclick="resetHistoryDateToToday()" class="px-2.5 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl text-xs font-bold">Hôm nay</button>
+                <input type="date" id="filter-history-date" class="px-3 py-1.5 bg-slate-50 border rounded-xl font-mono text-xs font-bold" onchange="renderActiveWorksheetTrips('${role}')">
+                <button onclick="resetHistoryDateToToday('${role}')" class="px-2.5 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl text-xs font-bold">Hôm nay</button>
               </div>
             </div>
             <div class="overflow-x-auto custom-scrollbar max-h-[380px]">
@@ -465,12 +488,67 @@
       const histDateInp = document.getElementById('filter-history-date');
       if(histDateInp) histDateInp.value = todayFormatted;
 
-      updatePersonalSummary();
-      renderActiveWorksheetTrips();
+      updatePersonalSummary(role);
+      renderActiveWorksheetTrips(role);
     }
 
-    // MODAL XEM LỊCH SỬ VÀ DOANH THU THEO NGÀY (DỄ CHỤP ẢNH BÁO CÁO)
-    function openSnapshotReportModal() {
+    function renderBatchRows(role) {
+      const tb = document.getElementById('tbody-batch');
+      if (!tb) return;
+      const now = new Date();
+      const dd = String(now.getDate()).padStart(2, '0');
+      const mm = String(now.getMonth() + 1).padStart(2, '0');
+      const yyyy = now.getFullYear();
+      const defaultDate = `${dd}/${mm}/${yyyy}`;
+
+      const activePayments = (role === 'plan') ? planPaymentOptions : paymentOptions;
+
+      let html = '';
+      for (let i = 0; i < 20; i++) {
+        html += `
+          <tr>
+            <td class="p-2.5 text-center font-bold">${i+1}</td>
+            <td class="p-2.5"><input type="text" id="date-${i}" autocomplete="off" value="${defaultDate}" class="w-full p-2 bg-slate-50 border rounded-xl font-mono text-xs"></td>
+            <td class="p-2.5 relative">
+              <input type="text" id="staff-${i}" autocomplete="off" value="" placeholder="Gõ tên để đề xuất..." class="w-full p-2 bg-slate-50 border rounded-xl font-bold text-xs" oninput="showStaffSuggestions(this, 'staff-drop-${i}')" onfocus="showStaffSuggestions(this, 'staff-drop-${i}')">
+              <div id="staff-drop-${i}"></div>
+            </td>
+            <td class="p-2.5"><input type="text" id="t-${i}" autocomplete="off" placeholder="Phiếu..." class="w-full p-2 bg-slate-50 border rounded-xl font-mono font-bold text-xs" onfocus="handleSmartTicketFocus(${i})"></td>
+            <td class="p-2.5"><input type="text" id="p-${i}" autocomplete="off" placeholder="51H-..." class="w-full p-2 bg-slate-50 border rounded-xl font-mono font-bold uppercase text-xs"></td>
+            <td class="p-2.5">
+              <select id="c-${i}" class="w-full p-2 bg-slate-50 border rounded-xl font-bold text-xs">
+                ${carTypeOptions.map(ct => `<option value="${ct}">${ct}</option>`).join('')}
+              </select>
+            </td>
+            <td class="p-2.5">
+              <select id="src-${i}" class="w-full p-2 bg-slate-50 border rounded-xl font-bold text-xs">
+                ${sourceOptions.map(s => `<option value="${s}">${s}</option>`).join('')}
+              </select>
+            </td>
+            <td class="p-2.5">
+              <select id="pick-${i}" class="w-full p-2 bg-slate-50 border rounded-xl font-bold text-xs">
+                ${TERMINAL_OPTIONS.map(t => `<option value="${t}">Ga ${t}</option>`).join('')}
+              </select>
+            </td>
+            <td class="p-2.5">
+              <input type="text" id="d-${i}" autocomplete="off" placeholder="Nhập điểm đến..." class="w-full p-2 bg-amber-50 border border-amber-300 rounded-xl font-semibold text-xs">
+            </td>
+            <td class="p-2.5"><input type="text" id="f-${i}" autocomplete="off" placeholder="Số tiền..." onblur="formatCurrSmartInput(this)" class="w-full p-2 bg-emerald-50 border border-emerald-300 rounded-xl font-extrabold text-emerald-800 text-right text-xs"></td>
+            <td class="p-2.5">
+              <select id="m-${i}" class="w-full p-2 bg-slate-50 border rounded-xl font-bold text-xs">
+                ${activePayments.map(opt => `<option value="${opt}">${opt}</option>`).join('')}
+              </select>
+            </td>
+            <td class="p-2.5">
+              <input type="text" id="note-${i}" autocomplete="off" placeholder="Ghi chú thêm..." class="w-full p-2 bg-slate-50 border rounded-xl text-xs">
+            </td>
+          </tr>
+        `;
+      }
+      tb.innerHTML = html;
+    }
+
+    function openSnapshotReportModal(role) {
       const now = new Date();
       const yyyy = now.getFullYear();
       const mm = String(now.getMonth() + 1).padStart(2, '0');
@@ -490,7 +568,7 @@
                 </div>
               </div>
               <div class="flex items-center space-x-2">
-                <input type="date" id="snapshot-date-picker" value="${todayInputVal}" class="px-3 py-1.5 bg-slate-50 border rounded-xl font-mono text-xs font-bold" onchange="updateSnapshotModalData()">
+                <input type="date" id="snapshot-date-picker" value="${todayInputVal}" class="px-3 py-1.5 bg-slate-50 border rounded-xl font-mono text-xs font-bold" onchange="updateSnapshotModalData('${role}')">
                 <button onclick="document.getElementById('snapshot-report-modal').remove()" class="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold">Đóng</button>
               </div>
             </div>
@@ -519,19 +597,17 @@
                     <th class="p-2.5 text-right">Tổng Tiền</th>
                   </tr>
                 </thead>
-                <tbody id="snapshot-tbody" class="divide-y divide-slate-200">
-                  <!-- Dữ liệu render động -->
-                </tbody>
+                <tbody id="snapshot-tbody" class="divide-y divide-slate-200"></tbody>
               </table>
             </div>
           </div>
         </div>
       `;
       document.getElementById('main-container').insertAdjacentHTML('beforeend', modalHtml);
-      updateSnapshotModalData();
+      updateSnapshotModalData(role);
     }
 
-    function updateSnapshotModalData() {
+    function updateSnapshotModalData(role) {
       const dateInp = document.getElementById('snapshot-date-picker');
       const titleEl = document.getElementById('snapshot-title');
       const revEl = document.getElementById('snapshot-total-rev');
@@ -539,7 +615,7 @@
       const tbody = document.getElementById('snapshot-tbody');
       if (!dateInp || !tbody) return;
 
-      const rawVal = dateInp.value; // YYYY-MM-DD
+      const rawVal = dateInp.value;
       const parts = rawVal.split('-');
       let targetDateStr = '';
       if (parts.length === 3) {
@@ -554,6 +630,8 @@
       if(revEl) revEl.innerText = totalSum.toLocaleString('vi-VN') + ' ₫';
       if(countEl) countEl.innerText = filtered.length + ' đơn';
 
+      const activePayments = (role === 'plan') ? planPaymentOptions : paymentOptions;
+
       if (filtered.length === 0) {
         tbody.innerHTML = `<tr><td colspan="7" class="p-4 text-center text-slate-400">Không có đơn hàng nào vào ngày ${targetDateStr}.</td></tr>`;
         return;
@@ -565,14 +643,14 @@
           <td class="p-2.5 font-mono font-bold text-blue-600">${t.ticketNumber}</td>
           <td class="p-2.5 font-mono font-bold uppercase">${t.plateNumber}</td>
           <td class="p-2.5">${t.destination}</td>
-          <td class="p-2.5 font-bold">${t.paymentMethod || paymentOptions[0]}</td>
+          <td class="p-2.5 font-bold">${t.paymentMethod || activePayments[0]}</td>
           <td class="p-2.5 text-slate-600">${t.note || '--'}</td>
           <td class="p-2.5 text-right font-bold text-emerald-600">${Number(t.totalFare || 0).toLocaleString('vi-VN')} ₫</td>
         </tr>
       `).join('');
     }
 
-    function resetSummaryDateToToday() {
+    function resetSummaryDateToToday(role) {
       const sumDateInp = document.getElementById('summary-date-picker');
       if(sumDateInp) {
         const todayObj = new Date();
@@ -580,11 +658,11 @@
         const mm = String(todayObj.getMonth() + 1).padStart(2, '0');
         const dd = String(todayObj.getDate()).padStart(2, '0');
         sumDateInp.value = `${yyyy}-${mm}-${dd}`;
-        updatePersonalSummary();
+        updatePersonalSummary(role);
       }
     }
 
-    function resetHistoryDateToToday() {
+    function resetHistoryDateToToday(role) {
       const histDateInp = document.getElementById('filter-history-date');
       if(histDateInp) {
         const todayObj = new Date();
@@ -592,14 +670,15 @@
         const mm = String(todayObj.getMonth() + 1).padStart(2, '0');
         const dd = String(todayObj.getDate()).padStart(2, '0');
         histDateInp.value = `${yyyy}-${mm}-${dd}`;
-        renderActiveWorksheetTrips();
+        renderActiveWorksheetTrips(role);
       }
     }
 
-    function openMonthlyHistoryModal() {
+    function openMonthlyHistoryModal(role) {
       const now = new Date();
       const currentMonth = now.getMonth() + 1;
       const currentYear = now.getFullYear();
+      const activePayments = (role === 'plan') ? planPaymentOptions : paymentOptions;
 
       let monthTrips = personalTrips.filter(t => {
         if (!t.dateStr) return false;
@@ -657,7 +736,7 @@
                         <td class="p-2.5 font-mono font-bold text-blue-600">${t.ticketNumber}</td>
                         <td class="p-2.5 font-mono font-bold uppercase">${t.plateNumber}</td>
                         <td class="p-2.5">${t.destination}</td>
-                        <td class="p-2.5 font-bold">${t.paymentMethod || paymentOptions[0]}</td>
+                        <td class="p-2.5 font-bold">${t.paymentMethod || activePayments[0]}</td>
                         <td class="p-2.5 text-slate-600">${t.note || '--'}</td>
                         <td class="p-2.5 text-right font-bold text-emerald-600">${Number(t.totalFare || 0).toLocaleString('vi-VN')} ₫</td>
                       </tr>
@@ -671,7 +750,7 @@
       document.getElementById('main-container').insertAdjacentHTML('beforeend', html);
     }
 
-    function updatePersonalSummary() {
+    function updatePersonalSummary(role) {
       if (!loggedInUser || loggedInUser.role === 'manager') return;
 
       const sumDateInp = document.getElementById('summary-date-picker');
@@ -689,17 +768,18 @@
       });
 
       const totalSum = selectedItems.reduce((acc, t) => acc + (Number(t.totalFare) || 0), 0);
+      const activePayments = (role === 'plan') ? planPaymentOptions : paymentOptions;
       
       let methodSums = {};
-      paymentOptions.forEach(opt => methodSums[opt] = 0);
+      activePayments.forEach(opt => methodSums[opt] = 0);
 
       selectedItems.forEach(t => {
         const fare = Number(t.totalFare || 0);
-        const method = t.paymentMethod || paymentOptions[0];
+        const method = t.paymentMethod || activePayments[0];
         if (methodSums[method] !== undefined) {
           methodSums[method] += fare;
         } else {
-          methodSums[paymentOptions[0]] = (methodSums[paymentOptions[0]] || 0) + fare;
+          methodSums[activePayments[0]] = (methodSums[activePayments[0]] || 0) + fare;
         }
       });
 
@@ -715,7 +795,7 @@
       `;
 
       const colors = ['bg-blue-50 border-blue-200 text-blue-800', 'bg-indigo-50 border-indigo-200 text-indigo-800', 'bg-amber-50 border-amber-200 text-amber-800', 'bg-purple-50 border-purple-200 text-purple-800', 'bg-rose-50 border-rose-200 text-rose-800'];
-      paymentOptions.forEach((opt, idx) => {
+      activePayments.forEach((opt, idx) => {
         const cls = colors[idx % colors.length];
         cardsHtml += `
           <div class="${cls} border p-3.5 rounded-2xl shadow-sm">
@@ -728,7 +808,7 @@
       container.innerHTML = cardsHtml;
     }
 
-    function renderActiveWorksheetTrips() {
+    function renderActiveWorksheetTrips(role) {
       const tb = document.getElementById('tbody-personal-trips');
       if (!tb || !loggedInUser) return;
 
@@ -752,6 +832,7 @@
       }
 
       sortTripsByDateAndTime(filteredTrips);
+      const activePayments = (role === 'plan') ? planPaymentOptions : paymentOptions;
 
       tb.innerHTML = filteredTrips.map(t => {
         const isDeletable = canDeleteTrip(t.timestamp);
@@ -761,7 +842,7 @@
           : `<span class="text-slate-400 font-semibold italic text-[11px]">Đã Khóa</span>`;
         
         const editBtn = isDeletable
-          ? `<button type="button" onclick="openEditTripModal('${t.id}')" class="px-2 py-1 bg-blue-50 hover:bg-blue-100 text-blue-600 font-bold rounded-lg text-[11px] cursor-pointer ml-1">✏️ Sửa</button>`
+          ? `<button type="button" onclick="openEditTripModal('${t.id}', '${role}')" class="px-2 py-1 bg-blue-50 hover:bg-blue-100 text-blue-600 font-bold rounded-lg text-[11px] cursor-pointer ml-1">✏️ Sửa</button>`
           : '';
 
         return `
@@ -776,7 +857,7 @@
             <td class="p-2.5 font-bold">${t.source || '--'}</td>
             <td class="p-2.5 font-bold">${t.pickup ? 'Ga ' + t.pickup : '--'}</td>
             <td class="p-2.5">${t.destination}</td>
-            <td class="p-2.5 font-bold text-slate-700">${t.paymentMethod || paymentOptions[0]}</td>
+            <td class="p-2.5 font-bold text-slate-700">${t.paymentMethod || activePayments[0]}</td>
             <td class="p-2.5 text-slate-600">${t.note || '--'}</td>
             <td class="p-2.5 text-right font-bold text-emerald-600">${Number(t.totalFare || 0).toLocaleString('vi-VN')} ₫</td>
             <td class="p-2.5 text-center whitespace-nowrap">${editBtn} ${deleteBtn}</td>
@@ -785,7 +866,7 @@
       }).join('');
     }
 
-    function openEditTripModal(id) {
+    function openEditTripModal(id, role) {
       const trip = personalTrips.find(x => x.id === id);
       if (!trip) return;
 
@@ -799,6 +880,7 @@
 
       let parts = normalizeDateInput(trip.dateStr).split('/');
       let dateInputVal = parts.length === 3 ? `${parts[2]}-${parts[1]}-${parts[0]}` : '';
+      const activePayments = (role === 'plan') ? planPaymentOptions : paymentOptions;
 
       const modalHtml = `
         <div id="edit-trip-modal" class="fixed inset-0 bg-slate-900/80 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
@@ -861,7 +943,7 @@
                 <div>
                   <label class="font-bold text-slate-600">Thanh Toán:</label>
                   <select id="edit-modal-payment" class="w-full mt-1 p-2.5 bg-slate-50 border rounded-xl font-bold">
-                    ${paymentOptions.map(opt => `<option value="${opt}" ${(trip.paymentMethod || paymentOptions[0]) === opt ? 'selected' : ''}>${opt}</option>`).join('')}
+                    ${activePayments.map(opt => `<option value="${opt}" ${(trip.paymentMethod || activePayments[0]) === opt ? 'selected' : ''}>${opt}</option>`).join('')}
                   </select>
                 </div>
               </div>
@@ -872,7 +954,7 @@
             </div>
 
             <div class="flex space-x-2 pt-2">
-              <button onclick="saveEditedTrip('${trip.id}')" class="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-xs">💾 Lưu Thay Đổi</button>
+              <button onclick="saveEditedTrip('${trip.id}', '${role}')" class="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-xs">💾 Lưu Thay Đổi</button>
               <button onclick="document.getElementById('edit-trip-modal').remove()" class="w-full py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold text-xs">Hủy</button>
             </div>
           </div>
@@ -881,7 +963,7 @@
       document.body.insertAdjacentHTML('beforeend', modalHtml);
     }
 
-    function saveEditedTrip(id) {
+    function saveEditedTrip(id, role) {
       const trip = personalTrips.find(x => x.id === id);
       if (!trip) return;
 
@@ -922,11 +1004,16 @@
       rtdb.ref().update(updates).then(() => {
         alert("Đã cập nhật đơn hàng thành công!");
         document.getElementById('edit-trip-modal').remove();
-        updatePersonalSummary();
-        renderActiveWorksheetTrips();
+        updatePersonalSummary(role);
+        renderActiveWorksheetTrips(role);
       }).catch(err => {
         alert("Lỗi khi cập nhật: " + err.message);
       });
+    }
+
+    function toggleSelectAllPersonal(masterCheckbox) {
+      const checkboxes = document.querySelectorAll('.personal-trip-checkbox');
+      checkboxes.forEach(cb => cb.checked = masterCheckbox.checked);
     }
 
     function deleteSelectedPersonalTrips() {
@@ -1012,60 +1099,6 @@
       });
     }
 
-    function renderBatchRows(role) {
-      const tb = document.getElementById('tbody-batch');
-      if (!tb) return;
-      const now = new Date();
-      const dd = String(now.getDate()).padStart(2, '0');
-      const mm = String(now.getMonth() + 1).padStart(2, '0');
-      const yyyy = now.getFullYear();
-      const defaultDate = `${dd}/${mm}/${yyyy}`;
-
-      let html = '';
-      for (let i = 0; i < 20; i++) {
-        html += `
-          <tr>
-            <td class="p-2.5 text-center font-bold">${i+1}</td>
-            <td class="p-2.5"><input type="text" id="date-${i}" autocomplete="off" value="${defaultDate}" class="w-full p-2 bg-slate-50 border rounded-xl font-mono text-xs"></td>
-            <td class="p-2.5 relative">
-              <input type="text" id="staff-${i}" autocomplete="off" value="" placeholder="Gõ tên để đề xuất..." class="w-full p-2 bg-slate-50 border rounded-xl font-bold text-xs" oninput="showStaffSuggestions(this, 'staff-drop-${i}')" onfocus="showStaffSuggestions(this, 'staff-drop-${i}')">
-              <div id="staff-drop-${i}"></div>
-            </td>
-            <td class="p-2.5"><input type="text" id="t-${i}" autocomplete="off" placeholder="Phiếu..." class="w-full p-2 bg-slate-50 border rounded-xl font-mono font-bold text-xs" onfocus="handleSmartTicketFocus(${i})"></td>
-            <td class="p-2.5"><input type="text" id="p-${i}" autocomplete="off" placeholder="51H-..." class="w-full p-2 bg-slate-50 border rounded-xl font-mono font-bold uppercase text-xs"></td>
-            <td class="p-2.5">
-              <select id="c-${i}" class="w-full p-2 bg-slate-50 border rounded-xl font-bold text-xs">
-                ${carTypeOptions.map(ct => `<option value="${ct}">${ct}</option>`).join('')}
-              </select>
-            </td>
-            <td class="p-2.5">
-              <select id="src-${i}" class="w-full p-2 bg-slate-50 border rounded-xl font-bold text-xs">
-                ${sourceOptions.map(s => `<option value="${s}">${s}</option>`).join('')}
-              </select>
-            </td>
-            <td class="p-2.5">
-              <select id="pick-${i}" class="w-full p-2 bg-slate-50 border rounded-xl font-bold text-xs">
-                ${TERMINAL_OPTIONS.map(t => `<option value="${t}">Ga ${t}</option>`).join('')}
-              </select>
-            </td>
-            <td class="p-2.5">
-              <input type="text" id="d-${i}" autocomplete="off" placeholder="Nhập điểm đến..." class="w-full p-2 bg-amber-50 border border-amber-300 rounded-xl font-semibold text-xs">
-            </td>
-            <td class="p-2.5"><input type="text" id="f-${i}" autocomplete="off" placeholder="Số tiền..." onblur="formatCurrSmartInput(this)" class="w-full p-2 bg-emerald-50 border border-emerald-300 rounded-xl font-extrabold text-emerald-800 text-right text-xs"></td>
-            <td class="p-2.5">
-              <select id="m-${i}" class="w-full p-2 bg-slate-50 border rounded-xl font-bold text-xs">
-                ${paymentOptions.map(opt => `<option value="${opt}">${opt}</option>`).join('')}
-              </select>
-            </td>
-            <td class="p-2.5">
-              <input type="text" id="note-${i}" autocomplete="off" placeholder="Ghi chú thêm..." class="w-full p-2 bg-slate-50 border rounded-xl text-xs">
-            </td>
-          </tr>
-        `;
-      }
-      tb.innerHTML = html;
-    }
-
     function showStaffSuggestions(input, dropId) {
       const q = input.value.trim().toLowerCase();
       const drop = document.getElementById(dropId);
@@ -1108,7 +1141,7 @@
       let count = 0;
       let updates = {};
       let duplicateCount = 0;
-      let lastFormattedDate = ''; // KHỞI TẠO ĐÚNG PHẠM VI AN TOÀN
+      let lastFormattedDate = '';
 
       for (let i = 0; i < 20; i++) {
         let rawDate = document.getElementById(`date-${i}`).value.trim();
@@ -1174,7 +1207,7 @@
           if (histInput && lastFormattedDate) {
             const parts = formatDateForInput(lastFormattedDate);
             if (parts) histInput.value = parts;
-            renderActiveWorksheetTrips();
+            renderActiveWorksheetTrips(role);
           }
         }).catch(err => {
           alert("Lỗi lưu dữ liệu: " + err.message);
@@ -1198,7 +1231,7 @@
             <button onclick="exportCustomExcel()" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-sm">📥 Xuất Excel (Đã Lọc & Có Thanh Toán, Ghi Chú)</button>
           </div>
 
-          <!-- MỤC 0: BÁO CÁO TỔNG DOANH THU TRONG NGÀY (CÓ NÚT HÔM NAY) -->
+          <!-- MỤC 0: BÁO CÁO TỔNG DOANH THU TRONG NGÀY -->
           <div class="bg-white p-4 sm:p-6 rounded-3xl shadow-md border border-slate-200 space-y-4">
             <div class="flex flex-col sm:flex-row items-center justify-between border-b pb-3 gap-3">
               <h4 class="text-xs sm:text-sm font-extrabold text-slate-900 uppercase">💰 Báo Cáo Tổng Doanh Thu Theo Ngày</h4>
@@ -1264,12 +1297,12 @@
             <div class="flex flex-wrap gap-2 pt-2" id="cartype-tag-list"></div>
           </div>
 
-          <!-- MỤC 4: QUẢN LÝ HÌNH THỨC THANH TOÁN -->
+          <!-- MỤC 4: QUẢN LÝ HÌNH THỨC THANH TOÁN (BÁN VÉ) -->
           <div class="bg-white rounded-3xl shadow-md border border-slate-200 p-4 sm:p-5 space-y-3">
-            <h4 class="text-xs font-extrabold text-blue-900 uppercase">💳 Quản Lý Hình Thức Thanh Toán</h4>
+            <h4 class="text-xs font-extrabold text-blue-900 uppercase">💳 Quản Lý Hình Thức Thanh Toán (Bán Vé)</h4>
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
               <div class="space-y-2">
-                <input type="text" id="new-payment-name" autocomplete="off" placeholder="Thêm 1 hình thức thanh toán..." class="w-full p-2.5 bg-slate-50 border rounded-xl font-bold">
+                <input type="text" id="new-payment-name" autocomplete="off" placeholder="Thêm 1 hình thức..." class="w-full p-2.5 bg-slate-50 border rounded-xl font-bold">
                 <button onclick="addNewPayment()" class="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold">+ Thêm Một Hình Thức</button>
               </div>
               <div class="space-y-2">
@@ -1280,14 +1313,34 @@
             <div class="flex flex-wrap gap-2 pt-2" id="payment-tag-list"></div>
           </div>
 
+          <!-- MỤC 4.1: QUẢN LÝ HÌNH THỨC THANH TOÁN TEAM KẾ HOẠCH -->
+          <div class="bg-white rounded-3xl shadow-md border border-slate-200 p-4 sm:p-5 space-y-3">
+            <h4 class="text-xs font-extrabold text-purple-900 uppercase">📋 QUẢN LÝ HÌNH THỨC THANH TOÁN Team kế hoạch</h4>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+              <div class="space-y-2">
+                <input type="text" id="new-planpayment-name" autocomplete="off" placeholder="Thêm 1 hình thức cho Team Kế Hoạch..." class="w-full p-2.5 bg-slate-50 border rounded-xl font-bold">
+                <button onclick="addNewPlanPayment()" class="w-full py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-xl font-bold">+ Thêm Một Hình Thức</button>
+              </div>
+              <div class="space-y-2">
+                <textarea id="bulk-planpayment-text" placeholder="Dán danh sách dạng cột vào đây..." class="w-full p-2 bg-slate-50 border rounded-xl font-bold h-16 text-xs"></textarea>
+                <button onclick="addBulkPlanPayment()" class="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold">📥 Thêm Hàng Loạt Từ Cột</button>
+              </div>
+            </div>
+            <div class="flex flex-wrap gap-2 pt-2" id="planpayment-tag-list"></div>
+          </div>
+
           <!-- MỤC 5: QUẢN LÝ TÀI KHOẢN -->
           <div class="bg-white rounded-3xl shadow-md border border-slate-200 p-4 sm:p-5 space-y-3">
             <h4 class="text-xs font-extrabold text-blue-900 uppercase">🔑 Cấp Phát Tài Khoản & Mật Khẩu (Đồng Bộ Firebase Cloud)</h4>
             <input type="hidden" id="edit-user-idx" value="-1">
             <div class="grid grid-cols-1 sm:grid-cols-4 gap-2 text-xs">
-              <input type="text" id="new-user" autocomplete="off" placeholder="Tài khoản (TSS01)..." class="p-2.5 bg-slate-50 border rounded-xl font-bold">
+              <input type="text" id="new-user" autocomplete="off" placeholder="Tài khoản..." class="p-2.5 bg-slate-50 border rounded-xl font-bold">
               <input type="text" id="new-pass" autocomplete="off" placeholder="Mật khẩu..." class="p-2.5 bg-slate-50 border rounded-xl font-bold">
-              <select id="new-role" class="p-2.5 bg-slate-50 border rounded-xl font-bold"><option value="pos">Bán Vé (Quầy)</option><option value="driver">Cổng Chủ Xe</option></select>
+              <select id="new-role" class="p-2.5 bg-slate-50 border rounded-xl font-bold">
+                <option value="pos">Bán Vé (Quầy)</option>
+                <option value="driver">Cổng Chủ Xe</option>
+                <option value="plan">Team Kế Hoạch</option>
+              </select>
               <button onclick="saveAccount()" class="p-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold shadow-sm" id="btn-save-acc">+ Thêm Tài Khoản</button>
             </div>
             <div class="overflow-x-auto pt-2">
@@ -1326,6 +1379,7 @@
                   <option value="all">📂 Tất Cả Phân Vùng</option>
                   <option value="pos">🚖 Chỉ Bán Vé</option>
                   <option value="driver">🚗 Chỉ Tài Xế</option>
+                  <option value="plan">📋 Team Kế Hoạch</option>
                 </select>
 
                 <input type="text" id="audit-search-input" autocomplete="off" placeholder="🔍 Lọc từ khóa..." class="px-3 py-1.5 bg-slate-50 border rounded-xl font-bold text-xs w-44" oninput="updateManagerAuditTable()">
@@ -1378,8 +1432,53 @@
       renderStaffTable();
       renderCarTypesTable();
       renderPaymentsTable();
+      renderPlanPaymentsTable();
       updateManagerAuditTable();
       updateManagerRevenueSummary();
+    }
+
+    function renderPlanPaymentsTable() {
+      const container = document.getElementById('planpayment-tag-list');
+      if (!container) return;
+      container.innerHTML = planPaymentOptions.map((pt, idx) => `
+        <span class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-purple-50 text-purple-900 rounded-xl font-bold text-xs border border-purple-200">
+          💳 ${pt}
+          <button onclick="deletePlanPayment(${idx})" class="text-rose-500 hover:text-rose-700 font-extrabold ml-1">×</button>
+        </span>
+      `).join('');
+    }
+
+    function addNewPlanPayment() {
+      const input = document.getElementById('new-planpayment-name');
+      const val = input ? input.value.trim() : '';
+      if (!val) { alert("Vui lòng nhập hình thức thanh toán!"); return; }
+      if (planPaymentOptions.includes(val)) { alert("Hình thức này đã tồn tại!"); return; }
+      planPaymentOptions.push(val);
+      rtdb.ref('settings/planPayments').set(planPaymentOptions).then(() => { input.value = ''; renderPlanPaymentsTable(); });
+    }
+
+    function addBulkPlanPayment() {
+      const textarea = document.getElementById('bulk-planpayment-text');
+      const raw = textarea ? textarea.value.trim() : '';
+      if (!raw) { alert("Vui lòng dán danh sách vào ô!"); return; }
+      const lines = raw.split('\n').map(l => l.trim()).filter(Boolean);
+      let added = 0;
+      lines.forEach(pt => {
+        if (!planPaymentOptions.includes(pt)) { planPaymentOptions.push(pt); added++; }
+      });
+      rtdb.ref('settings/planPayments').set(planPaymentOptions).then(() => {
+        textarea.value = '';
+        renderPlanPaymentsTable();
+        alert(`Đã thêm thành công ${added} hình thức mới!`);
+      });
+    }
+
+    function deletePlanPayment(idx) {
+      if (planPaymentOptions.length <= 1) { alert("Cần giữ lại ít nhất 1 hình thức thanh toán!"); return; }
+      if (confirm(`Bạn có chắc muốn xóa hình thức "${planPaymentOptions[idx]}" không?`)) {
+        planPaymentOptions.splice(idx, 1);
+        rtdb.ref('settings/planPayments').set(planPaymentOptions).then(() => { renderPlanPaymentsTable(); });
+      }
     }
 
     function resetRevenueDateToToday() {
@@ -1740,7 +1839,7 @@
       const endInp = document.getElementById('audit-end-date');
       
       let startDateVal = startInp && startInp.value ? startInp.value : ''; 
-      let endDateVal = endInp && endInp.value ? endInp.value : '';     
+      let endDateVal = endInp && endInp.value ? endInp.value : '';      
 
       const roleFilter = document.getElementById('audit-role-filter') ? document.getElementById('audit-role-filter').value : 'all';
       const keyword = document.getElementById('audit-search-input') ? document.getElementById('audit-search-input').value.trim().toLowerCase() : '';
@@ -1838,15 +1937,21 @@
         group.forEach((t, idx) => {
           const defaultPay = paymentOptions[0] || 'Nhân Viên Quầy Thu';
           const isPos = t.role === 'pos';
-          const roleBadge = isPos 
-            ? `<span class="px-2 py-0.5 bg-blue-100 text-blue-800 rounded-md font-extrabold text-[10px]">🚖 Bán Vé</span>` 
-            : `<span class="px-2 py-0.5 bg-amber-100 text-amber-800 rounded-md font-extrabold text-[10px]">🚗 Tài Xế</span>`;
-          const rowBg = isPos ? 'bg-blue-50/30' : 'bg-amber-50/30';
+          const isPlan = t.role === 'plan';
+          const roleBadge = isPlan 
+            ? `<span class="px-2 py-0.5 bg-purple-100 text-purple-800 rounded-md font-extrabold text-[10px]">📋 Kế Hoạch</span>`
+            : (isPos 
+              ? `<span class="px-2 py-0.5 bg-blue-100 text-blue-800 rounded-md font-extrabold text-[10px]">🚖 Bán Vé</span>` 
+              : `<span class="px-2 py-0.5 bg-amber-100 text-amber-800 rounded-md font-extrabold text-[10px]">🚗 Tài Xế</span>`);
+          
+          const rowBg = isPlan ? 'bg-purple-50/30' : (isPos ? 'bg-blue-50/30' : 'bg-amber-50/30');
 
           const checkboxHtml = `<input type="checkbox" class="manager-trip-checkbox" value="${t.id}">`;
           const deleteBtn = `<button onclick="adminDeleteTrip('${t.id}', '${t.createdBy}')" class="px-2 py-0.5 bg-rose-50 hover:bg-rose-100 text-rose-600 font-bold rounded-md text-[10px]">🗑️ Xóa</button>`;
           const auditCell = (idx === 0) ? `<td class="p-3 text-center align-middle" rowspan="${group.length}">${statusHtml}</td>` : '';
           const borderClass = (idx === group.length - 1) ? 'border-b-2 border-slate-300' : 'border-b';
+
+          const currentPaymentsList = isPlan ? planPaymentOptions : paymentOptions;
 
           rowsHtml += `
             <tr class="${rowBg} hover:bg-slate-100/80 transition-all ${borderClass}">
@@ -1870,7 +1975,7 @@
               <td class="p-2.5"><input type="text" value="${t.destination || ''}" class="inline-edit-input w-36" onblur="updateInlineTripField('${t.id}', 'destination', this.value)"></td>
               <td class="p-2.5">
                 <select class="inline-edit-input w-32 font-bold" onchange="updateInlineTripField('${t.id}', 'paymentMethod', this.value)">
-                  ${paymentOptions.map(opt => `<option value="${opt}" ${(t.paymentMethod || defaultPay) === opt ? 'selected' : ''}>${opt}</option>`).join('')}
+                  ${currentPaymentsList.map(opt => `<option value="${opt}" ${(t.paymentMethod || currentPaymentsList[0]) === opt ? 'selected' : ''}>${opt}</option>`).join('')}
                 </select>
               </td>
               <td class="p-2.5"><input type="text" value="${t.note || ''}" class="inline-edit-input w-32" onblur="updateInlineTripField('${t.id}', 'note', this.value)"></td>
@@ -1952,10 +2057,11 @@
           const rowString = `${t.dateStr} ${t.timeStr} ${t.role} ${t.staff} ${t.ticketNumber} ${t.plateNumber} ${t.carType || ''} ${t.source || ''} ${t.destination} ${t.paymentMethod || defaultPay} ${t.note || ''} ${t.totalFare}`.toLowerCase();
           
           if (!keyword || rowString.includes(keyword)) {
+            const roleLabel = t.role === 'plan' ? 'Team Kế Hoạch' : (t.role === 'pos' ? 'Bán Vé (Quầy)' : 'Cổng Chủ Xe');
             groupRows.push({
               "Ngày": t.dateStr || '--',
               "Thời Gian Nộp": t.timeStr || '--',
-              "Phân Vùng": t.role === 'pos' ? 'Bán Vé (Quầy)' : 'Cổng Chủ Xe',
+              "Phân Vùng": roleLabel,
               "Nhân Sự": t.staff || 'N/A',
               "Số Phiếu": t.ticketNumber || '--',
               "Biển Số": t.plateNumber || '--',
@@ -2006,17 +2112,20 @@
         tb.innerHTML = `<tr><td colspan="4" class="p-4 text-center text-slate-400">Chưa có tài khoản nào.</td></tr>`;
         return;
       }
-      tb.innerHTML = userAccounts.map((x, i) => `
-        <tr>
-          <td class="p-3 font-mono font-bold text-blue-700">${x.user}</td>
-          <td class="p-3 font-mono font-bold text-slate-700">${x.pass}</td>
-          <td class="p-3 font-bold">${x.role === 'pos' ? 'Bán Vé' : 'Cổng Chủ Xe'}</td>
-          <td class="p-3 text-center space-x-1">
-            <button onclick="editAccount(${i})" class="px-2.5 py-1 bg-blue-50 text-blue-600 rounded-lg font-bold">Sửa</button>
-            <button onclick="deleteAccount(${i})" class="px-2.5 py-1 bg-rose-50 text-rose-600 rounded-lg font-bold">Xóa</button>
-          </td>
-        </tr>
-      `).join('');
+      tb.innerHTML = userAccounts.map((x, i) => {
+        const roleLabels = { 'pos': 'Bán Vé', 'driver': 'Cổng Chủ Xe', 'plan': 'Team Kế Hoạch' };
+        return `
+          <tr>
+            <td class="p-3 font-mono font-bold text-blue-700">${x.user}</td>
+            <td class="p-3 font-mono font-bold text-slate-700">${x.pass}</td>
+            <td class="p-3 font-bold">${roleLabels[x.role] || x.role}</td>
+            <td class="p-3 text-center space-x-1">
+              <button onclick="editAccount(${i})" class="px-2.5 py-1 bg-blue-50 text-blue-600 rounded-lg font-bold">Sửa</button>
+              <button onclick="deleteAccount(${i})" class="px-2.5 py-1 bg-rose-50 text-rose-600 rounded-lg font-bold">Xóa</button>
+            </td>
+          </tr>
+        `;
+      }).join('');
     }
 
     function saveAccount() {

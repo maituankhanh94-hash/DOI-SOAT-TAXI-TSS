@@ -358,6 +358,17 @@
       const isPos = role === 'pos';
       document.getElementById('main-container').innerHTML = `
         <div class="space-y-4 pb-20 w-full">
+          <!-- NÚT BÁO CÁO NHANH ĐẦU TRANG -->
+          <div class="bg-gradient-to-r from-blue-600 to-indigo-600 p-4 rounded-3xl shadow-lg flex flex-col sm:flex-row items-center justify-between text-white gap-3">
+            <div>
+              <h2 class="text-sm font-extrabold uppercase">📸 Báo Cáo Nhanh & Lịch Sử Hàng Ngày</h2>
+              <p class="text-[11px] opacity-90">Bấm nút bên cạnh để mở bảng chụp hình báo cáo theo ngày tùy chọn.</p>
+            </div>
+            <button onclick="openSnapshotReportModal()" class="px-5 py-2.5 bg-white text-blue-700 hover:bg-slate-100 font-extrabold text-xs rounded-xl shadow transition-all flex items-center space-x-2">
+              <span>📸 Xem Lịch Sử Đơn Hàng & Doanh Thu Theo Ngày</span>
+            </button>
+          </div>
+
           <!-- BẢNG 1: TỔNG KẾT DOANH THU CÓ CHỌN NGÀY -->
           <div class="bg-white p-4 sm:p-5 rounded-3xl shadow-md border border-slate-200 space-y-3">
             <div class="flex flex-col sm:flex-row items-center justify-between border-b pb-3 gap-3">
@@ -456,6 +467,109 @@
 
       updatePersonalSummary();
       renderActiveWorksheetTrips();
+    }
+
+    // MODAL XEM LỊCH SỬ VÀ DOANH THU THEO NGÀY (DỄ CHỤP ẢNH BÁO CÁO)
+    function openSnapshotReportModal() {
+      const now = new Date();
+      const yyyy = now.getFullYear();
+      const mm = String(now.getMonth() + 1).padStart(2, '0');
+      const dd = String(now.getDate()).padStart(2, '0');
+      const todayInputVal = `${yyyy}-${mm}-${dd}`;
+      const todayFormatted = `${dd}/${mm}/${yyyy}`;
+
+      const modalHtml = `
+        <div id="snapshot-report-modal" class="fixed inset-0 bg-slate-900/85 z-50 flex items-center justify-center p-3 backdrop-blur-sm">
+          <div class="bg-white rounded-3xl shadow-2xl max-w-4xl w-full p-5 sm:p-6 space-y-4 max-h-[92vh] flex flex-col">
+            <div class="flex items-center justify-between border-b pb-3">
+              <div class="flex items-center space-x-3">
+                <div class="bg-blue-600 text-white w-10 h-10 rounded-2xl flex items-center justify-center text-lg font-bold">📸</div>
+                <div>
+                  <h3 id="snapshot-title" class="text-sm font-extrabold text-slate-900 uppercase">📅 Lịch Sử Đơn Hàng & Doanh Thu Ngày ${todayFormatted}</h3>
+                  <p class="text-xs text-slate-500">Tài khoản: ${loggedInUser.user}</p>
+                </div>
+              </div>
+              <div class="flex items-center space-x-2">
+                <input type="date" id="snapshot-date-picker" value="${todayInputVal}" class="px-3 py-1.5 bg-slate-50 border rounded-xl font-mono text-xs font-bold" onchange="updateSnapshotModalData()">
+                <button onclick="document.getElementById('snapshot-report-modal').remove()" class="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold">Đóng</button>
+              </div>
+            </div>
+
+            <div class="grid grid-cols-2 gap-3 bg-slate-50 p-3.5 rounded-2xl border">
+              <div>
+                <div class="text-[10px] font-bold text-slate-500 uppercase">Tổng Doanh Thu Ngày</div>
+                <div id="snapshot-total-rev" class="text-lg sm:text-xl font-extrabold text-emerald-700">0 ₫</div>
+              </div>
+              <div>
+                <div class="text-[10px] font-bold text-slate-500 uppercase">Tổng Số Đơn Trong Ngày</div>
+                <div id="snapshot-total-count" class="text-lg sm:text-xl font-extrabold text-blue-700">0 đơn</div>
+              </div>
+            </div>
+
+            <div class="overflow-x-auto custom-scrollbar flex-1 border rounded-2xl">
+              <table class="w-full text-left border-collapse text-xs">
+                <thead class="bg-slate-800 text-white sticky top-0">
+                  <tr>
+                    <th class="p-2.5">Ngày</th>
+                    <th class="p-2.5">Số Phiếu</th>
+                    <th class="p-2.5">Biển Số</th>
+                    <th class="p-2.5">Điểm Đến</th>
+                    <th class="p-2.5">Thanh Toán</th>
+                    <th class="p-2.5">Ghi Chú</th>
+                    <th class="p-2.5 text-right">Tổng Tiền</th>
+                  </tr>
+                </thead>
+                <tbody id="snapshot-tbody" class="divide-y divide-slate-200">
+                  <!-- Dữ liệu render động -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      `;
+      document.getElementById('main-container').insertAdjacentHTML('beforeend', modalHtml);
+      updateSnapshotModalData();
+    }
+
+    function updateSnapshotModalData() {
+      const dateInp = document.getElementById('snapshot-date-picker');
+      const titleEl = document.getElementById('snapshot-title');
+      const revEl = document.getElementById('snapshot-total-rev');
+      const countEl = document.getElementById('snapshot-total-count');
+      const tbody = document.getElementById('snapshot-tbody');
+      if (!dateInp || !tbody) return;
+
+      const rawVal = dateInp.value; // YYYY-MM-DD
+      const parts = rawVal.split('-');
+      let targetDateStr = '';
+      if (parts.length === 3) {
+        targetDateStr = `${parts[2]}/${parts[1]}/${parts[0]}`;
+        if(titleEl) titleEl.innerText = `📅 Lịch Sử Đơn Hàng & Doanh Thu Ngày ${targetDateStr}`;
+      }
+
+      const filtered = personalTrips.filter(t => normalizeDateInput(t.dateStr) === targetDateStr);
+      sortTripsByDateAndTime(filtered);
+
+      const totalSum = filtered.reduce((acc, t) => acc + Number(t.totalFare || 0), 0);
+      if(revEl) revEl.innerText = totalSum.toLocaleString('vi-VN') + ' ₫';
+      if(countEl) countEl.innerText = filtered.length + ' đơn';
+
+      if (filtered.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="7" class="p-4 text-center text-slate-400">Không có đơn hàng nào vào ngày ${targetDateStr}.</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = filtered.map(t => `
+        <tr class="hover:bg-slate-50">
+          <td class="p-2.5">${t.dateStr}</td>
+          <td class="p-2.5 font-mono font-bold text-blue-600">${t.ticketNumber}</td>
+          <td class="p-2.5 font-mono font-bold uppercase">${t.plateNumber}</td>
+          <td class="p-2.5">${t.destination}</td>
+          <td class="p-2.5 font-bold">${t.paymentMethod || paymentOptions[0]}</td>
+          <td class="p-2.5 text-slate-600">${t.note || '--'}</td>
+          <td class="p-2.5 text-right font-bold text-emerald-600">${Number(t.totalFare || 0).toLocaleString('vi-VN')} ₫</td>
+        </tr>
+      `).join('');
     }
 
     function resetSummaryDateToToday() {
@@ -851,10 +965,12 @@
       let count = 0;
       let updates = {};
       let duplicateCount = 0;
+      let lastFormattedDate = ''; // KHỞI TẠO ĐÚNG PHẠM VI AN TOÀN
 
       for (let i = 0; i < 20; i++) {
         let rawDate = document.getElementById(`date-${i}`).value.trim();
         let formattedDate = normalizeDateInput(rawDate);
+        if (formattedDate) lastFormattedDate = formattedDate;
 
         const rawStaff = document.getElementById(`staff-${i}`).value.trim();
         const ticket = document.getElementById(`t-${i}`).value.trim();
@@ -912,8 +1028,8 @@
           alert(`Đã lưu thành công và phân tách hoa hồng cho ${count} đơn!`);
           renderBatchRows(role);
           const histInput = document.getElementById('filter-history-date');
-          if (histInput) {
-            const parts = formatDateForInput(formattedDate);
+          if (histInput && lastFormattedDate) {
+            const parts = formatDateForInput(lastFormattedDate);
             if (parts) histInput.value = parts;
             renderActiveWorksheetTrips();
           }

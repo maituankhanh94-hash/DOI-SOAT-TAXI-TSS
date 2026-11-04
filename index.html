@@ -344,6 +344,13 @@
       return rawDate;
     }
 
+    function formatDisplayTicket(ticketStr) {
+      if (!ticketStr) return '';
+      // Chuẩn hóa tự động hiển thị dạng / hoặc cũ thành -x/total
+      let clean = ticketStr.replace('/', '-');
+      return clean;
+    }
+
     function sortTripsByDateAndTime(trips) {
       return trips.sort((a, b) => {
         let normA = normalizeDateInput(a.dateStr);
@@ -651,7 +658,7 @@
       tbody.innerHTML = filtered.map(t => `
         <tr class="hover:bg-slate-50">
           <td class="p-2.5">${t.dateStr}</td>
-          <td class="p-2.5 font-mono font-bold text-blue-600">${t.ticketNumber}</td>
+          <td class="p-2.5 font-mono font-bold text-blue-600">${formatDisplayTicket(t.ticketNumber)}</td>
           <td class="p-2.5 font-mono font-bold uppercase">${t.plateNumber}</td>
           <td class="p-2.5">${t.destination}</td>
           <td class="p-2.5 font-bold">${t.paymentMethod || activePayments[0]}</td>
@@ -744,7 +751,7 @@
                     monthTrips.map(t => `
                       <tr class="hover:bg-slate-50">
                         <td class="p-2.5">${t.dateStr}</td>
-                        <td class="p-2.5 font-mono font-bold text-blue-600">${t.ticketNumber}</td>
+                        <td class="p-2.5 font-mono font-bold text-blue-600">${formatDisplayTicket(t.ticketNumber)}</td>
                         <td class="p-2.5 font-mono font-bold uppercase">${t.plateNumber}</td>
                         <td class="p-2.5">${t.destination}</td>
                         <td class="p-2.5 font-bold">${t.paymentMethod || activePayments[0]}</td>
@@ -862,7 +869,7 @@
             <td class="p-2.5">${t.dateStr || '--'}</td>
             <td class="p-2.5 font-mono font-bold text-slate-600">${t.timeStr || '--'}</td>
             <td class="p-2.5 font-extrabold text-slate-800">${t.staff || '--'}</td>
-            <td class="p-2.5 font-mono font-bold text-blue-600">${t.ticketNumber}</td>
+            <td class="p-2.5 font-mono font-bold text-blue-600">${formatDisplayTicket(t.ticketNumber)}</td>
             <td class="p-2.5 font-mono font-bold uppercase">${t.plateNumber}</td>
             <td class="p-2.5 font-bold">${t.carType || '--'}</td>
             <td class="p-2.5 font-bold">${t.source || '--'}</td>
@@ -897,7 +904,7 @@
         <div id="edit-trip-modal" class="fixed inset-0 bg-slate-900/80 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
           <div class="bg-white rounded-3xl shadow-2xl max-w-md w-full p-6 space-y-4">
             <div class="flex items-center justify-between border-b pb-3">
-              <h3 class="text-sm font-extrabold text-slate-900 uppercase">✏️ Chỉnh Sửa Đơn Hàng (${trip.ticketNumber})</h3>
+              <h3 class="text-sm font-extrabold text-slate-900 uppercase">✏️ Chỉnh Sửa Đơn Hàng (${formatDisplayTicket(trip.ticketNumber)})</h3>
               <button onclick="document.getElementById('edit-trip-modal').remove()" class="text-slate-400 hover:text-slate-600 font-bold">✕</button>
             </div>
             
@@ -1191,6 +1198,7 @@
 
           staffNames.forEach((staffName, sIdx) => {
             const subId = 'X' + baseTimestamp + '_' + sIdx;
+            // Đổi cơ chế sang định dạng 113806-1/2 và 113806-2/2
             const subTicket = splitCount > 1 ? `${ticket}-${sIdx + 1}/${splitCount}` : ticket;
 
             const tripData = {
@@ -1538,16 +1546,25 @@
 
       const totalSum = selectedTrips.reduce((acc, t) => acc + (Number(t.totalFare) || 0), 0);
 
+      // Tổng hợp đầy đủ theo tất cả các phương thức thanh toán và nguồn đơn/đối tác hiện có
+      let allCategories = [...new Set([...paymentOptions, ...planPaymentOptions, ...sourceOptions])];
       let methodSums = {};
-      paymentOptions.forEach(opt => methodSums[opt] = 0);
+      allCategories.forEach(opt => methodSums[opt] = 0);
 
       selectedTrips.forEach(t => {
         const fare = Number(t.totalFare || 0);
+        // Ưu tiên gom theo phương thức thanh toán hoặc nguồn đơn
         const method = t.paymentMethod || paymentOptions[0];
+        const source = t.source;
+
         if (methodSums[method] !== undefined) {
           methodSums[method] += fare;
         } else {
-          methodSums[paymentOptions[0]] = (methodSums[paymentOptions[0]] || 0) + fare;
+          methodSums[method] = (methodSums[method] || 0) + fare;
+        }
+
+        if (source && methodSums[source] !== undefined && source !== method) {
+          methodSums[source] += fare;
         }
       });
 
@@ -1559,15 +1576,20 @@
         </div>
       `;
 
-      const colors = ['bg-blue-50 border-blue-200 text-blue-800', 'bg-indigo-50 border-indigo-200 text-indigo-800', 'bg-amber-50 border-amber-200 text-amber-800', 'bg-purple-50 border-purple-200 text-purple-800', 'bg-rose-50 border-rose-200 text-rose-800'];
-      paymentOptions.forEach((opt, idx) => {
+      const colors = ['bg-blue-50 border-blue-200 text-blue-800', 'bg-indigo-50 border-indigo-200 text-indigo-800', 'bg-amber-50 border-amber-200 text-amber-800', 'bg-purple-50 border-purple-200 text-purple-800', 'bg-rose-50 border-rose-200 text-rose-800', 'bg-teal-50 border-teal-200 text-teal-800'];
+      
+      // Hiển thị các danh mục có phát sinh doanh thu hoặc các hình thức chính
+      paymentOptions.concat(planPaymentOptions).forEach((opt, idx) => {
         const cls = colors[idx % colors.length];
-        cardsHtml += `
-          <div class="${cls} border p-3.5 rounded-2xl shadow-sm">
-            <div class="text-[10px] font-bold uppercase opacity-80">${opt}</div>
-            <div class="text-base font-extrabold mt-1">${(methodSums[opt] || 0).toLocaleString('vi-VN')} ₫</div>
-          </div>
-        `;
+        const amt = methodSums[opt] || 0;
+        if (amt > 0 || paymentOptions.includes(opt)) {
+          cardsHtml += `
+            <div class="${cls} border p-3.5 rounded-2xl shadow-sm">
+              <div class="text-[10px] font-bold uppercase opacity-80">${opt}</div>
+              <div class="text-base font-extrabold mt-1">${amt.toLocaleString('vi-VN')} ₫</div>
+            </div>
+          `;
+        }
       });
 
       revContainer.innerHTML = cardsHtml;
@@ -1855,36 +1877,6 @@
       const roleFilter = document.getElementById('audit-role-filter') ? document.getElementById('audit-role-filter').value : 'all';
       const keyword = document.getElementById('audit-search-input') ? document.getElementById('audit-search-input').value.trim().toLowerCase() : '';
 
-      let expandedTrips = [];
-      allCompanyTrips.forEach(t => {
-        if (roleFilter !== 'all' && t.role !== roleFilter) return;
-
-        if (t.dateStr && (startDateVal || endDateVal)) {
-          const norm = normalizeDateInput(t.dateStr);
-          const p = norm.split('/');
-          if (p.length === 3) {
-            const tFormatted = `${p[2]}-${p[1]}-${p[0]}`;
-            if (startDateVal && tFormatted < startDateVal) return;
-            if (endDateVal && tFormatted > endDateVal) return;
-          }
-        }
-
-        const rawStaff = t.staff || '';
-        if (rawStaff.includes('+') || rawStaff.includes(',')) {
-          const names = rawStaff.split(/[+,]+/).map(s => s.trim()).filter(Boolean);
-          const splitFare = Math.round((Number(t.totalFare) || 0) / names.length);
-          names.forEach((name, nIdx) => {
-            let cloned = Object.assign({}, t);
-            cloned.staff = name;
-            cloned.totalFare = splitFare;
-            cloned.ticketNumber = `${(t.originalTicket || t.ticketNumber).split('/')[0]}/${nIdx + 1}`;
-            expandedTrips.push(cloned);
-          });
-        } else {
-          expandedTrips.push(t);
-        }
-      });
-
       let pairMap = {};
       allCompanyTrips.forEach(t => {
         if (roleFilter !== 'all' && t.role !== roleFilter) return;
@@ -1899,11 +1891,6 @@
           }
         }
 
-        // Chuẩn hóa phiếu cũ dạng / sang - để gom nhóm đối soát chuẩn xác
-        let rawTicketStr = (t.originalTicket || t.ticketNumber || '');
-        if (rawTicketStr.includes('/')) {
-          rawTicketStr = rawTicketStr.replace('/', '-');
-        }
         const ticketKey = (t.originalTicket || t.ticketNumber || '').trim().toUpperCase();
         const plate = (t.plateNumber || '').trim().toUpperCase();
         if (ticketKey && plate) {
@@ -2006,7 +1993,7 @@
               <td class="p-2.5 font-mono font-bold text-slate-600">${t.timeStr || '--'}</td>
               <td class="p-2.5">${roleBadge}</td>
               <td class="p-2.5 font-extrabold text-slate-800">${t.staff || 'N/A'}</td>
-              <td class="p-2.5"><input type="text" value="${t.ticketNumber || ''}" class="inline-edit-input w-24 text-blue-600" onblur="updateInlineTripField('${t.id}', 'ticketNumber', this.value)"></td>
+              <td class="p-2.5"><input type="text" value="${formatDisplayTicket(t.ticketNumber) || ''}" class="inline-edit-input w-24 text-blue-600" onblur="updateInlineTripField('${t.id}', 'ticketNumber', this.value)"></td>
               <td class="p-2.5"><input type="text" value="${t.plateNumber || ''}" class="inline-edit-input w-28 uppercase" onblur="updateInlineTripField('${t.id}', 'plateNumber', this.value)"></td>
               <td class="p-2.5">
                 <select class="inline-edit-input w-28" onchange="updateInlineTripField('${t.id}', 'carType', this.value)">
@@ -2048,7 +2035,7 @@
       const roleFilter = document.getElementById('audit-role-filter') ? document.getElementById('audit-role-filter').value : 'all';
       const keyword = document.getElementById('audit-search-input') ? document.getElementById('audit-search-input').value.trim().toLowerCase() : '';
 
-      let expandedTrips = [];
+      let pairMap = {};
       allCompanyTrips.forEach(t => {
         if (roleFilter !== 'all' && t.role !== roleFilter) return;
 
@@ -2062,26 +2049,8 @@
           }
         }
 
-        const rawStaff = t.staff || '';
-        if (rawStaff.includes('+') || rawStaff.includes(',')) {
-          const names = rawStaff.split(/[+,]+/).map(s => s.trim()).filter(Boolean);
-          const splitFare = Math.round((Number(t.totalFare) || 0) / names.length);
-          names.forEach((name, nIdx) => {
-            let cloned = Object.assign({}, t);
-            cloned.staff = name;
-            cloned.totalFare = splitFare;
-            cloned.ticketNumber = `${(t.originalTicket || t.ticketNumber).split('/')[0]}/${nIdx + 1}`;
-            expandedTrips.push(cloned);
-          });
-        } else {
-          expandedTrips.push(t);
-        }
-      });
-
-      let pairMap = {};
-      expandedTrips.forEach(t => {
         const rawTicket = (t.originalTicket || t.ticketNumber || '').trim().toUpperCase();
-        const baseTicket = rawTicket.split('/')[0].trim();
+        const baseTicket = rawTicket.split('/')[0].split('-')[0].trim();
         const plate = (t.plateNumber || '').trim().toUpperCase();
 
         if (baseTicket && plate) {
@@ -2128,7 +2097,7 @@
               "Thời Gian Nộp": t.timeStr || '--',
               "Phân Vùng": roleLabel,
               "Nhân Sự": t.staff || 'N/A',
-              "Số Phiếu": t.ticketNumber || '--',
+              "Số Phiếu": formatDisplayTicket(t.ticketNumber) || '--',
               "Biển Số": t.plateNumber || '--',
               "Loại Xe": t.carType || '--',
               "Nguồn Đơn": t.source || '--',

@@ -1534,6 +1534,13 @@
                   <option value="plan">📋 Team Kế Hoạch</option>
                 </select>
 
+                <select id="audit-match-status-filter" class="px-3 py-1.5 bg-slate-50 border rounded-xl font-bold text-xs text-slate-800" onchange="updateManagerAuditTable()">
+                  <option value="all">⚡ Tất Cả Trạng Thái</option>
+                  <option value="unmatched">⏳ Đơn Chưa Khớp (Thiếu 1 bên)</option>
+                  <option value="match">🟢 Trùng Khớp</option>
+                  <option value="mismatch">🔴 Đơn Lệch</option>
+                </select>
+
                 <input type="text" id="audit-search-input" autocomplete="off" placeholder="🔍 Lọc từ khóa..." class="px-3 py-1.5 bg-slate-50 border rounded-xl font-bold text-xs w-44" oninput="updateManagerAuditTable()">
               </div>
             </div>
@@ -2006,6 +2013,10 @@
 
       const roleFilterEl = document.getElementById('audit-role-filter');
       const roleFilter = roleFilterEl ? roleFilterEl.value : 'all';
+      
+      const matchStatusFilterEl = document.getElementById('audit-match-status-filter');
+      const matchStatusFilter = matchStatusFilterEl ? matchStatusFilterEl.value : 'all';
+
       const searchInputEl = document.getElementById('audit-search-input');
       const keyword = searchInputEl ? searchInputEl.value.trim().toLowerCase() : '';
 
@@ -2028,16 +2039,19 @@
         if (ticketKey && plate) {
           const baseTicket = ticketKey.split('-')[0].split('/')[0];
           
-          // CƠ CHẾ GHÉP CẶP ĐỐI SOÁT: Nếu tài xế chọn thanh toán/nguồn liên quan đến kế hoạch, gom chung với team kế hoạch
           let groupKeyRoleTag = 'pos';
           if (t.role === 'driver') {
             const payLower = (t.paymentMethod || '').toLowerCase();
             const srcLower = (t.source || '').toLowerCase();
-            if (payLower.includes('kế hoạch') || srcLower.includes('kế hoạch') || srcLower.includes('sq') || srcLower.includes('g1') || srcLower.includes('vto')) {
+            if (payLower.includes('kế hoạch') || srcLower.includes('kế hoạch') || srcLower.includes('sq') || srcLower.includes('g1') || srcLower.includes('vto') || srcLower.includes('công nợ') || srcLower.includes('sanna') || srcLower.includes('stella') || srcLower.includes('jovia') || srcLower.includes('vdt') || srcLower.includes('monica') || srcLower.includes('november') || srcLower.includes('thanhlong') || srcLower.includes('fast track')) {
               groupKeyRoleTag = 'plan';
             }
-          } else if (t.role === 'plan') {
-            groupKeyRoleTag = 'plan';
+          } else if (t.role === 'plan' || t.role === 'pos') {
+            const payLower = (t.paymentMethod || '').toLowerCase();
+            const srcLower = (t.source || '').toLowerCase();
+            if (payLower.includes('kế hoạch') || srcLower.includes('kế hoạch') || srcLower.includes('sq') || srcLower.includes('g1') || srcLower.includes('vto') || srcLower.includes('công nợ') || srcLower.includes('sanna') || srcLower.includes('stella') || srcLower.includes('jovia') || srcLower.includes('vdt') || srcLower.includes('monica') || srcLower.includes('november') || srcLower.includes('thanhlong') || srcLower.includes('fast track')) {
+              groupKeyRoleTag = 'plan';
+            }
           }
 
           const key = `${baseTicket}_${plate}_${normalizeDateInput(t.dateStr)}_${groupKeyRoleTag}`;
@@ -2075,32 +2089,47 @@
         const posTrips = group.filter(x => x.role === 'pos' || x.role === 'plan');
         const driverTrips = group.filter(x => x.role === 'driver');
 
-        let statusHtml = '<span class="px-2 py-1 bg-slate-100 text-slate-600 font-bold rounded-lg text-[10px]">⏳ Đơn Lẻ</span>';
-        let statusType = 'single';
+        let statusHtml = '';
+        let statusType = '';
 
-        if (posTrips.length > 0 && driverTrips.length > 0) {
+        if (posTrips.length === 0 || driverTrips.length === 0) {
+          statusType = 'unmatched';
+          statusHtml = '<span class="px-2 py-1 bg-amber-100 text-amber-800 font-bold rounded-lg text-[10px]">⏳ Đơn Chưa Khớp (Thiếu 1 bên)</span>';
+        } else {
           const sumPos = posTrips.reduce((acc, x) => acc + Number(x.totalFare || 0), 0);
           const sumDriver = driverTrips.reduce((acc, x) => acc + Number(x.totalFare || 0), 0);
-          
-          const defaultPay = paymentOptions[0] || 'Nhân Viên Quầy Thu';
-          const posPay = posTrips[0].paymentMethod || defaultPay;
-          const driverPay = driverTrips[0].paymentMethod || defaultPay;
 
-          if (Math.abs(sumPos - sumDriver) < 1000) {
+          const defaultPay = paymentOptions[0] || 'Nhân Viên Quầy Thu';
+          const posPay = (posTrips[0].paymentMethod || posTrips[0].source || '').toLowerCase();
+          const driverPay = (driverTrips[0].paymentMethod || driverTrips[0].source || '').toLowerCase();
+
+          // Kiểm tra nếu cả hai bên đều thuộc nhóm Kế Hoạch / Đối tác thì bỏ qua việc so sánh khắt khe tên hình thức thanh toán chữ cái, chỉ xét tổng tiền
+          const isBothPlanOrPartner = (
+            posPay.includes('kế hoạch') || posPay.includes('sq') || posPay.includes('g1') || posPay.includes('vto') || posPay.includes('công nợ') || posPay.includes('sanna') || posPay.includes('stella') || posPay.includes('jovia') || posPay.includes('vdt') || posPay.includes('monica') || posPay.includes('november') || posPay.includes('thanhlong') || posPay.includes('fast track') ||
+            driverPay.includes('kế hoạch') || driverPay.includes('sq') || driverPay.includes('g1') || driverPay.includes('vto') || driverPay.includes('công nợ') || driverPay.includes('sanna') || driverPay.includes('stella') || driverPay.includes('jovia') || driverPay.includes('vdt') || driverPay.includes('monica') || driverPay.includes('november') || driverPay.includes('thanhlong') || driverPay.includes('fast track')
+          );
+
+          if (Math.abs(sumPos - sumDriver) < 1000 && (posPay === driverPay || isBothPlanOrPartner)) {
             statusType = 'match';
             statusHtml = '<span class="px-2 py-1 bg-emerald-100 text-emerald-800 font-extrabold rounded-lg text-[10px]">🟢 Trùng Khớp</span>';
           } else {
             statusType = 'mismatch';
-            statusHtml = '<span class="px-2 py-1 bg-rose-100 text-rose-800 font-extrabold rounded-lg animate-pulse text-[10px]">🔴 Lệch Tiền</span>';
+            statusHtml = '<span class="px-2 py-1 bg-rose-100 text-rose-800 font-extrabold rounded-lg animate-pulse text-[10px]">🔴 Đơn Lệch</span>';
           }
+        }
+
+        if (matchStatusFilter !== 'all' && statusType !== matchStatusFilter) {
+          return;
         }
 
         let groupPassesKeyword = true;
         if (keyword) {
           if (keyword === 'khớp' || keyword === 'trùng khớp') {
             groupPassesKeyword = (statusType === 'match');
-          } else if (keyword === 'lệch' || keyword === 'không khớp') {
+          } else if (keyword === 'lệch' || keyword === 'đơn lệch') {
             groupPassesKeyword = (statusType === 'mismatch');
+          } else if (keyword === 'chưa khớp' || keyword === 'đơn lẻ' || keyword === 'thiếu') {
+            groupPassesKeyword = (statusType === 'unmatched');
           } else {
             groupPassesKeyword = group.some(t => {
               const defaultPay = paymentOptions[0] || 'Nhân Viên Quầy Thu';

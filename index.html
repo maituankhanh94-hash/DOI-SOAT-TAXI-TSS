@@ -18,6 +18,21 @@
     .local-item { padding: 8px 12px; font-size: 11px; font-weight: 700; color: #1e293b; cursor: pointer; border-bottom: 1px solid #f1f5f9; }
     .local-item:hover { background: #eff6ff; color: #1d4ed8; }
     .inline-edit-input { background: #fff; border: 1px solid #3b82f6; border-radius: 6px; padding: 2px 6px; font-size: 11px; width: 100%; font-weight: 700; }
+    
+    @keyframes rainbow-border {
+      0% { border-color: #ef4444; box-shadow: 0 0 25px rgba(239, 68, 68, 0.4); }
+      33% { border-color: #3b82f6; box-shadow: 0 0 25px rgba(59, 130, 246, 0.4); }
+      66% { border-color: #10b981; box-shadow: 0 0 25px rgba(16, 185, 129, 0.4); }
+      100% { border-color: #f59e0b; box-shadow: 0 0 25px rgba(245, 158, 11, 0.4); }
+    }
+    @keyframes bounce-gentle {
+      0%, 100% { transform: translateY(0) scale(1); }
+      50% { transform: translateY(-6px) scale(1.02); }
+    }
+    .popup-vinh-danh {
+      animation: rainbow-border 3s infinite alternate, bounce-gentle 2s infinite ease-in-out;
+      border: 3px solid #3b82f6;
+    }
   </style>
 </head>
 <body class="h-full bg-slate-100 flex flex-col overflow-hidden">
@@ -66,6 +81,7 @@
     let personalTrips = []; 
     let allCompanyTrips = []; 
     let lastDeletedTripBackup = null;
+    let celebratedStaffToday = {}; // Lưu lại nhân viên đã được chúc mừng trong ngày để chỉ hiện 1 lần/ngày
     
     let userAccounts = [
       { user: 'TSS01', pass: '123', role: 'pos' },
@@ -198,6 +214,50 @@
         banner.classList.remove('hidden');
         setTimeout(() => { banner.classList.add('hidden'); }, 6000);
       }
+    }
+
+    function checkAndShowMilestoneCongratModal(staffName, todayTotalAmount, dateStr) {
+      if (todayTotalAmount > 2000000) {
+        const key = `${staffName}_${dateStr}`;
+        if (!notifiedMilestoneStaffs[key]) {
+          notifiedMilestoneStaffs[key] = true;
+          showMilestoneCongratModal(staffName, todayTotalAmount, dateStr);
+        }
+      }
+    }
+
+    function showMilestoneCongratModal(staffName, amount, dateStr) {
+      const existing = document.getElementById('congrat-milestone-modal');
+      if (existing) existing.remove();
+
+      const modalHtml = `
+        <div id="congrat-milestone-modal" class="fixed inset-0 bg-slate-950/85 z-50 flex items-center justify-center p-4 backdrop-blur-md animate-fadeIn">
+          <div class="vinh-danh-card rounded-3xl max-w-sm w-full p-6 text-center space-y-5 shadow-2xl relative">
+            <div class="flex items-center justify-center space-x-2 text-2xl">
+              <span>🏆</span>
+              <span>🎉</span>
+              <span>⭐</span>
+            </div>
+            
+            <div class="space-y-1.5">
+              <div class="text-[11px] font-extrabold tracking-widest uppercase text-amber-400">✨ VINH DANH XUẤT SẮC ✨</div>
+              <h3 class="text-sm font-bold text-slate-300">CHÚNG MỪNG NHÂN SỰ</h3>
+              <div class="text-xl sm:text-2xl font-extrabold text-amber-300 tracking-tight">${staffName}</div>
+            </div>
+
+            <div class="bg-zinc-900/90 border border-zinc-800 p-4 rounded-2xl space-y-1">
+              <div class="text-[11px] font-bold text-slate-400">Đã xuất sắc đạt doanh thu ngày ${dateStr}:</div>
+              <div class="text-2xl font-extrabold text-emerald-400">${amount.toLocaleString('vi-VN')} ₫</div>
+              <div class="text-[10px] font-bold text-amber-400 pt-0.5">🚀 Vượt mốc 2.000.000 ₫ thành công rực rỡ!</div>
+            </div>
+
+            <button onclick="document.getElementById('congrat-milestone-modal').remove()" class="w-full py-3 bg-gradient-to-r from-amber-500 via-rose-500 to-pink-600 hover:opacity-95 text-white font-extrabold text-xs rounded-xl shadow-lg transition-all uppercase tracking-wider">
+              🔥 TUYỆT VỜI QUÁ, TIẾP TỤC PHÁT HUY! 🔥
+            </button>
+          </div>
+        </div>
+      `;
+      document.body.insertAdjacentHTML('beforeend', modalHtml);
     }
 
     function renderHomeSelection() {
@@ -346,7 +406,6 @@
 
     function formatDisplayTicket(ticketStr) {
       if (!ticketStr) return '';
-      // Chuẩn hóa tự động hiển thị dạng / hoặc cũ thành -x/total
       let clean = ticketStr.replace('/', '-');
       return clean;
     }
@@ -786,6 +845,29 @@
       });
 
       const totalSum = selectedItems.reduce((acc, t) => acc + (Number(t.totalFare) || 0), 0);
+
+      // KIỂM TRA MỐC 2.ỆU TRIỆU CHO TỪNG NHÂN SỰ TRONG NGÀY
+      if (targetDateStr && totalSum > 2000000) {
+        // Gom nhóm doanh thu theo từng tên nhân sự đầy đủ xuất hiện trong ngày
+        let staffRevenueMap = {};
+        selectedItems.forEach(t => {
+          const sName = (t.staff || '').trim();
+          if (sName) {
+            staffRevenueMap[sName] = (staffRevenueMap[sName] || 0) + (Number(t.totalFare) || 0);
+          }
+        });
+
+        Object.entries(staffRevenueMap).forEach(([staffName, sTotal]) => {
+          if (sTotal > 2000000) {
+            const celebKey = `${staffName}_${targetDateStr}`;
+            if (!celebratedStaffToday[celebKey]) {
+              celebratedStaffToday[celebKey] = true;
+              showStaffCelebrationModal(staffName, sTotal, targetDateStr);
+            }
+          }
+        });
+      }
+
       const activePayments = (role === 'plan') ? planPaymentOptions : paymentOptions;
       
       let methodSums = {};
@@ -824,6 +906,43 @@
       });
 
       container.innerHTML = cardsHtml;
+    }
+
+    function showStaffCelebrationModal(staffName, revenueAmount, dateStr) {
+      const existing = document.getElementById('staff-celebration-popup');
+      if (existing) existing.remove();
+
+      const modalHtml = `
+        <div id="staff-celebration-popup" class="fixed inset-0 bg-slate-950/85 z-50 flex items-center justify-center p-4 backdrop-blur-md">
+          <div class="bg-slate-900 popup-vinh-danh rounded-3xl max-w-sm w-full p-6 text-center space-y-5 shadow-2xl relative overflow-hidden">
+            <div class="absolute -top-10 -right-10 w-32 h-32 bg-amber-500/20 rounded-full blur-2xl"></div>
+            <div class="absolute -bottom-10 -left-10 w-32 h-32 bg-blue-500/20 rounded-full blur-2xl"></div>
+            
+            <div class="flex items-center justify-center space-x-2 text-2xl">
+              <span>🏆</span>
+              <span>🎉</span>
+              <span>⭐</span>
+            </div>
+
+            <div class="space-y-1.5">
+              <div class="text-[11px] font-extrabold tracking-widest text-amber-400 uppercase animate-pulse">✨ VINH DANH XUẤT SẮC ✨</div>
+              <div class="text-xs font-bold text-slate-300">CHÚNG MỪNG NHÂN SỰ</div>
+              <div class="text-lg sm:text-xl font-extrabold text-white tracking-wide bg-gradient-to-r from-amber-200 via-yellow-400 to-amber-200 bg-clip-text text-transparent">${staffName}</div>
+            </div>
+
+            <div class="bg-slate-800/90 border border-slate-700/80 p-4 rounded-2xl space-y-1 shadow-inner">
+              <div class="text-[11px] font-semibold text-slate-400">Đã xuất sắc đạt doanh thu ngày ${dateStr}:</div>
+              <div class="text-xl sm:text-2xl font-black text-emerald-400">${revenueAmount.toLocaleString('vi-VN')} ₫</div>
+              <div class="text-[10px] font-bold text-amber-300 pt-1">🚀 Vượt mốc 2.000.000 ₫ thành công rực rỡ!</div>
+            </div>
+
+            <button onclick="document.getElementById('staff-celebration-popup').remove()" class="w-full py-3 bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-600 hover:to-yellow-600 text-slate-950 font-extrabold text-xs rounded-2xl shadow-lg transition-transform active:scale-95">
+              🔥 TUYỆT VỜI QUÁ, TIẾP TỤC PHÁT HUY! 🔥
+            </button>
+          </div>
+        </div>
+      `;
+      document.body.insertAdjacentHTML('beforeend', modalHtml);
     }
 
     function renderActiveWorksheetTrips(role) {
@@ -1069,7 +1188,7 @@
           return;
         }
 
-        if (confirm("Bạn có chắc chắn muốn xóa đơn hàng này không?")) {
+        if (confirm("Vui lòng xác nhận xóa đơn hàng này?")) {
           let updates = {};
           updates[`users_trips/${loggedInUser.user}/${id}`] = null;
           updates[`trips/${id}`] = null;
@@ -1198,7 +1317,6 @@
 
           staffNames.forEach((staffName, sIdx) => {
             const subId = 'X' + baseTimestamp + '_' + sIdx;
-            // Đổi cơ chế sang định dạng 113806-1/2 và 113806-2/2
             const subTicket = splitCount > 1 ? `${ticket}-${sIdx + 1}/${splitCount}` : ticket;
 
             const tripData = {
@@ -1546,14 +1664,12 @@
 
       const totalSum = selectedTrips.reduce((acc, t) => acc + (Number(t.totalFare) || 0), 0);
 
-      // Tổng hợp đầy đủ theo tất cả các phương thức thanh toán và nguồn đơn/đối tác hiện có
       let allCategories = [...new Set([...paymentOptions, ...planPaymentOptions, ...sourceOptions])];
       let methodSums = {};
       allCategories.forEach(opt => methodSums[opt] = 0);
 
       selectedTrips.forEach(t => {
         const fare = Number(t.totalFare || 0);
-        // Ưu tiên gom theo phương thức thanh toán hoặc nguồn đơn
         const method = t.paymentMethod || paymentOptions[0];
         const source = t.source;
 
@@ -1578,7 +1694,6 @@
 
       const colors = ['bg-blue-50 border-blue-200 text-blue-800', 'bg-indigo-50 border-indigo-200 text-indigo-800', 'bg-amber-50 border-amber-200 text-amber-800', 'bg-purple-50 border-purple-200 text-purple-800', 'bg-rose-50 border-rose-200 text-rose-800', 'bg-teal-50 border-teal-200 text-teal-800'];
       
-      // Hiển thị các danh mục có phát sinh doanh thu hoặc các hình thức chính
       paymentOptions.concat(planPaymentOptions).forEach((opt, idx) => {
         const cls = colors[idx % colors.length];
         const amt = methodSums[opt] || 0;

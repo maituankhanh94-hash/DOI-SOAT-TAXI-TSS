@@ -2039,22 +2039,8 @@
         if (ticketKey && plate) {
           const baseTicket = ticketKey.split('-')[0].split('/')[0];
           
-          let groupKeyRoleTag = 'pos';
-          if (t.role === 'driver') {
-            const payLower = (t.paymentMethod || '').toLowerCase();
-            const srcLower = (t.source || '').toLowerCase();
-            if (payLower.includes('kế hoạch') || srcLower.includes('kế hoạch') || srcLower.includes('sq') || srcLower.includes('g1') || srcLower.includes('vto') || srcLower.includes('công nợ') || srcLower.includes('sanna') || srcLower.includes('stella') || srcLower.includes('jovia') || srcLower.includes('vdt') || srcLower.includes('monica') || srcLower.includes('november') || srcLower.includes('thanhlong') || srcLower.includes('fast track')) {
-              groupKeyRoleTag = 'plan';
-            }
-          } else if (t.role === 'plan' || t.role === 'pos') {
-            const payLower = (t.paymentMethod || '').toLowerCase();
-            const srcLower = (t.source || '').toLowerCase();
-            if (payLower.includes('kế hoạch') || srcLower.includes('kế hoạch') || srcLower.includes('sq') || srcLower.includes('g1') || srcLower.includes('vto') || srcLower.includes('công nợ') || srcLower.includes('sanna') || srcLower.includes('stella') || srcLower.includes('jovia') || srcLower.includes('vdt') || srcLower.includes('monica') || srcLower.includes('november') || srcLower.includes('thanhlong') || srcLower.includes('fast track')) {
-              groupKeyRoleTag = 'plan';
-            }
-          }
-
-          const key = `${baseTicket}_${plate}_${normalizeDateInput(t.dateStr)}_${groupKeyRoleTag}`;
+          // GOM CHUNG MỘT NHÓM DUY NHẤT THEO SỐ PHIẾU + BIỂN SỐ + NGÀY (GIÚP ĐỐI SOÁT CHÍNH XÁC KHI ĐỔI HÌNH THỨC THANH TOÁN)
+          const key = `${baseTicket}_${plate}_${normalizeDateInput(t.dateStr)}`;
           if (!pairMap[key]) pairMap[key] = [];
           pairMap[key].push(t);
         } else {
@@ -2328,8 +2314,8 @@
             <td class="p-3 font-mono font-bold text-slate-700">${x.pass}</td>
             <td class="p-3 font-bold">${roleLabels[x.role] || x.role}</td>
             <td class="p-3 text-center space-x-1">
-              <button onclick="editAccount(${i})" class="px-2.5 py-1 bg-blue-50 text-blue-600 rounded-lg font-bold">Sửa</button>
-              <button onclick="deleteAccount(${i})" class="px-2.5 py-1 bg-rose-50 text-rose-600 rounded-lg font-bold">Xóa</button>
+              <button onclick="editAccount(${i})" class="px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-600 rounded-lg font-bold">Sửa</button>
+              <button onclick="deleteAccount(${i})" class="px-2.5 py-1 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-lg font-bold">Xóa</button>
             </td>
           </tr>
         `;
@@ -2364,11 +2350,13 @@
 
     function editAccount(i) {
       const a = userAccounts[i];
+      if (!a) return;
       document.getElementById('edit-user-idx').value = i;
       document.getElementById('new-user').value = a.user;
       document.getElementById('new-pass').value = a.pass;
       document.getElementById('new-role').value = a.role;
       document.getElementById('btn-save-acc').innerText = "💾 Cập Nhật";
+      window.scrollTo({ top: document.getElementById('new-user').offsetTop - 100, behavior: 'smooth' });
     }
 
     function deleteAccount(i) {

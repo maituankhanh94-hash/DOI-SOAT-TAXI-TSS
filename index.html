@@ -2004,8 +2004,10 @@
       let startDateVal = startInp && startInp.value ? startInp.value : ''; 
       let endDateVal = endInp && endInp.value ? endInp.value : '';      
 
-      const roleFilter = document.getElementById('audit-role-filter') ? document.getElementById('audit-role-filter').value : 'all';
-      const keyword = document.getElementById('audit-search-input') ? document.getElementById('audit-search-input').value.trim().toLowerCase() : '';
+      const roleFilterEl = document.getElementById('audit-role-filter');
+      const roleFilter = roleFilterEl ? roleFilterEl.value : 'all';
+      const searchInputEl = document.getElementById('audit-search-input');
+      const keyword = searchInputEl ? searchInputEl.value.trim().toLowerCase() : '';
 
       let pairMap = {};
       allCompanyTrips.forEach(t => {
@@ -2025,7 +2027,20 @@
         const plate = (t.plateNumber || '').trim().toUpperCase();
         if (ticketKey && plate) {
           const baseTicket = ticketKey.split('-')[0].split('/')[0];
-          const key = `${baseTicket}_${plate}_${normalizeDateInput(t.dateStr)}`;
+          
+          // CƠ CHẾ GHÉP CẶP ĐỐI SOÁT: Nếu tài xế chọn thanh toán/nguồn liên quan đến kế hoạch, gom chung với team kế hoạch
+          let groupKeyRoleTag = 'pos';
+          if (t.role === 'driver') {
+            const payLower = (t.paymentMethod || '').toLowerCase();
+            const srcLower = (t.source || '').toLowerCase();
+            if (payLower.includes('kế hoạch') || srcLower.includes('kế hoạch') || srcLower.includes('sq') || srcLower.includes('g1') || srcLower.includes('vto')) {
+              groupKeyRoleTag = 'plan';
+            }
+          } else if (t.role === 'plan') {
+            groupKeyRoleTag = 'plan';
+          }
+
+          const key = `${baseTicket}_${plate}_${normalizeDateInput(t.dateStr)}_${groupKeyRoleTag}`;
           if (!pairMap[key]) pairMap[key] = [];
           pairMap[key].push(t);
         } else {
@@ -2055,7 +2070,7 @@
 
       let rowsHtml = '';
       groupList.forEach(group => {
-        group.sort((a, b) => (a.role === 'pos' ? -1 : 1));
+        group.sort((a, b) => (a.role === 'pos' || a.role === 'plan' ? -1 : 1));
 
         const posTrips = group.filter(x => x.role === 'pos' || x.role === 'plan');
         const driverTrips = group.filter(x => x.role === 'driver');
@@ -2071,12 +2086,12 @@
           const posPay = posTrips[0].paymentMethod || defaultPay;
           const driverPay = driverTrips[0].paymentMethod || defaultPay;
 
-          if (Math.abs(sumPos - sumDriver) < 1000 && posPay === driverPay) {
+          if (Math.abs(sumPos - sumDriver) < 1000) {
             statusType = 'match';
             statusHtml = '<span class="px-2 py-1 bg-emerald-100 text-emerald-800 font-extrabold rounded-lg text-[10px]">🟢 Trùng Khớp</span>';
           } else {
             statusType = 'mismatch';
-            statusHtml = '<span class="px-2 py-1 bg-rose-100 text-rose-800 font-extrabold rounded-lg animate-pulse text-[10px]">🔴 Lệch (Tiền / Thanh Toán)</span>';
+            statusHtml = '<span class="px-2 py-1 bg-rose-100 text-rose-800 font-extrabold rounded-lg animate-pulse text-[10px]">🔴 Lệch Tiền</span>';
           }
         }
 
@@ -2156,11 +2171,11 @@
     function exportCustomExcel() {
       if (allCompanyTrips.length === 0) { alert("Không có dữ liệu xuất đi!"); return; }
 
-      const startInp = document.getElementById('audit-start-date');
-      const endInp = document.getElementById('audit-end-date');
+      let startInp = document.getElementById('audit-start-date');
+      let endInp = document.getElementById('audit-end-date');
       
-      let startDateVal = startInp && startInp.value ? startInp.value : '';
-      let endDateVal = endInp && endInp.value ? endInp.value : '';
+      let startDateVal = startInp && startInp.value ? startInp.value : ''; 
+      let endDateVal = endInp && endInp.value ? endInp.value : '';      
 
       const roleFilter = document.getElementById('audit-role-filter') ? document.getElementById('audit-role-filter').value : 'all';
       const keyword = document.getElementById('audit-search-input') ? document.getElementById('audit-search-input').value.trim().toLowerCase() : '';

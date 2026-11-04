@@ -1191,7 +1191,7 @@
 
           staffNames.forEach((staffName, sIdx) => {
             const subId = 'X' + baseTimestamp + '_' + sIdx;
-            const subTicket = splitCount > 1 ? `${ticket}/${sIdx + 1}` : ticket;
+            const subTicket = splitCount > 1 ? `${ticket}-${sIdx + 1}/${splitCount}` : ticket;
 
             const tripData = {
               id: subId, dateStr: formattedDate, timeStr, ticketNumber: subTicket, originalTicket: ticket, plateNumber: plate,
@@ -1886,12 +1886,28 @@
       });
 
       let pairMap = {};
-      expandedTrips.forEach(t => {
-        const rawTicket = (t.originalTicket || t.ticketNumber || '').trim().toUpperCase();
-        const baseTicket = rawTicket.split('/')[0].trim();
-        const plate = (t.plateNumber || '').trim().toUpperCase();
+      allCompanyTrips.forEach(t => {
+        if (roleFilter !== 'all' && t.role !== roleFilter) return;
 
-        if (baseTicket && plate) {
+        if (t.dateStr && (startDateVal || endDateVal)) {
+          const norm = normalizeDateInput(t.dateStr);
+          const p = norm.split('/');
+          if (p.length === 3) {
+            const tFormatted = `${p[2]}-${p[1]}-${p[0]}`;
+            if (startDateVal && tFormatted < startDateVal) return;
+            if (endDateVal && tFormatted > endDateVal) return;
+          }
+        }
+
+        // Chuẩn hóa phiếu cũ dạng / sang - để gom nhóm đối soát chuẩn xác
+        let rawTicketStr = (t.originalTicket || t.ticketNumber || '');
+        if (rawTicketStr.includes('/')) {
+          rawTicketStr = rawTicketStr.replace('/', '-');
+        }
+        const ticketKey = (t.originalTicket || t.ticketNumber || '').trim().toUpperCase();
+        const plate = (t.plateNumber || '').trim().toUpperCase();
+        if (ticketKey && plate) {
+          const baseTicket = ticketKey.split('-')[0].split('/')[0];
           const key = `${baseTicket}_${plate}_${normalizeDateInput(t.dateStr)}`;
           if (!pairMap[key]) pairMap[key] = [];
           pairMap[key].push(t);

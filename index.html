@@ -1277,8 +1277,11 @@
       const timeStr = new Date().toLocaleTimeString('vi-VN', {hour:'2-digit', minute:'2-digit'});
       let count = 0;
       let updates = {};
-      let duplicateCount = 0;
+      let duplicateDetails = [];
       let lastFormattedDate = '';
+
+      // Mảng lưu trữ các đơn chuẩn bị đưa lên để check trùng ngay trong nội bộ lô nhập hàng loạt này
+      let batchEntriesToCheck = [];
 
       for (let i = 0; i < 20; i++) {
         let rawDate = document.getElementById(`date-${i}`).value.trim();
@@ -1297,17 +1300,29 @@
         const note = document.getElementById(`note-${i}`).value.trim();
 
         if (rawStaff && ticket && plate && dest) {
-          const isDuplicate = personalTrips.some(t => {
+          const cleanTicket = ticket.trim().toUpperCase();
+          const cleanPlate = plate.trim().toUpperCase();
+
+          // 1. Kiểm tra trùng ngay trong nội bộ các dòng đang nhập hàng loạt
+          const isDuplicateInBatch = batchEntriesToCheck.some(item => 
+            item.ticket === cleanTicket && item.plate === cleanPlate && item.date === formattedDate
+          );
+
+          // 2. Kiểm tra trùng với lịch sử đã lưu trước đó trên Cloud của tài khoản này
+          const isDuplicateInCloud = personalTrips.some(t => {
             const existingTicket = (t.originalTicket || t.ticketNumber || '').trim().toUpperCase();
             const existingPlate = (t.plateNumber || '').trim().toUpperCase();
             const existingDate = normalizeDateInput(t.dateStr);
-            return existingTicket === ticket.trim().toUpperCase() && existingPlate === plate && existingDate === formattedDate;
+            return existingTicket === cleanTicket && existingPlate === cleanPlate && existingDate === formattedDate;
           });
 
-          if (isDuplicate) {
-            duplicateCount++;
+          if (isDuplicateInBatch || isDuplicateInCloud) {
+            duplicateDetails.push(`Dòng ${i+1} (Phiếu: ${ticket} - Biển số: ${plate})`);
             continue;
           }
+
+          // Đưa vào mảng kiểm tra nội bộ tiếp theo
+          batchEntriesToCheck.push({ ticket: cleanTicket, plate: cleanPlate, date: formattedDate });
 
           const baseTimestamp = Date.now() + i;
 
@@ -1332,8 +1347,8 @@
         }
       }
 
-      if (duplicateCount > 0) {
-        showFloatingWarning(`Phát hiện ${duplicateCount} đơn hàng bị trùng số phiếu và biển số đã lưu trước đó nên đã được bỏ qua!`);
+      if (duplicateDetails.length > 0) {
+        showFloatingWarning(`Đã chặn ${duplicateDetails.length} đơn trùng lặp (trùng trong danh sách nhập hoặc đã có trên Cloud): ${duplicateDetails.join(', ')}`);
       }
 
       if (count > 0) {
@@ -1349,7 +1364,7 @@
         }).catch(err => {
           alert("Lỗi lưu dữ liệu: " + err.message);
         });
-      } else if (duplicateCount === 0) {
+      } else if (duplicateDetails.length === 0) {
         alert("Vui lòng điền đầy đủ Tên Nhân Sự, Số Phiếu, Biển Số và Điểm Đến!");
       }
     }

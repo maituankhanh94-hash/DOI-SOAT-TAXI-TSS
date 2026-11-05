@@ -472,36 +472,7 @@
             <div class="grid grid-cols-1 sm:grid-cols-5 gap-3" id="summary-cards-container"></div>
           </div>
 
-          <!-- BẢNG 2: NHẬP HÀNG LOẠT 20 ĐƠN -->
-          <div class="bg-white p-4 sm:p-6 rounded-3xl shadow-xl border border-slate-200 space-y-4">
-            <div class="flex flex-col sm:flex-row items-center justify-between gap-3 border-b pb-4">
-              <h3 class="text-xs sm:text-sm font-extrabold uppercase ${themeColorClass}">📋 Nhập Hàng Loạt 20 Dòng Nhanh</h3>
-              <button onclick="submitBatch('${role}')" class="px-5 py-2.5 ${btnThemeClass} text-white font-extrabold text-xs rounded-xl shadow-lg transition-all">🚀 Lưu Đơn Lên Cloud</button>
-            </div>
-            <div class="overflow-x-auto custom-scrollbar max-h-[450px]">
-              <table class="w-full text-left border-collapse min-w-[1700px]">
-                <thead class="sticky top-0 z-20 shadow-md">
-                  <tr class="bg-slate-900 text-white text-[11px] font-bold">
-                    <th class="p-3 text-center w-10 bg-slate-900">STT</th>
-                    <th class="p-3 w-32 bg-slate-900">Ngày Tháng</th>
-                    <th class="p-3 w-40 bg-slate-900 relative">Tên Nhân Sự (Gõ mới đề xuất)</th>
-                    <th class="p-3 w-28 bg-slate-900">Số Phiếu (Tự nhảy)</th>
-                    <th class="p-3 w-32 bg-slate-900">Biển Số Xe</th>
-                    <th class="p-3 w-36 bg-slate-900">Loại Xe</th>
-                    <th class="p-3 w-40 bg-slate-900">Nguồn Đơn</th>
-                    <th class="p-3 w-28 bg-slate-900">Điểm Đón</th>
-                    <th class="p-3 min-w-[220px] bg-slate-900">Điểm Đến</th>
-                    <th class="p-3 w-36 text-right bg-slate-900">Tổng Tiền</th>
-                    <th class="p-3 w-32 bg-slate-900">Thanh Toán</th>
-                    <th class="p-3 min-w-[180px] bg-slate-900">Ghi Chú</th>
-                  </tr>
-                </thead>
-                <tbody id="tbody-batch" class="divide-y divide-slate-200 text-xs"></tbody>
-              </table>
-            </div>
-          </div>
-
-          <!-- BẢNG 3: LỊCH SỬ ĐƠN HÀNG -->
+          <!-- BẢNG 2: LỊCH SỬ ĐƠN HÀNG (ĐÃ DỜI LÊN ĐÂY) -->
           <div class="bg-white p-4 sm:p-6 rounded-3xl shadow-xl border border-slate-200 space-y-3">
             <div class="flex flex-col sm:flex-row items-center justify-between border-b pb-3 gap-2">
               <div class="flex items-center space-x-3">
@@ -535,6 +506,35 @@
                   </tr>
                 </thead>
                 <tbody id="tbody-personal-trips" class="divide-y divide-slate-200"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- BẢNG 3: NHẬP HÀNG LOẠT 20 ĐƠN -->
+          <div class="bg-white p-4 sm:p-6 rounded-3xl shadow-xl border border-slate-200 space-y-4">
+            <div class="flex flex-col sm:flex-row items-center justify-between gap-3 border-b pb-4">
+              <h3 class="text-xs sm:text-sm font-extrabold uppercase ${themeColorClass}">📋 Nhập Hàng Loạt 20 Dòng Nhanh</h3>
+              <button onclick="submitBatch('${role}')" class="px-5 py-2.5 ${btnThemeClass} text-white font-extrabold text-xs rounded-xl shadow-lg transition-all">🚀 Lưu Đơn Lên Cloud</button>
+            </div>
+            <div class="overflow-x-auto custom-scrollbar max-h-[450px]">
+              <table class="w-full text-left border-collapse min-w-[1700px]">
+                <thead class="sticky top-0 z-20 shadow-md">
+                  <tr class="bg-slate-900 text-white text-[11px] font-bold">
+                    <th class="p-3 text-center w-10 bg-slate-900">STT</th>
+                    <th class="p-3 w-32 bg-slate-900">Ngày Tháng</th>
+                    <th class="p-3 w-40 bg-slate-900 relative">Tên Nhân Sự (Gõ mới đề xuất)</th>
+                    <th class="p-3 w-28 bg-slate-900">Số Phiếu (Tự nhảy)</th>
+                    <th class="p-3 w-32 bg-slate-900">Biển Số Xe</th>
+                    <th class="p-3 w-36 bg-slate-900">Loại Xe</th>
+                    <th class="p-3 w-40 bg-slate-900">Nguồn Đơn</th>
+                    <th class="p-3 w-28 bg-slate-900">Điểm Đón</th>
+                    <th class="p-3 min-w-[220px] bg-slate-900">Điểm Đến</th>
+                    <th class="p-3 w-36 text-right bg-slate-900">Tổng Tiền</th>
+                    <th class="p-3 w-32 bg-slate-900">Thanh Toán</th>
+                    <th class="p-3 min-w-[180px] bg-slate-900">Ghi Chú</th>
+                  </tr>
+                </thead>
+                <tbody id="tbody-batch" class="divide-y divide-slate-200 text-xs"></tbody>
               </table>
             </div>
           </div>

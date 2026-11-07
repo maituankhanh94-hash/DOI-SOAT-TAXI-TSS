@@ -31,7 +31,7 @@
 - Xóa đơn ở Trang Quản Lý: nhập lại MK của chính quản lý (reauthenticate). Nút 🔑 Đổi Mật Khẩu cho mọi tài khoản. Bị khóa khi đang dùng → tự đăng xuất.
 - Môi trường: `FORCE_TEST_ENV` trong index.html (nhánh thử = true, main = false) hoặc hostname có `-git-`/localhost → vùng `test_env/`, nhãn 🧪 BẢN THỬ, có nút "Chép dữ liệu thật vào bản thử" (chỉ đọc dữ liệu thật).
 - Quy tắc: `firebase-rules/quy-tac-buoc-1.json` (chuyển tiếp: đường dẫn thật vẫn công khai, `test_env` khóa chặt) và `quy-tac-buoc-2.json` (khóa chặt cả hai). Sinh bằng script trong lịch sử phiên; giữ hai file đồng bộ khi sửa.
-- Trình tự lên bản chính: bật Email/Password (đã xong) → dán quy tắc bước 1 (đã xong) → thử bản thử (đã xong) → FORCE_TEST_ENV=false, merge main (07/11) → quản lý thiết lập lần đầu + chuyển đổi tài khoản → dán quy tắc bước 2. Kiểm tra lại với người dùng 2 bước cuối đã làm chưa. Trên nhánh thử, link `-git-` vẫn tự vào vùng thử nên giữ FORCE_TEST_ENV=false cũng được.
+- Trình tự lên bản chính: bật Email/Password (đã xong) → dán quy tắc bước 1 (đã xong) → thử bản thử (đã xong) → FORCE_TEST_ENV=false, merge main (07/11) → quản lý thiết lập lần đầu + chuyển đổi tài khoản → dán quy tắc bước 2 (ảnh console xác nhận đã Publish quy tắc bước 2 ngày 07/11). HIỆN TẠI DB THẬT ĐÃ KHÓA. Trên nhánh thử, link `-git-` vẫn tự vào vùng thử nên giữ FORCE_TEST_ENV=false cũng được.
 - Nhập hàng loạt 20 dòng; tên nhân sự "A + B" → tách đơn chia đều tiền (phiếu `123-1/2`). Chặn trùng (phiếu+biển số+ngày) trong tài khoản. Khóa sửa/xóa sau `lockHour` giờ sáng hôm sau.
 - Đối soát (Quản lý): gom nhóm theo `số phiếu gốc + biển số + ngày`; so bên Quầy/Kế hoạch với bên Tài xế: lệch tiền < 1.000đ và cùng hình thức TT (hoặc thuộc nhóm đối tác/kế hoạch) → Trùng khớp; thiếu 1 bên → Chưa khớp; còn lại → Lệch. Xuất Excel bằng SheetJS (không màu).
 
@@ -41,8 +41,8 @@
 
 - Luật khớp thanh toán (08/11, người dùng báo "Thẻ vs NVQ vẫn khớp"): `paymentCategory` quy về NVQ / THE / TXT / KH (đơn role plan luôn KH; Công nợ, Chuyển khoản, đối tác = KH); đơn cũ không ghi thanh toán → theo nguồn (đối tác = KH) hoặc "chưa ghi". Khớp khi tiền lệch < 1.000đ VÀ mọi đơn 2 bên cùng 1 nhóm; "Free nội bộ" (FREE) ở bất kỳ bên nào thì khớp mọi hình thức (vẫn so tiền); đơn chọn Free mà tiền > 0 → Lệch "chọn Free nhưng có nhập tiền". `getMismatchReason` hiện lý do dưới nhãn Đơn Lệch và trong Excel. Ô chọn thanh toán hiện đúng giá trị thật (trước đây trống thì hiện nhầm lựa chọn đầu tiên).
 
-## Lỗi/rủi ro đã phát hiện (06/11/2026, chưa sửa)
-1. BẢO MẬT: quy tắc RTDB thật đang là `.read/.write: true` (đã xác nhận qua ảnh console 07/11). Đang sửa ở nhánh `bao-mat-dang-nhap`. Số liệu 07/11: lưu 1,61 MB, tải về 121 MB/6 ngày, kết nối đỉnh 33/100 (gói Spark). DB thật còn 2 nhánh cũ không dùng: `deleted_trips`, `drivers`.
+## Lỗi/rủi ro đã phát hiện (06/11/2026) — việc còn lại: 3–8, tối ưu tải dữ liệu, gợi ý địa chỉ
+1. ĐÃ SỬA 07/11: quy tắc RTDB thật trước đây `.read/.write: true`; nay là quy-tac-buoc-2 + Firebase Auth. Còn tồn: dữ liệu thử `test_env/` và tài khoản Auth `@test.taxi-tss.local` (xóa được trong console nếu muốn). Số liệu 07/11: lưu 1,61 MB, tải về 121 MB/6 ngày, kết nối đỉnh 33/100 (gói Spark). DB thật còn 2 nhánh cũ không dùng: `deleted_trips`, `drivers`.
 2. ĐÃ SỬA (nhánh bao-mat-dang-nhap): màn hình & Excel dùng chung `computeAuditGroups`/`getAuditStatus`. Excel xuất bằng ExcelJS 4.4.0 (tải khi cần): sheet "Đối Soát" (màu theo trạng thái, kẻ ô, nhóm theo ngày, gộp ô STT/Trạng thái, dòng cộng ngày + tổng cộng, ký tên) và sheet "Tổng Hợp" (theo trạng thái / hình thức TT / nhân sự). Ngày gõ thiếu dấu ("01/112026") được `normalizeDateInput` tự sửa; nhập đơn kiểm tra ngày hợp lệ (`isValidDateStr`).
 3. "Tổng doanh thu ngày" của Quản lý cộng cả đơn Tài xế lẫn Quầy → 1 chuyến bị tính 2 lần (đã tái hiện: 300k → 600k).
 4. Sửa số phiếu (modal Sửa hoặc ô sửa nhanh của Quản lý) không cập nhật `originalTicket` → sửa phiếu gõ nhầm vẫn không ghép cặp được.

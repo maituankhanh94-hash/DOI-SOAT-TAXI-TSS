@@ -2188,7 +2188,7 @@
     function normalizePlate(p) { return String(p || '').toUpperCase().replace(/[^A-Z0-9]/g, ''); }
 
     // Quy đổi hình thức thanh toán về 1 nhóm để so 2 bên:
-    //  NVQ = Nhân viên quầy thu, THE = Thẻ, TXT = Tài xế thu, KH = Kế hoạch / Công nợ / đối tác.
+    //  FREE = Free nội bộ (khớp với mọi hình thức), NVQ = Nhân viên quầy thu, THE = Thẻ, TXT = Tài xế thu, KH = Kế hoạch / Công nợ / đối tác.
     //  Đơn của Team Kế Hoạch luôn là KH. Đơn cũ không ghi thanh toán -> lấy theo nguồn đơn (đối tác = KH), nếu không thì là "chưa ghi".
     function paymentCategory(t) {
       if (t.role === 'plan') return 'KH';
@@ -2197,13 +2197,14 @@
         const src = String(t.source || '').toLowerCase();
         return PARTNER_KEYWORDS.some(k => src.includes(k)) ? 'KH' : 'CHUA_GHI';
       }
+      if (/free|miễn phí|mien phi/.test(raw)) return 'FREE';
       if (/nhân viên quầy|^nvq/.test(raw)) return 'NVQ';
       if (/^thẻ|^the\b|quẹt|card|pos/.test(raw)) return 'THE';
       if (/tài xế thu|^txt\b/.test(raw)) return 'TXT';
       if (/kế hoạch|công nợ|chuyển khoản/.test(raw) || PARTNER_KEYWORDS.some(k => raw.includes(k))) return 'KH';
       return raw;
     }
-    const PAY_CAT_LABEL = { NVQ: 'Nhân Viên Quầy Thu', THE: 'Thẻ', TXT: 'Tài Xế Thu', KH: 'Kế Hoạch', CHUA_GHI: '(chưa ghi)' };
+    const PAY_CAT_LABEL = { FREE: 'Free Nội Bộ', NVQ: 'Nhân Viên Quầy Thu', THE: 'Thẻ', TXT: 'Tài Xế Thu', KH: 'Kế Hoạch', CHUA_GHI: '(chưa ghi)' };
 
     // Trả về '' nếu khớp, ngược lại là lý do lệch (để hiện cho người xem)
     function getMismatchReason(group) {
@@ -2215,7 +2216,9 @@
       if (Math.abs(sumPos - sumDriver) >= 1000) reasons.push(`Lệch tiền ${Math.abs(sumPos - sumDriver).toLocaleString('vi-VN')} ₫`);
       const catsPos = [...new Set(posTrips.map(paymentCategory))];
       const catsDrv = [...new Set(driverTrips.map(paymentCategory))];
-      if (!(catsPos.length === 1 && catsDrv.length === 1 && catsPos[0] === catsDrv[0])) {
+      // "Free nội bộ" ở bất kỳ bên nào: khớp với mọi hình thức thanh toán (vẫn so tiền)
+      const hasFree = catsPos.includes('FREE') || catsDrv.includes('FREE');
+      if (!hasFree && !(catsPos.length === 1 && catsDrv.length === 1 && catsPos[0] === catsDrv[0])) {
         const lb = trips => [...new Set(trips.map(t => t.role === 'plan' && !t.paymentMethod ? 'Kế Hoạch' : (t.paymentMethod || '(chưa ghi)')))].join('/');
         reasons.push(`Khác thanh toán: ${lb(posTrips)} ≠ ${lb(driverTrips)}`);
       }

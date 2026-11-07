@@ -37,7 +37,7 @@
 
 ## Lỗi/rủi ro đã phát hiện (06/11/2026, chưa sửa)
 1. BẢO MẬT: quy tắc RTDB thật đang là `.read/.write: true` (đã xác nhận qua ảnh console 07/11). Đang sửa ở nhánh `bao-mat-dang-nhap`. Số liệu 07/11: lưu 1,61 MB, tải về 121 MB/6 ngày, kết nối đỉnh 33/100 (gói Spark). DB thật còn 2 nhánh cũ không dùng: `deleted_trips`, `drivers`.
-2. Excel xuất ra dùng luật đối soát khác màn hình (so khắt khe tên hình thức TT) → màn hình "Trùng khớp" nhưng Excel "Không trùng khớp" (đã tái hiện).
+2. ĐÃ SỬA (nhánh bao-mat-dang-nhap): màn hình & Excel dùng chung `computeAuditGroups`/`getAuditStatus`. Excel xuất bằng ExcelJS 4.4.0 (tải khi cần): sheet "Đối Soát" (màu theo trạng thái, kẻ ô, nhóm theo ngày, gộp ô STT/Trạng thái, dòng cộng ngày + tổng cộng, ký tên) và sheet "Tổng Hợp" (theo trạng thái / hình thức TT / nhân sự). Ngày gõ thiếu dấu ("01/112026") được `normalizeDateInput` tự sửa; nhập đơn kiểm tra ngày hợp lệ (`isValidDateStr`).
 3. "Tổng doanh thu ngày" của Quản lý cộng cả đơn Tài xế lẫn Quầy → 1 chuyến bị tính 2 lần (đã tái hiện: 300k → 600k).
 4. Sửa số phiếu (modal Sửa hoặc ô sửa nhanh của Quản lý) không cập nhật `originalTicket` → sửa phiếu gõ nhầm vẫn không ghép cặp được.
 5. Không escape HTML: dấu `"` trong điểm đến/ghi chú bị cắt trong ô sửa nhanh, và khi rời ô sẽ lưu bản bị cắt → mất chữ (đã tái hiện).

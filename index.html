@@ -519,6 +519,12 @@
 
     function normalizeDateInput(rawDate) {
       if (!rawDate) return '';
+      rawDate = String(rawDate).trim();
+      // Ngày gõ thiếu dấu "/" (vd "01/112026", "01112026") -> "01/11/2026"
+      const digits = rawDate.replace(/\D/g, '');
+      if (digits.length === 8 && !/^\d{4}-/.test(rawDate) && (rawDate.split('/').length !== 3 || rawDate.split('/')[2].length !== 4)) {
+        return `${digits.slice(0, 2)}/${digits.slice(2, 4)}/${digits.slice(4)}`;
+      }
       if (rawDate.includes('-')) {
         const p = rawDate.split('-');
         if (p.length === 3) {
@@ -531,6 +537,13 @@
         }
       }
       return rawDate;
+    }
+
+    function isValidDateStr(d) {
+      const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(d || '');
+      if (!m) return false;
+      const dt = new Date(+m[3], +m[2] - 1, +m[1]);
+      return dt.getFullYear() === +m[3] && dt.getMonth() === +m[2] - 1 && dt.getDate() === +m[1] && +m[3] >= 2020 && +m[3] <= 2100;
     }
 
     function formatDisplayTicket(ticketStr) {
@@ -1411,6 +1424,7 @@
 
       // Mảng lưu trữ các đơn chuẩn bị đưa lên để check trùng ngay trong nội bộ lô nhập hàng loạt này
       let batchEntriesToCheck = [];
+      let invalidDateRows = [];
 
       for (let i = 0; i < 20; i++) {
         let rawDate = document.getElementById(`date-${i}`).value.trim();
@@ -1427,6 +1441,11 @@
         const pickup = document.getElementById(`pick-${i}`).value;
         const pay = document.getElementById(`m-${i}`).value;
         const note = document.getElementById(`note-${i}`).value.trim();
+
+        if (rawStaff && ticket && plate && dest && !isValidDateStr(formattedDate)) {
+          invalidDateRows.push(`Dòng ${i+1} ("${rawDate}")`);
+          continue;
+        }
 
         if (rawStaff && ticket && plate && dest) {
           const cleanTicket = ticket.trim().toUpperCase();
@@ -1476,6 +1495,10 @@
         }
       }
 
+      if (invalidDateRows.length > 0) {
+        alert(`Ngày tháng không đúng dạng ngày/tháng/năm (vd 07/11/2026) ở: ${invalidDateRows.join(', ')}.\nCác dòng này CHƯA được lưu, vui lòng sửa lại ngày.`);
+      }
+
       if (duplicateDetails.length > 0) {
         showFloatingWarning(`Đã chặn ${duplicateDetails.length} đơn trùng lặp (trùng trong danh sách nhập hoặc đã có trên Cloud): ${duplicateDetails.join(', ')}`);
       }
@@ -1493,7 +1516,7 @@
         }).catch(err => {
           alert("Lỗi lưu dữ liệu: " + err.message);
         });
-      } else if (duplicateDetails.length === 0) {
+      } else if (duplicateDetails.length === 0 && invalidDateRows.length === 0) {
         alert("Vui lòng điền đầy đủ Tên Nhân Sự, Số Phiếu, Biển Số và Điểm Đến!");
       }
     }
@@ -1511,7 +1534,7 @@
             <h3 class="text-xs sm:text-sm font-extrabold text-slate-900 uppercase">📊 Quản Lý Hệ Thống & Cấu Hình</h3>
             <div class="flex flex-wrap gap-2 justify-center">
               ${IS_TEST_ENV ? `<button onclick="copyRealDataToTest()" class="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-slate-900 rounded-xl text-xs font-extrabold shadow-sm">🧪 Chép Dữ Liệu Thật Vào Bản Thử</button>` : ''}
-              <button onclick="exportCustomExcel()" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-sm">📥 Xuất Excel (Đã Lọc & Có Thanh Toán, Ghi Chú)</button>
+              <button id="btn-export-excel" onclick="exportCustomExcel()" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-sm">📥 Xuất Excel Đối Soát (Có Màu, Kẻ Ô)</button>
             </div>
           </div>
 
@@ -2121,49 +2144,61 @@
       }
     }
 
-    function updateManagerAuditTable() {
-      const tb = document.getElementById('tbody-mgr');
-      if (!tb) return;
-      if (allCompanyTrips.length === 0) {
-        tb.innerHTML = `<tr><td colspan="15" class="p-4 text-center text-slate-400">Chưa có dữ liệu đơn hàng.</td></tr>`;
-        return;
-      }
+    // ===== ĐỐI SOÁT: một hàm dùng chung cho màn hình và file Excel (để 2 nơi luôn ra cùng kết quả) =====
+    const AUDIT_STATUS = {
+      match: { label: '🟢 Trùng Khớp', text: 'Trùng Khớp' },
+      mismatch: { label: '🔴 Đơn Lệch', text: 'Đơn Lệch' },
+      unmatched: { label: '⏳ Đơn Chưa Khớp (Thiếu 1 bên)', text: 'Chưa Khớp (Thiếu 1 bên)' }
+    };
+    const PARTNER_KEYWORDS = ['kế hoạch', 'sq', 'g1', 'vto', 'công nợ', 'sanna', 'stella', 'jovia', 'vdt', 'monica', 'november', 'thanhlong', 'fast track'];
 
-      const startInp = document.getElementById('audit-start-date');
-      const endInp = document.getElementById('audit-end-date');
-      
-      let startDateVal = startInp && startInp.value ? startInp.value : ''; 
-      let endDateVal = endInp && endInp.value ? endInp.value : '';      
+    function tripDateKey(t) {
+      // dd/mm/yyyy -> yyyy-mm-dd (để so sánh / sắp xếp); '' nếu ngày không hợp lệ
+      const p = normalizeDateInput(t.dateStr).split('/');
+      return (p.length === 3 && p[2].length === 4) ? `${p[2]}-${p[1]}-${p[0]}` : '';
+    }
 
-      const roleFilterEl = document.getElementById('audit-role-filter');
-      const roleFilter = roleFilterEl ? roleFilterEl.value : 'all';
-      
-      const matchStatusFilterEl = document.getElementById('audit-match-status-filter');
-      const matchStatusFilter = matchStatusFilterEl ? matchStatusFilterEl.value : 'all';
+    function getAuditStatus(group) {
+      const posTrips = group.filter(x => x.role === 'pos' || x.role === 'plan');
+      const driverTrips = group.filter(x => x.role === 'driver');
+      if (posTrips.length === 0 || driverTrips.length === 0) return 'unmatched';
+      const sumPos = posTrips.reduce((acc, x) => acc + Number(x.totalFare || 0), 0);
+      const sumDriver = driverTrips.reduce((acc, x) => acc + Number(x.totalFare || 0), 0);
+      const posPay = (posTrips[0].paymentMethod || posTrips[0].source || '').toLowerCase();
+      const driverPay = (driverTrips[0].paymentMethod || driverTrips[0].source || '').toLowerCase();
+      // Cả hai bên thuộc nhóm Kế Hoạch / Đối tác thì không so tên hình thức thanh toán, chỉ xét tổng tiền
+      const isBothPlanOrPartner = PARTNER_KEYWORDS.some(k => posPay.includes(k) || driverPay.includes(k));
+      return (Math.abs(sumPos - sumDriver) < 1000 && (posPay === driverPay || isBothPlanOrPartner)) ? 'match' : 'mismatch';
+    }
 
-      const searchInputEl = document.getElementById('audit-search-input');
-      const keyword = searchInputEl ? searchInputEl.value.trim().toLowerCase() : '';
+    function getAuditFilters() {
+      const val = id => { const el = document.getElementById(id); return el ? el.value : ''; };
+      return {
+        startDateVal: val('audit-start-date') || '',
+        endDateVal: val('audit-end-date') || '',
+        roleFilter: val('audit-role-filter') || 'all',
+        matchStatusFilter: val('audit-match-status-filter') || 'all',
+        keyword: (val('audit-search-input') || '').trim().toLowerCase()
+      };
+    }
 
-      let pairMap = {};
+    // Trả về danh sách nhóm [{trips, status, dateKey}] đã lọc theo bộ lọc trên màn hình
+    function computeAuditGroups(f) {
+      const pairMap = {};
       allCompanyTrips.forEach(t => {
-        if (roleFilter !== 'all' && t.role !== roleFilter) return;
-
-        if (t.dateStr && (startDateVal || endDateVal)) {
-          const norm = normalizeDateInput(t.dateStr);
-          const p = norm.split('/');
-          if (p.length === 3) {
-            const tFormatted = `${p[2]}-${p[1]}-${p[0]}`;
-            if (startDateVal && tFormatted < startDateVal) return;
-            if (endDateVal && tFormatted > endDateVal) return;
+        if (f.roleFilter !== 'all' && t.role !== f.roleFilter) return;
+        if (f.startDateVal || f.endDateVal) {
+          const k = tripDateKey(t);
+          if (k) {
+            if (f.startDateVal && k < f.startDateVal) return;
+            if (f.endDateVal && k > f.endDateVal) return;
           }
         }
-
         const ticketKey = (t.originalTicket || t.ticketNumber || '').trim().toUpperCase();
         const plate = (t.plateNumber || '').trim().toUpperCase();
         if (ticketKey && plate) {
           const baseTicket = ticketKey.split('-')[0].split('/')[0];
-          
-          // GOM CHUNG MỘT NHÓM DUY NHẤT THEO SỐ PHIẾU + BIỂN SỐ + NGÀY (GIÚP ĐỐI SOÁT CHÍNH XÁC KHI ĐỔI HÌNH THỨC THANH TOÁN)
+          // Gom chung một nhóm theo Số phiếu + Biển số + Ngày
           const key = `${baseTicket}_${plate}_${normalizeDateInput(t.dateStr)}`;
           if (!pairMap[key]) pairMap[key] = [];
           pairMap[key].push(t);
@@ -2172,87 +2207,51 @@
         }
       });
 
-      let groupList = Object.values(pairMap);
+      const defaultPay = paymentOptions[0] || 'Nhân Viên Quầy Thu';
+      const groups = [];
+      Object.values(pairMap).forEach(trips => {
+        trips.sort((a, b) => ((a.role === 'pos' || a.role === 'plan') ? 0 : 1) - ((b.role === 'pos' || b.role === 'plan') ? 0 : 1) || (a.timestamp || 0) - (b.timestamp || 0));
+        const status = getAuditStatus(trips);
+        if (f.matchStatusFilter !== 'all' && status !== f.matchStatusFilter) return;
+        const kw = f.keyword;
+        if (kw) {
+          let pass;
+          if (kw === 'khớp' || kw === 'trùng khớp') pass = status === 'match';
+          else if (kw === 'lệch' || kw === 'đơn lệch') pass = status === 'mismatch';
+          else if (kw === 'chưa khớp' || kw === 'đơn lẻ' || kw === 'thiếu') pass = status === 'unmatched';
+          else pass = trips.some(t => `${t.dateStr} ${t.timeStr} ${t.role} ${t.staff} ${t.ticketNumber} ${t.plateNumber} ${t.carType || ''} ${t.source || ''} ${t.destination} ${t.paymentMethod || defaultPay} ${t.note || ''} ${t.totalFare}`.toLowerCase().includes(kw));
+          if (!pass) return;
+        }
+        groups.push({ trips, status, dateKey: tripDateKey(trips[0]), ts: Math.min(...trips.map(t => t.timestamp || 0)) });
+      });
+      return groups;
+    }
+
+    function updateManagerAuditTable() {
+      const tb = document.getElementById('tbody-mgr');
+      if (!tb) return;
+      if (allCompanyTrips.length === 0) {
+        tb.innerHTML = `<tr><td colspan="15" class="p-4 text-center text-slate-400">Chưa có dữ liệu đơn hàng.</td></tr>`;
+        return;
+      }
+      const groupList = computeAuditGroups(getAuditFilters());
       if (groupList.length === 0) {
         tb.innerHTML = `<tr><td colspan="15" class="p-4 text-center text-slate-400">Không tìm thấy dữ liệu đối soát phù hợp.</td></tr>`;
         return;
       }
+      // Màn hình: ngày mới nhất lên trên
+      groupList.sort((a, b) => (b.dateKey || '').localeCompare(a.dateKey || '') || b.ts - a.ts);
 
-      groupList.sort((groupA, groupB) => {
-        let sampleA = groupA[0] || {};
-        let sampleB = groupB[0] || {};
-        let partsA = normalizeDateInput(sampleA.dateStr).split('/');
-        let partsB = normalizeDateInput(sampleB.dateStr).split('/');
-
-        if (partsA.length === 3 && partsB.length === 3) {
-          let numA = parseInt(`${partsA[2]}${partsA[1]}${partsA[0]}`, 10);
-          let numB = parseInt(`${partsB[2]}${partsB[1]}${partsB[0]}`, 10);
-          if (numA !== numB) return numB - numA;
-        }
-        return (sampleB.timestamp || 0) - (sampleA.timestamp || 0);
-      });
+      const statusBadge = {
+        unmatched: '<span class="px-2 py-1 bg-amber-100 text-amber-800 font-bold rounded-lg text-[10px]">⏳ Đơn Chưa Khớp (Thiếu 1 bên)</span>',
+        match: '<span class="px-2 py-1 bg-emerald-100 text-emerald-800 font-extrabold rounded-lg text-[10px]">🟢 Trùng Khớp</span>',
+        mismatch: '<span class="px-2 py-1 bg-rose-100 text-rose-800 font-extrabold rounded-lg animate-pulse text-[10px]">🔴 Đơn Lệch</span>'
+      };
 
       let rowsHtml = '';
-      groupList.forEach(group => {
-        group.sort((a, b) => (a.role === 'pos' || a.role === 'plan' ? -1 : 1));
-
-        const posTrips = group.filter(x => x.role === 'pos' || x.role === 'plan');
-        const driverTrips = group.filter(x => x.role === 'driver');
-
-        let statusHtml = '';
-        let statusType = '';
-
-        if (posTrips.length === 0 || driverTrips.length === 0) {
-          statusType = 'unmatched';
-          statusHtml = '<span class="px-2 py-1 bg-amber-100 text-amber-800 font-bold rounded-lg text-[10px]">⏳ Đơn Chưa Khớp (Thiếu 1 bên)</span>';
-        } else {
-          const sumPos = posTrips.reduce((acc, x) => acc + Number(x.totalFare || 0), 0);
-          const sumDriver = driverTrips.reduce((acc, x) => acc + Number(x.totalFare || 0), 0);
-
-          const defaultPay = paymentOptions[0] || 'Nhân Viên Quầy Thu';
-          const posPay = (posTrips[0].paymentMethod || posTrips[0].source || '').toLowerCase();
-          const driverPay = (driverTrips[0].paymentMethod || driverTrips[0].source || '').toLowerCase();
-
-          // Kiểm tra nếu cả hai bên đều thuộc nhóm Kế Hoạch / Đối tác thì bỏ qua việc so sánh khắt khe tên hình thức thanh toán chữ cái, chỉ xét tổng tiền
-          const isBothPlanOrPartner = (
-            posPay.includes('kế hoạch') || posPay.includes('sq') || posPay.includes('g1') || posPay.includes('vto') || posPay.includes('công nợ') || posPay.includes('sanna') || posPay.includes('stella') || posPay.includes('jovia') || posPay.includes('vdt') || posPay.includes('monica') || posPay.includes('november') || posPay.includes('thanhlong') || posPay.includes('fast track') ||
-            driverPay.includes('kế hoạch') || driverPay.includes('sq') || driverPay.includes('g1') || driverPay.includes('vto') || driverPay.includes('công nợ') || driverPay.includes('sanna') || driverPay.includes('stella') || driverPay.includes('jovia') || driverPay.includes('vdt') || driverPay.includes('monica') || driverPay.includes('november') || driverPay.includes('thanhlong') || driverPay.includes('fast track')
-          );
-
-          if (Math.abs(sumPos - sumDriver) < 1000 && (posPay === driverPay || isBothPlanOrPartner)) {
-            statusType = 'match';
-            statusHtml = '<span class="px-2 py-1 bg-emerald-100 text-emerald-800 font-extrabold rounded-lg text-[10px]">🟢 Trùng Khớp</span>';
-          } else {
-            statusType = 'mismatch';
-            statusHtml = '<span class="px-2 py-1 bg-rose-100 text-rose-800 font-extrabold rounded-lg animate-pulse text-[10px]">🔴 Đơn Lệch</span>';
-          }
-        }
-
-        if (matchStatusFilter !== 'all' && statusType !== matchStatusFilter) {
-          return;
-        }
-
-        let groupPassesKeyword = true;
-        if (keyword) {
-          if (keyword === 'khớp' || keyword === 'trùng khớp') {
-            groupPassesKeyword = (statusType === 'match');
-          } else if (keyword === 'lệch' || keyword === 'đơn lệch') {
-            groupPassesKeyword = (statusType === 'mismatch');
-          } else if (keyword === 'chưa khớp' || keyword === 'đơn lẻ' || keyword === 'thiếu') {
-            groupPassesKeyword = (statusType === 'unmatched');
-          } else {
-            groupPassesKeyword = group.some(t => {
-              const defaultPay = paymentOptions[0] || 'Nhân Viên Quầy Thu';
-              const rowString = `${t.dateStr} ${t.timeStr} ${t.role} ${t.staff} ${t.ticketNumber} ${t.plateNumber} ${t.carType || ''} ${t.source || ''} ${t.destination} ${t.paymentMethod || defaultPay} ${t.note || ''} ${t.totalFare}`.toLowerCase();
-              return rowString.includes(keyword);
-            });
-          }
-        }
-
-        if (!groupPassesKeyword) return;
-
+      groupList.forEach(({ trips: group, status }) => {
+        const statusHtml = statusBadge[status];
         group.forEach((t, idx) => {
-          const defaultPay = paymentOptions[0] || 'Nhân Viên Quầy Thu';
           const isPos = t.role === 'pos';
           const isPlan = t.role === 'plan';
           const roleBadge = isPlan 
@@ -2307,112 +2306,415 @@
       tb.innerHTML = rowsHtml;
     }
 
-    function exportCustomExcel() {
-      if (allCompanyTrips.length === 0) { alert("Không có dữ liệu xuất đi!"); return; }
-
-      let startInp = document.getElementById('audit-start-date');
-      let endInp = document.getElementById('audit-end-date');
-      
-      let startDateVal = startInp && startInp.value ? startInp.value : ''; 
-      let endDateVal = endInp && endInp.value ? endInp.value : '';      
-
-      const roleFilter = document.getElementById('audit-role-filter') ? document.getElementById('audit-role-filter').value : 'all';
-      const keyword = document.getElementById('audit-search-input') ? document.getElementById('audit-search-input').value.trim().toLowerCase() : '';
-
-      let pairMap = {};
-      allCompanyTrips.forEach(t => {
-        if (roleFilter !== 'all' && t.role !== roleFilter) return;
-
-        if (t.dateStr && (startDateVal || endDateVal)) {
-          const norm = normalizeDateInput(t.dateStr);
-          const p = norm.split('/');
-          if (p.length === 3) {
-            const tFormatted = `${p[2]}-${p[1]}-${p[0]}`;
-            if (startDateVal && tFormatted < startDateVal) return;
-            if (endDateVal && tFormatted > endDateVal) return;
-          }
-        }
-
-        const rawTicket = (t.originalTicket || t.ticketNumber || '').trim().toUpperCase();
-        const baseTicket = rawTicket.split('/')[0].split('-')[0].trim();
-        const plate = (t.plateNumber || '').trim().toUpperCase();
-
-        if (baseTicket && plate) {
-          const key = `${baseTicket}_${plate}_${normalizeDateInput(t.dateStr)}`;
-          if (!pairMap[key]) pairMap[key] = [];
-          pairMap[key].push(t);
-        } else {
-          pairMap['single_' + t.id] = [t];
-        }
-      });
-
-      let sortedExcelRows = [];
-      Object.values(pairMap).forEach(group => {
-        group.sort((a, b) => (a.role === 'pos' ? -1 : 1));
-
-        const posTrips = group.filter(x => x.role === 'pos' || x.role === 'plan');
-        const driverTrips = group.filter(x => x.role === 'driver');
-
-        let auditStatusStr = 'Đơn Lẻ';
-        if (posTrips.length > 0 && driverTrips.length > 0) {
-          const sumPos = posTrips.reduce((acc, x) => acc + Number(x.totalFare || 0), 0);
-          const sumDriver = driverTrips.reduce((acc, x) => acc + Number(x.totalFare || 0), 0);
-          
-          const defaultPay = paymentOptions[0] || 'Nhân Viên Quầy Thu';
-          const posPay = posTrips[0].paymentMethod || defaultPay;
-          const driverPay = driverTrips[0].paymentMethod || defaultPay;
-
-          if (Math.abs(sumPos - sumDriver) < 1000 && posPay === driverPay) {
-            auditStatusStr = 'Trùng Khớp';
-          } else {
-            auditStatusStr = 'Không Trùng Khớp';
-          }
-        }
-
-        let groupRows = [];
-        group.forEach(t => {
-          const defaultPay = paymentOptions[0] || 'Nhân Viên Quầy Thu';
-          const rowString = `${t.dateStr} ${t.timeStr} ${t.role} ${t.staff} ${t.ticketNumber} ${t.plateNumber} ${t.carType || ''} ${t.source || ''} ${t.destination} ${t.paymentMethod || defaultPay} ${t.note || ''} ${t.totalFare}`.toLowerCase();
-          
-          if (!keyword || rowString.includes(keyword)) {
-            const roleLabel = t.role === 'plan' ? 'Team Kế Hoạch' : (t.role === 'pos' ? 'Bán Vé (Quầy)' : 'Cổng Chủ Xe');
-            groupRows.push({
-              "Ngày": t.dateStr || '--',
-              "Thời Gian Nộp": t.timeStr || '--',
-              "Phân Vùng": roleLabel,
-              "Nhân Sự": t.staff || 'N/A',
-              "Số Phiếu": formatDisplayTicket(t.ticketNumber) || '--',
-              "Biển Số": t.plateNumber || '--',
-              "Loại Xe": t.carType || '--',
-              "Nguồn Đơn": t.source || '--',
-              "Điểm Đến": t.destination || '--',
-              "Hình Thức Thanh Toán": t.paymentMethod || defaultPay,
-              "Ghi Chú": t.note || '',
-              "Tổng Tiền": Number(t.totalFare || 0),
-              "Trạng Thái Đối Soát": auditStatusStr
-            });
-          }
-        });
-
-        if (groupRows.length > 0) {
-          sortedExcelRows.push(...groupRows);
-          sortedExcelRows.push({
-            "Ngày": "", "Thời Gian Nộp": "", "Phân Vùng": "", "Nhân Sự": "", "Số Phiếu": "", "Biển Số": "", "Loại Xe": "", "Nguồn Đơn": "", "Điểm Đến": "", "Hình Thức Thanh Toán": "", "Ghi Chú": "", "Tổng Tiền": "", "Trạng Thái Đối Soát": ""
-          });
-        }
-      });
-
-      if (sortedExcelRows.length === 0) { alert("Không có dữ liệu khớp với khoảng thời gian và từ khóa để xuất!"); return; }
-
-      const worksheet = XLSX.utils.json_to_sheet(sortedExcelRows);
-      worksheet['!autofilter'] = { ref: XLSX.utils.encode_range(XLSX.utils.decode_range(worksheet['!ref'])) };
-      worksheet['!cols'] = [
-        {wch: 14}, {wch: 16}, {wch: 16}, {wch: 18}, {wch: 14}, {wch: 14}, {wch: 16}, {wch: 16}, {wch: 28}, {wch: 22}, {wch: 22}, {wch: 18}, {wch: 22}
+    // ===== XUẤT EXCEL CÓ ĐỊNH DẠNG (ExcelJS, tải khi cần) =====
+    let excelJsPromise = null;
+    function loadExcelJS() {
+      if (window.ExcelJS) return Promise.resolve(window.ExcelJS);
+      if (excelJsPromise) return excelJsPromise;
+      const urls = [
+        'https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js',
+        'https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js',
+        'https://unpkg.com/exceljs@4.4.0/dist/exceljs.min.js'
       ];
+      excelJsPromise = new Promise((resolve, reject) => {
+        const tryLoad = i => {
+          if (i >= urls.length) { excelJsPromise = null; reject(new Error('Không tải được thư viện Excel. Kiểm tra mạng rồi thử lại.')); return; }
+          const s = document.createElement('script');
+          s.src = urls[i];
+          s.onload = () => window.ExcelJS ? resolve(window.ExcelJS) : tryLoad(i + 1);
+          s.onerror = () => { s.remove(); tryLoad(i + 1); };
+          document.head.appendChild(s);
+        };
+        tryLoad(0);
+      });
+      return excelJsPromise;
+    }
 
-      const workbook = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(workbook, worksheet, "DoiSoatTSS");
-      XLSX.writeFile(workbook, "Bao_Cao_Doi_Soat_TSS.xlsx");
+    function fmtDateKeyVN(k) { if (!k) return ''; const p = k.split('-'); return `${p[2]}/${p[1]}/${p[0]}`; }
+
+    async function exportCustomExcel() {
+      if (allCompanyTrips.length === 0) { alert("Không có dữ liệu xuất đi!"); return; }
+      const f = getAuditFilters();
+      const groups = computeAuditGroups(f);
+      if (groups.length === 0) { alert("Không có dữ liệu khớp với khoảng thời gian và bộ lọc để xuất!"); return; }
+      // File Excel: ngày cũ trước, trong ngày theo thời gian nộp
+      groups.sort((a, b) => (a.dateKey || '9999').localeCompare(b.dateKey || '9999') || a.ts - b.ts);
+
+      const btn = document.getElementById('btn-export-excel');
+      const oldTxt = btn ? btn.innerText : '';
+      if (btn) { btn.disabled = true; btn.innerText = '⏳ Đang tạo file Excel...'; }
+      try {
+        const ExcelJS = await loadExcelJS();
+        const wb = new ExcelJS.Workbook();
+        wb.creator = 'TSS POS';
+        wb.created = new Date();
+        buildAuditSheet(wb, groups, f);
+        buildSummarySheet(wb, groups, f);
+        const buf = await wb.xlsx.writeBuffer();
+        const now = new Date();
+        const pad = n => String(n).padStart(2, '0');
+        const range = f.startDateVal || f.endDateVal
+          ? `${(f.startDateVal || 'dau').replace(/-/g, '')}-${(f.endDateVal || 'nay').replace(/-/g, '')}`
+          : 'TatCa';
+        const fileName = `Bao_Cao_Doi_Soat_TSS_${range}_${pad(now.getHours())}h${pad(now.getMinutes())}.xlsx`;
+        const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = fileName;
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000);
+      } catch (e) {
+        alert('Lỗi xuất Excel: ' + (e && e.message ? e.message : e));
+      } finally {
+        if (btn) { btn.disabled = false; btn.innerText = oldTxt; }
+      }
+    }
+
+    const XL = {
+      font: 'Arial',
+      border: { top: { style: 'thin', color: { argb: 'FF94A3B8' } }, left: { style: 'thin', color: { argb: 'FF94A3B8' } }, bottom: { style: 'thin', color: { argb: 'FF94A3B8' } }, right: { style: 'thin', color: { argb: 'FF94A3B8' } } },
+      status: {
+        match: { fill: 'FFDCFCE7', badge: 'FF16A34A', text: 'FF14532D' },
+        mismatch: { fill: 'FFFEE2E2', badge: 'FFDC2626', text: 'FF7F1D1D' },
+        unmatched: { fill: 'FFFEF3C7', badge: 'FFF59E0B', text: 'FF78350F' }
+      },
+      role: {
+        pos: { label: 'Bán Vé (Quầy)', color: 'FF1D4ED8' },
+        plan: { label: 'Team Kế Hoạch', color: 'FF7E22CE' },
+        driver: { label: 'Cổng Chủ Xe', color: 'FFB45309' }
+      },
+      money: '#,##0" ₫"'
+    };
+    function xlFill(cell, argb) { cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb } }; }
+    function xlFont(cell, opts) { cell.font = Object.assign({ name: XL.font, size: 10 }, opts || {}); }
+
+    function filterDescription(f) {
+      const roleTxt = { all: 'Tất cả', pos: 'Bán vé', driver: 'Tài xế', plan: 'Kế hoạch' }[f.roleFilter] || f.roleFilter;
+      const stTxt = { all: 'Tất cả', match: 'Trùng khớp', mismatch: 'Đơn lệch', unmatched: 'Chưa khớp' }[f.matchStatusFilter] || f.matchStatusFilter;
+      return `Phân vùng: ${roleTxt}  •  Trạng thái: ${stTxt}` + (f.keyword ? `  •  Từ khóa: "${f.keyword}"` : '');
+    }
+    function periodDescription(f) {
+      if (!f.startDateVal && !f.endDateVal) return 'Tất cả thời gian';
+      if (f.startDateVal && f.startDateVal === f.endDateVal) return `Ngày ${fmtDateKeyVN(f.startDateVal)}`;
+      return `Từ ngày ${f.startDateVal ? fmtDateKeyVN(f.startDateVal) : '...'} đến ngày ${f.endDateVal ? fmtDateKeyVN(f.endDateVal) : '...'}`;
+    }
+    function sideSums(trips) {
+      let pos = 0, drv = 0, posN = 0, drvN = 0;
+      trips.forEach(t => {
+        const v = Number(t.totalFare || 0);
+        if (t.role === 'driver') { drv += v; drvN++; } else { pos += v; posN++; }
+      });
+      return { pos, drv, posN, drvN };
+    }
+    function xlTitle(ws, lastCol, f, title) {
+      ws.mergeCells(1, 1, 1, lastCol);
+      const c1 = ws.getCell(1, 1);
+      c1.value = 'CÔNG TY CỔ PHẦN DỊCH VỤ HÀNG KHÔNG TSS';
+      xlFont(c1, { bold: true, size: 11, color: { argb: 'FF1E3A8A' } });
+      ws.mergeCells(2, 1, 2, lastCol);
+      const c2 = ws.getCell(2, 1);
+      c2.value = title;
+      xlFont(c2, { bold: true, size: 16, color: { argb: 'FFFFFFFF' } });
+      xlFill(c2, 'FF1E40AF');
+      c2.alignment = { horizontal: 'center', vertical: 'middle' };
+      ws.getRow(2).height = 30;
+      ws.mergeCells(3, 1, 3, lastCol);
+      const c3 = ws.getCell(3, 1);
+      c3.value = periodDescription(f);
+      xlFont(c3, { bold: true, size: 11 });
+      c3.alignment = { horizontal: 'center' };
+      ws.mergeCells(4, 1, 4, lastCol);
+      const now = new Date();
+      const pad = n => String(n).padStart(2, '0');
+      const c4 = ws.getCell(4, 1);
+      c4.value = `${filterDescription(f)}  •  Xuất lúc ${pad(now.getHours())}:${pad(now.getMinutes())} ${pad(now.getDate())}/${pad(now.getMonth() + 1)}/${now.getFullYear()} bởi ${loggedInUser ? loggedInUser.user : ''}`;
+      xlFont(c4, { italic: true, size: 9, color: { argb: 'FF475569' } });
+      c4.alignment = { horizontal: 'center' };
+    }
+    function xlSignature(ws, startRow, lastCol) {
+      const now = new Date();
+      let r = startRow;
+      ws.mergeCells(r, lastCol - 4, r, lastCol);
+      const d = ws.getCell(r, lastCol - 4);
+      d.value = `TP. Hồ Chí Minh, ngày ${now.getDate()} tháng ${now.getMonth() + 1} năm ${now.getFullYear()}`;
+      xlFont(d, { italic: true });
+      d.alignment = { horizontal: 'center' };
+      r++;
+      const third = Math.floor(lastCol / 3);
+      const blocks = [[1, third, 'NGƯỜI LẬP BIỂU'], [third + 1, third * 2, 'KẾ TOÁN'], [third * 2 + 1, lastCol, 'GIÁM ĐỐC']];
+      blocks.forEach(([c1, c2, label]) => {
+        ws.mergeCells(r, c1, r, c2);
+        const h = ws.getCell(r, c1);
+        h.value = label;
+        xlFont(h, { bold: true, size: 11 });
+        h.alignment = { horizontal: 'center' };
+        ws.mergeCells(r + 1, c1, r + 1, c2);
+        const s = ws.getCell(r + 1, c1);
+        s.value = '(Ký, ghi rõ họ tên)';
+        xlFont(s, { italic: true, size: 9, color: { argb: 'FF64748B' } });
+        s.alignment = { horizontal: 'center' };
+      });
+      if (loggedInUser) {
+        ws.mergeCells(r + 6, 1, r + 6, third);
+        const n = ws.getCell(r + 6, 1);
+        n.value = loggedInUser.user;
+        xlFont(n, { bold: true });
+        n.alignment = { horizontal: 'center' };
+      }
+    }
+
+    function buildAuditSheet(wb, groups, f) {
+      const ws = wb.addWorksheet('Đối Soát', {
+        views: [{ state: 'frozen', ySplit: 8, showGridLines: false }],
+        pageSetup: { paperSize: 9, orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0, margins: { left: 0.3, right: 0.3, top: 0.4, bottom: 0.4, header: 0.2, footer: 0.2 }, printTitlesRow: '8:8' },
+        headerFooter: { oddFooter: '&LBáo cáo đối soát TSS&RTrang &P / &N' }
+      });
+      const cols = [
+        ['STT', 6], ['Ngày', 11], ['Giờ Nộp', 8], ['Phân Vùng', 15], ['Nhân Sự', 24], ['Số Phiếu', 12], ['Biển Số', 11],
+        ['Loại Xe', 11], ['Nguồn Đơn', 14], ['Điểm Đón', 9], ['Điểm Đến', 26], ['Thanh Toán', 18], ['Ghi Chú', 20], ['Tổng Tiền', 14], ['Trạng Thái', 17]
+      ];
+      const N = cols.length;
+      ws.columns = cols.map(([, w]) => ({ width: w }));
+      xlTitle(ws, N, f, 'BÁO CÁO ĐỐI SOÁT ĐƠN HÀNG');
+
+      // Ô tổng hợp nhanh (dòng 6)
+      const cnt = { match: 0, mismatch: 0, unmatched: 0 };
+      let totPos = 0, totDrv = 0;
+      groups.forEach(g => { cnt[g.status]++; const s = sideSums(g.trips); totPos += s.pos; totDrv += s.drv; });
+      const boxes = [
+        [1, 3, `Trùng khớp: ${cnt.match} nhóm`, 'match'],
+        [4, 6, `Đơn lệch: ${cnt.mismatch} nhóm`, 'mismatch'],
+        [7, 9, `Chưa khớp: ${cnt.unmatched} nhóm`, 'unmatched'],
+        [10, 12, `Tiền Quầy + Kế hoạch: ${totPos.toLocaleString('vi-VN')} ₫`, null],
+        [13, 15, `Tiền Chủ xe báo: ${totDrv.toLocaleString('vi-VN')} ₫`, null]
+      ];
+      ws.getRow(6).height = 24;
+      boxes.forEach(([c1, c2, text, st]) => {
+        ws.mergeCells(6, c1, 6, c2);
+        const c = ws.getCell(6, c1);
+        c.value = text;
+        const color = st ? XL.status[st] : { fill: 'FFE0E7FF', text: 'FF1E3A8A' };
+        xlFill(c, color.fill);
+        xlFont(c, { bold: true, size: 10, color: { argb: color.text } });
+        c.alignment = { horizontal: 'center', vertical: 'middle' };
+        c.border = XL.border;
+      });
+
+      // Dòng tiêu đề bảng (dòng 8)
+      const hr = ws.getRow(8);
+      cols.forEach(([name], i) => {
+        const c = hr.getCell(i + 1);
+        c.value = name;
+        xlFill(c, 'FF0F172A');
+        xlFont(c, { bold: true, color: { argb: 'FFFFFFFF' } });
+        c.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+        c.border = XL.border;
+      });
+      hr.height = 22;
+
+      let r = 9, stt = 0;
+      const writeTotalRow = (label, sums, fillArgb, bold) => {
+        ws.mergeCells(r, 1, r, 11);
+        const l = ws.getCell(r, 1);
+        l.value = label;
+        xlFont(l, { bold: true, color: { argb: 'FF0F172A' } });
+        l.alignment = { horizontal: 'right', vertical: 'middle' };
+        ws.mergeCells(r, 12, r, 13);
+        const info = ws.getCell(r, 12);
+        info.value = `Quầy+KH: ${sums.posN} đơn | Chủ xe: ${sums.drvN} đơn`;
+        xlFont(info, { size: 9, color: { argb: 'FF334155' } });
+        info.alignment = { horizontal: 'center', vertical: 'middle' };
+        const m = ws.getCell(r, 14);
+        m.value = sums.pos;
+        m.numFmt = XL.money;
+        xlFont(m, { bold: true, color: { argb: 'FF065F46' } });
+        const d = ws.getCell(r, 15);
+        d.value = sums.drv;
+        d.numFmt = '"Chủ xe: "#,##0';
+        xlFont(d, { bold: bold, size: 9, color: { argb: 'FF92400E' } });
+        for (let c = 1; c <= N; c++) { const cell = ws.getCell(r, c); xlFill(cell, fillArgb); cell.border = XL.border; }
+        ws.getRow(r).height = 20;
+        r++;
+      };
+
+      // Nhóm theo ngày
+      const byDay = [];
+      groups.forEach(g => {
+        const last = byDay[byDay.length - 1];
+        if (last && last.dateKey === g.dateKey) last.groups.push(g);
+        else byDay.push({ dateKey: g.dateKey, groups: [g] });
+      });
+      const grand = { pos: 0, drv: 0, posN: 0, drvN: 0 };
+
+      byDay.forEach(day => {
+        // Dòng tiêu đề ngày
+        ws.mergeCells(r, 1, r, N);
+        const dc = ws.getCell(r, 1);
+        const dayTxt = day.dateKey ? fmtDateKeyVN(day.dateKey) : 'Ngày không hợp lệ';
+        dc.value = `📅  NGÀY ${dayTxt}  —  ${day.groups.length} nhóm đơn`;
+        xlFill(dc, 'FFCBD5E1');
+        xlFont(dc, { bold: true, size: 11, color: { argb: 'FF0F172A' } });
+        dc.alignment = { vertical: 'middle' };
+        dc.border = XL.border;
+        ws.getRow(r).height = 20;
+        r++;
+
+        const daySum = { pos: 0, drv: 0, posN: 0, drvN: 0 };
+        day.groups.forEach(g => {
+          stt++;
+          const st = XL.status[g.status];
+          const first = r;
+          g.trips.forEach(t => {
+            const role = XL.role[t.role] || { label: t.role || '', color: 'FF334155' };
+            const vals = [stt, normalizeDateInput(t.dateStr) || '',t.timeStr || '', role.label, t.staff || '', t.ticketNumber || '', t.plateNumber || '',
+              t.carType || '', t.source || '', t.pickup ? 'Ga ' + t.pickup : '', t.destination || '', t.paymentMethod || (paymentOptions[0] || ''), t.note || '',
+              Number(t.totalFare || 0), AUDIT_STATUS[g.status].text];
+            const row = ws.getRow(r);
+            vals.forEach((v, i) => {
+              const c = row.getCell(i + 1);
+              c.value = v;
+              xlFill(c, st.fill);
+              c.border = XL.border;
+              xlFont(c, {});
+              c.alignment = { vertical: 'middle', wrapText: i === 4 || i === 10 || i === 12 };
+            });
+            xlFont(row.getCell(4), { bold: true, color: { argb: role.color } });
+            xlFont(row.getCell(6), { bold: true, color: { argb: 'FF1D4ED8' } });
+            row.getCell(14).numFmt = XL.money;
+            xlFont(row.getCell(14), { bold: true });
+            [1, 2, 3, 6, 7, 10].forEach(i => { row.getCell(i).alignment = { horizontal: 'center', vertical: 'middle' }; });
+            r++;
+          });
+          const last = r - 1;
+          // STT và Trạng thái gộp ô theo nhóm
+          if (last > first) { ws.mergeCells(first, 1, last, 1); ws.mergeCells(first, 15, last, 15); }
+          const sc = ws.getCell(first, 15);
+          xlFill(sc, st.badge);
+          xlFont(sc, { bold: true, color: { argb: 'FFFFFFFF' } });
+          sc.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+          const sn = ws.getCell(first, 1);
+          xlFont(sn, { bold: true });
+          sn.alignment = { horizontal: 'center', vertical: 'middle' };
+          // Viền dưới đậm ngăn cách các nhóm
+          for (let c = 1; c <= N; c++) {
+            const cell = ws.getCell(last, c);
+            cell.border = Object.assign({}, XL.border, { bottom: { style: 'medium', color: { argb: 'FF475569' } } });
+          }
+          const s = sideSums(g.trips);
+          ['pos', 'drv', 'posN', 'drvN'].forEach(k => { daySum[k] += s[k]; grand[k] += s[k]; });
+        });
+        writeTotalRow(`CỘNG NGÀY ${dayTxt}`, daySum, 'FFF1F5F9', false);
+      });
+
+      r++;
+      writeTotalRow('TỔNG CỘNG', grand, 'FFFDE68A', true);
+      const totLabel = ws.getCell(r - 1, 1);
+      xlFont(totLabel, { bold: true, size: 12, color: { argb: 'FF7C2D12' } });
+      xlFont(ws.getCell(r - 1, 14), { bold: true, size: 12, color: { argb: 'FF065F46' } });
+
+      // Ghi chú cách đọc
+      r++;
+      ws.mergeCells(r, 1, r, N);
+      const note = ws.getCell(r, 1);
+      note.value = 'Ghi chú: Tiền "Quầy + Kế hoạch" là doanh thu bán vé; tiền "Chủ xe" là số chủ xe/tài xế báo lại để đối chiếu (không cộng dồn hai bên). Màu xanh = trùng khớp, đỏ = lệch, vàng = chưa đủ 2 bên.';
+      xlFont(note, { italic: true, size: 9, color: { argb: 'FF475569' } });
+      note.alignment = { wrapText: true, vertical: 'top' };
+      ws.getRow(r).height = 28;
+
+      ws.autoFilter = { from: { row: 8, column: 1 }, to: { row: 8, column: N } };
+      xlSignature(ws, r + 2, N);
+    }
+
+    function buildSummarySheet(wb, groups, f) {
+      const ws = wb.addWorksheet('Tổng Hợp', {
+        views: [{ showGridLines: false }],
+        pageSetup: { paperSize: 9, orientation: 'portrait', fitToPage: true, fitToWidth: 1, fitToHeight: 0 }
+      });
+      ws.columns = [{ width: 30 }, { width: 18 }, { width: 14 }, { width: 18 }, { width: 14 }, { width: 18 }];
+      xlTitle(ws, 6, f, 'TỔNG HỢP ĐỐI SOÁT');
+      let r = 6;
+      const header = (cells) => {
+        cells.filter(v => v !== '').forEach((v, i) => {
+          const c = ws.getCell(r, i + 1);
+          c.value = v;
+          xlFill(c, 'FF0F172A');
+          xlFont(c, { bold: true, color: { argb: 'FFFFFFFF' } });
+          c.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+          c.border = XL.border;
+        });
+        ws.getRow(r).height = 30;
+        r++;
+      };
+      const line = (cells, fill, bold) => {
+        cells.filter(v => v !== '').forEach((v, i) => {
+          const c = ws.getCell(r, i + 1);
+          c.value = v;
+          if (fill) xlFill(c, fill);
+          xlFont(c, { bold: !!bold });
+          c.border = XL.border;
+          if (typeof v === 'number') { c.numFmt = '#,##0'; c.alignment = { horizontal: 'right' }; }
+        });
+        r++;
+      };
+      const section = title => {
+        ws.mergeCells(r, 1, r, 6);
+        const c = ws.getCell(r, 1);
+        c.value = title;
+        xlFont(c, { bold: true, size: 12, color: { argb: 'FF1E40AF' } });
+        r++;
+      };
+      const moneyCols = (row, idxs) => idxs.forEach(i => { ws.getCell(row, i).numFmt = XL.money; });
+
+      // 1. Theo trạng thái
+      section('1. Theo trạng thái đối soát');
+      header(['Trạng thái', 'Số nhóm đơn', 'Số đơn Quầy + KH', 'Tiền Quầy + KH', 'Số đơn Chủ xe', 'Tiền Chủ xe']);
+      const tot = { n: 0, posN: 0, pos: 0, drvN: 0, drv: 0 };
+      ['match', 'mismatch', 'unmatched'].forEach(st => {
+        const gs = groups.filter(g => g.status === st);
+        const s = { posN: 0, pos: 0, drvN: 0, drv: 0 };
+        gs.forEach(g => { const x = sideSums(g.trips); s.posN += x.posN; s.pos += x.pos; s.drvN += x.drvN; s.drv += x.drv; });
+        tot.n += gs.length; tot.posN += s.posN; tot.pos += s.pos; tot.drvN += s.drvN; tot.drv += s.drv;
+        line([AUDIT_STATUS[st].text, gs.length, s.posN, s.pos, s.drvN, s.drv], XL.status[st].fill);
+        moneyCols(r - 1, [4, 6]);
+      });
+      line(['TỔNG CỘNG', tot.n, tot.posN, tot.pos, tot.drvN, tot.drv], 'FFFDE68A', true);
+      moneyCols(r - 1, [4, 6]);
+      r++;
+
+      // 2. Theo hình thức thanh toán
+      const allTrips = groups.flatMap(g => g.trips);
+      section('2. Theo hình thức thanh toán');
+      header(['Hình thức thanh toán', 'Số đơn Quầy + KH', 'Tiền Quầy + KH', 'Số đơn Chủ xe', 'Tiền Chủ xe', '']);
+      const payMap = {};
+      allTrips.forEach(t => {
+        const k = t.paymentMethod || paymentOptions[0] || '(Không ghi)';
+        if (!payMap[k]) payMap[k] = { posN: 0, pos: 0, drvN: 0, drv: 0 };
+        const v = Number(t.totalFare || 0);
+        if (t.role === 'driver') { payMap[k].drvN++; payMap[k].drv += v; } else { payMap[k].posN++; payMap[k].pos += v; }
+      });
+      Object.keys(payMap).sort().forEach(k => {
+        const s = payMap[k];
+        line([k, s.posN, s.pos, s.drvN, s.drv, ''], null);
+        moneyCols(r - 1, [3, 5]);
+      });
+      r++;
+
+      // 3. Theo nhân sự
+      section('3. Theo nhân sự');
+      header(['Nhân sự', 'Phân vùng', 'Số đơn', 'Tổng tiền', '', '']);
+      const staffMap = {};
+      allTrips.forEach(t => {
+        const k = `${t.staff || '(Không tên)'}|${t.role}`;
+        if (!staffMap[k]) staffMap[k] = { name: t.staff || '(Không tên)', role: (XL.role[t.role] || { label: t.role }).label, n: 0, v: 0 };
+        staffMap[k].n++;
+        staffMap[k].v += Number(t.totalFare || 0);
+      });
+      Object.values(staffMap).sort((a, b) => a.role.localeCompare(b.role) || b.v - a.v).forEach(s => {
+        line([s.name, s.role, s.n, s.v, '', ''], null);
+        moneyCols(r - 1, [4]);
+      });
+      xlSignature(ws, r + 2, 6);
     }
 
     function formatCurrSmartInput(el) {

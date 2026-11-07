@@ -50,6 +50,13 @@
 - ĐÃ LÊN MAIN 08/11; ảnh console xác nhận quy tắc mới (có .indexOn, places, meta) đã Publish. Chờ người dùng xác nhận quản lý đã đăng nhập để chạy nâng cấp dateKey.
 - Bản thử: nút "Chép Dữ Liệu Thật" hỏi tài khoản QUẢN LÝ BẢN CHÍNH (đọc bằng app Firebase phụ, đọc settings từng mục vì quy tắc không cho đọc cả `settings`).
 
+## Chống mất dữ liệu (nhánh `sao-luu-thung-rac`, 07/11 — sau sự cố mất chấm công ở app HR)
+- `APP_VERSION` (hiện 3) + `meta/minAppVersion`: quản lý đăng nhập tự nâng minAppVersion = APP_VERSION; máy chạy bản cũ hơn → `appOutdated`, khung "Đã có bản app mới" che màn hình, `guardWrite()` chặn ghi (submitBatch, saveEditedTrip, sửa nhanh, xóa, danh mục, khôi phục). **Mỗi khi đổi cách lưu dữ liệu: TĂNG APP_VERSION.**
+- Thùng rác: xóa đơn → `deleteTripsToTrash` ghi `deleted_trips/<id>` (+deletedAt, deletedBy) cùng lúc với xóa; quy tắc cũ chặn thì vẫn xóa như trước. Quản lý: nút 🗑️ Thùng Rác (30 ngày, `orderByChild('deletedAt')`), khôi phục không đè đơn đang có. Nhánh `deleted_trips` thật có dữ liệu cũ không có deletedAt → không hiện, không đụng tới.
+- Danh mục: `listTxn` (transaction) thêm/xóa đúng mục, xóa theo giá trị; không ghi đè cả mảng.
+- Sao lưu: nút 💾 Tải Bản Sao Lưu (JSON: trips, settings trừ accounts, accounts (không có mật khẩu), places, deleted_trips), ghi `meta/lastBackup`, nhắc đỏ nếu ≥7 ngày. 📤 Khôi Phục Từ File: chỉ THÊM đơn đang thiếu + mục danh mục thiếu, không sửa/xóa gì.
+- Kiểm tra code 07/11: đơn lưu từng bản ghi riêng, không có đoạn tự dọn/xóa; bản app trước 07/11 bị quy tắc chặn hoàn toàn.
+
 ## Lỗi/rủi ro đã phát hiện (06/11/2026) — 3–9 ĐÃ SỬA ở nhánh `cai-tien-doi-soat` (08/11)
 1. ĐÃ SỬA 07/11: quy tắc RTDB thật trước đây `.read/.write: true`; nay là quy-tac-buoc-2 + Firebase Auth. Còn tồn: dữ liệu thử `test_env/` và tài khoản Auth `@test.taxi-tss.local`. Số liệu 07/11: lưu 1,61 MB, tải về 121 MB/6 ngày, kết nối đỉnh 33/100 (gói Spark). DB thật còn 2 nhánh cũ không dùng: `deleted_trips`, `drivers`.
 2. ĐÃ SỬA: màn hình & Excel dùng chung `computeAuditGroups`/`getAuditStatus`; Excel ExcelJS có màu/kẻ ô/nhóm ngày/tổng/ký tên + sheet Tổng Hợp; ngày gõ thiếu dấu tự sửa, ngày sai bị chặn.

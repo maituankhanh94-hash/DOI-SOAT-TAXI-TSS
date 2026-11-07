@@ -84,6 +84,8 @@
     // ===== MÔI TRƯỜNG: BẢN THỬ dùng vùng dữ liệu riêng "test_env/", BẢN CHÍNH dùng gốc =====
     // Trên nhánh thử nghiệm đặt FORCE_TEST_ENV = true. Trước khi đưa lên bản chính (main) đặt lại = false.
     const FORCE_TEST_ENV = false;
+    // Số phiên bản app. TĂNG LÊN mỗi khi đổi cách lưu dữ liệu -> máy còn mở bản cũ sẽ bị khóa ghi và yêu cầu tải lại.
+    const APP_VERSION = 3;
     const IS_TEST_ENV = FORCE_TEST_ENV || /-git-|localhost|127\.0\.0\.1/.test(location.hostname) || location.protocol === 'file:';
     const DB_PREFIX = IS_TEST_ENV ? 'test_env' : '';
     const EMAIL_DOMAIN = IS_TEST_ENV ? 'test.taxi-tss.local' : 'taxi-tss.local';
@@ -189,6 +191,8 @@
       document.getElementById('btn-change-pass').classList.remove('hidden');
       await loadCloudSettings();
       loadPlaces();
+      watchAppVersion();
+      if (r.role === 'manager') watchBackupInfo();
       if (r.role === 'manager') startManagerSession();
       else startWorkerSession(r.role);
     }
@@ -323,14 +327,18 @@
     }
     const inputCls = 'w-full px-3 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold';
 
+    let loginPromptSeq = 0;
     async function promptLogin(role) {
+      const seq = ++loginPromptSeq; // bấm nhiều lần liên tiếp -> chỉ mở 1 hộp đăng nhập
       closeLoginModals();
       if (role === 'manager') {
         // Chưa có tài khoản nào trong hệ thống mới -> thiết lập quản lý lần đầu
         let isEmpty = false;
         try { isEmpty = !(await dbRef('login_index').limitToFirst(1).once('value')).exists(); } catch (e) {}
+        if (seq !== loginPromptSeq) return;
         if (isEmpty) { promptBootstrapManager(); return; }
       }
+      closeLoginModals();
       const titles = { pos: 'Đăng Nhập Bán Vé', driver: 'Đăng Nhập Chủ Xe / Tài Xế', plan: 'Đăng Nhập Team Kế Hoạch', manager: 'Đăng Nhập Quản Lý' };
       const body = `
         <input type="text" id="modal-user" autocomplete="username" placeholder="Tài khoản..." class="${inputCls}">
@@ -338,7 +346,7 @@
       const icon = role === 'manager' ? '📊' : '🔐';
       const bg = role === 'manager' ? 'bg-slate-900' : 'bg-blue-600';
       document.body.insertAdjacentHTML('beforeend', loginModalHtml('login-modal', bg, icon, titles[role] || 'Đăng Nhập', body, 'Xác Nhận', `executeUserLogin('${role}')`));
-      setTimeout(() => { const i = document.getElementById('modal-user'); if (i) i.focus(); }, 50);
+      const mu = document.getElementById('modal-user'); if (mu) mu.focus();
     }
     function promptUserLoginModal(role) { promptLogin(role); }
 
@@ -1448,6 +1456,7 @@
     }
 
     function saveEditedTrip(id, role) {
+      if (!guardWrite()) return;
       const trip = personalTrips.find(x => x.id === id);
       if (!trip) return;
 
@@ -1502,55 +1511,7 @@
       checkboxes.forEach(cb => cb.checked = masterCheckbox.checked);
     }
 
-    function deleteSelectedPersonalTrips() {
-      const checkboxes = document.querySelectorAll('.personal-trip-checkbox:checked');
-      if (checkboxes.length === 0) { alert("Vui lòng tích chọn ít nhất một đơn hàng để xóa!"); return; }
 
-      if (confirm(`Bạn có chắc chắn muốn xóa ${checkboxes.length} đơn hàng đã chọn không?`)) {
-        let updates = {};
-        let deletedList = [];
-        checkboxes.forEach(cb => {
-          const id = cb.value;
-          const trip = personalTrips.find(x => x.id === id);
-          if (trip && canDeleteTrip(trip.timestamp)) {
-            updates[`users_trips/${loggedInUser.user}/${id}`] = null;
-            updates[`trips/${id}`] = null;
-            deletedList.push(trip);
-          }
-        });
-
-        dbRoot().update(updates).then(() => {
-          lastDeletedTripBackup = deletedList;
-          showUndoButton(`Đã xóa ${deletedList.length} đơn hàng!`);
-        });
-      }
-    }
-
-    function deletePersonalTrip(id) {
-      if (!loggedInUser) return;
-      
-      dbRef(`users_trips/${loggedInUser.user}/${id}`).once('value', snap => {
-        const trip = snap.val();
-        
-        if (trip && !canDeleteTrip(trip.timestamp)) {
-          alert(`Đã quá giờ quy định của ngày hôm sau, đơn hàng đã bị khóa và không thể xóa!`);
-          return;
-        }
-
-        if (confirm("Vui lòng xác nhận xóa đơn hàng này?")) {
-          let updates = {};
-          updates[`users_trips/${loggedInUser.user}/${id}`] = null;
-          updates[`trips/${id}`] = null;
-
-          dbRoot().update(updates).then(() => {
-            lastDeletedTripBackup = [trip || { id }];
-            showUndoButton("Đã xóa đơn hàng!");
-          }).catch(err => {
-            alert("Lỗi khi xóa: " + err.message);
-          });
-        }
-      });
-    }
 
     function showUndoButton(message) {
       const existingBtn = document.getElementById('floating-undo-container');
@@ -1568,23 +1529,6 @@
       setTimeout(() => { if(container) container.remove(); }, 10000);
     }
 
-    function restoreDeletedTrips() {
-      if (!lastDeletedTripBackup || lastDeletedTripBackup.length === 0) { alert("Không có đơn hàng nào để khôi phục!"); return; }
-      let updates = {};
-      lastDeletedTripBackup.forEach(trip => {
-        if (!trip.dateKey) trip.dateKey = tripDateKey(trip) || fallbackDateKey(trip);
-        updates[`trips/${trip.id}`] = trip;
-        if (trip.createdBy) {
-          updates[`users_trips/${trip.createdBy}/${trip.id}`] = trip;
-        }
-      });
-      dbRoot().update(updates).then(() => {
-        alert("Đã khôi phục đơn hàng thành công!");
-        lastDeletedTripBackup = null;
-        const container = document.getElementById('floating-undo-container');
-        if (container) container.remove();
-      });
-    }
 
     function handleSmartTicketFocus(currentIndex) {
       const currentInput = document.getElementById(`t-${currentIndex}`);
@@ -1609,7 +1553,7 @@
     }
 
     async function submitBatch(role) {
-      if (!loggedInUser) return;
+      if (!loggedInUser || !guardWrite()) return;
       // Đơn nhập cho ngày cũ hơn khoảng đã tải: tải thêm đơn của đúng ngày đó để kiểm tra trùng
       let dupPool = personalTrips;
       if (staffMode === 'window' && staffWinFrom) {
@@ -1747,6 +1691,10 @@
           <div class="bg-white p-4 sm:p-5 rounded-3xl shadow-md border border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-3">
             <h3 class="text-xs sm:text-sm font-extrabold text-slate-900 uppercase">📊 Quản Lý Hệ Thống & Cấu Hình</h3>
             <div class="flex flex-wrap gap-2 justify-center">
+              <span id="backup-info" class="text-[11px] font-bold px-3 py-1.5 rounded-xl bg-slate-100 text-slate-500">💾 Đang kiểm tra sao lưu...</span>
+              <button id="btn-backup" onclick="downloadBackup()" class="px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-xl text-xs font-bold shadow-sm">💾 Tải Bản Sao Lưu</button>
+              <button onclick="openRestoreFromFile()" class="px-4 py-2 bg-white border-2 border-slate-300 hover:bg-slate-50 text-slate-700 rounded-xl text-xs font-bold shadow-sm">📤 Khôi Phục Từ File</button>
+              <button onclick="openTrashModal()" class="px-4 py-2 bg-rose-50 border-2 border-rose-200 hover:bg-rose-100 text-rose-700 rounded-xl text-xs font-bold shadow-sm">🗑️ Thùng Rác</button>
               ${IS_TEST_ENV ? `<button onclick="copyRealDataToTest()" class="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-slate-900 rounded-xl text-xs font-extrabold shadow-sm">🧪 Chép Dữ Liệu Thật Vào Bản Thử</button>` : ''}
               <button id="btn-export-excel" onclick="exportCustomExcel()" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-sm">📥 Xuất Excel Đối Soát (Có Màu, Kẻ Ô)</button>
             </div>
@@ -1963,6 +1911,7 @@
       const revDateInp = document.getElementById('revenue-date-picker');
       if(revDateInp) revDateInp.value = todayFormatted;
 
+      dbRef('meta/lastBackup').once('value').then(s => renderBackupInfo(s.val())).catch(() => renderBackupInfo(null));
       renderAccountsTable();
       renderSourcesTable();
       renderStaffTable();
@@ -1984,38 +1933,11 @@
       `).join('');
     }
 
-    function addNewPlanPayment() {
-      const input = document.getElementById('new-planpayment-name');
-      const val = input ? input.value.trim() : '';
-      if (!val) { alert("Vui lòng nhập hình thức thanh toán!"); return; }
-      if (planPaymentOptions.includes(val)) { alert("Hình thức này đã tồn tại!"); return; }
-      planPaymentOptions.push(val);
-      dbRef('settings/planPayments').set(planPaymentOptions).then(() => { input.value = ''; renderPlanPaymentsTable(); });
-    }
+    function addNewPlanPayment() { addListItem('planPayments', 'new-planpayment-name', 'hình thức thanh toán'); }
 
-    function addBulkPlanPayment() {
-      const textarea = document.getElementById('bulk-planpayment-text');
-      const raw = textarea ? textarea.value.trim() : '';
-      if (!raw) { alert("Vui lòng dán danh sách vào ô!"); return; }
-      const lines = raw.split('\n').map(l => l.trim()).filter(Boolean);
-      let added = 0;
-      lines.forEach(pt => {
-        if (!planPaymentOptions.includes(pt)) { planPaymentOptions.push(pt); added++; }
-      });
-      dbRef('settings/planPayments').set(planPaymentOptions).then(() => {
-        textarea.value = '';
-        renderPlanPaymentsTable();
-        alert(`Đã thêm thành công ${added} hình thức mới!`);
-      });
-    }
+    function addBulkPlanPayment() { addListBulk('planPayments', 'bulk-planpayment-text', 'hình thức thanh toán'); }
 
-    function deletePlanPayment(idx) {
-      if (planPaymentOptions.length <= 1) { alert("Cần giữ lại ít nhất 1 hình thức thanh toán!"); return; }
-      if (confirm(`Bạn có chắc muốn xóa hình thức "${planPaymentOptions[idx]}" không?`)) {
-        planPaymentOptions.splice(idx, 1);
-        dbRef('settings/planPayments').set(planPaymentOptions).then(() => { renderPlanPaymentsTable(); });
-      }
-    }
+    function deletePlanPayment(idx) { deleteListItem('planPayments', idx, 'hình thức thanh toán'); }
 
     function resetRevenueDateToToday() {
       const revDateInp = document.getElementById('revenue-date-picker');
@@ -2113,49 +2035,321 @@
       };
     }
 
+
+    // ===== CHẶN BẢN APP CŨ: máy còn mở bản cũ hơn meta/minAppVersion thì không được ghi, phải tải lại trang =====
+    let appOutdated = false;
+    function showOutdatedOverlay() {
+      if (document.getElementById('outdated-overlay')) return;
+      document.body.insertAdjacentHTML('beforeend', `
+        <div id="outdated-overlay" class="fixed inset-0 z-[99999] bg-slate-950/90 flex items-center justify-center p-4">
+          <div class="bg-white rounded-3xl max-w-sm w-full p-6 text-center space-y-4 shadow-2xl">
+            <div class="text-4xl">🔄</div>
+            <h3 class="text-sm font-extrabold text-slate-900">ĐÃ CÓ BẢN APP MỚI</h3>
+            <p class="text-xs text-slate-600">Máy này đang mở bản cũ. Để tránh làm hỏng dữ liệu, bản cũ đã bị tạm khóa. Vui lòng tải lại trang (dữ liệu đã lưu không bị mất).</p>
+            <button onclick="location.reload()" class="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-extrabold">Tải Lại Trang Ngay</button>
+          </div>
+        </div>`);
+    }
+    function guardWrite() {
+      if (appOutdated) { showOutdatedOverlay(); return false; }
+      return true;
+    }
+    function watchAppVersion() {
+      dbRef('meta/minAppVersion').on('value', s => {
+        const v = Number(s.val() || 0);
+        if (v > APP_VERSION) { appOutdated = true; showOutdatedOverlay(); }
+        else if (isManager() && v < APP_VERSION) dbRef('meta/minAppVersion').set(APP_VERSION).catch(() => {});
+      }, () => {});
+    }
+
+    // ===== SAO LƯU: tải về 1 file JSON chứa toàn bộ đơn + danh mục (không có mật khẩu) =====
+    const BACKUP_REMIND_DAYS = 7;
+    function pad2(n) { return String(n).padStart(2, '0'); }
+    function fmtDateTime(ms) { const d = new Date(ms); return `${pad2(d.getHours())}:${pad2(d.getMinutes())} ${pad2(d.getDate())}/${pad2(d.getMonth() + 1)}/${d.getFullYear()}`; }
+
+    async function downloadBackup() {
+      const btn = document.getElementById('btn-backup');
+      const old = btn ? btn.innerText : '';
+      if (btn) { btn.disabled = true; btn.innerText = '⏳ Đang sao lưu...'; }
+      try {
+        const data = { app: 'TSS POS - Đối Soát', appVersion: APP_VERSION, env: DB_PREFIX || 'ban-chinh', createdAt: Date.now(), createdBy: loggedInUser.user };
+        data.trips = (await dbRef('trips').once('value')).val() || {};
+        data.settings = {};
+        for (const k of ['sources', 'staff', 'carTypes', 'payments', 'planPayments', 'lockHour']) {
+          const v = (await dbRef('settings/' + k).once('value')).val();
+          if (v !== null && v !== undefined) data.settings[k] = v;
+        }
+        data.accounts = (await dbRef('accounts').once('value')).val() || {};
+        for (const k of ['places', 'deleted_trips']) {
+          try { data[k] = (await dbRef(k).once('value')).val() || {}; } catch (e) { data[k] = {}; }
+        }
+        const n = Object.keys(data.trips).length;
+        const d = new Date();
+        const name = `SaoLuu_TSS_${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}_${pad2(d.getHours())}h${pad2(d.getMinutes())}${DB_PREFIX ? '_BANTHU' : ''}.json`;
+        const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = name;
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000);
+        await dbRef('meta/lastBackup').set({ at: Date.now(), by: loggedInUser.user, trips: n }).catch(() => {});
+        alert(`Đã tải file sao lưu "${name}" (${n} đơn).\nHãy cất file vào Google Drive hoặc máy tính.`);
+      } catch (e) {
+        alert('Lỗi sao lưu: ' + authErrorText(e));
+      } finally {
+        if (btn) { btn.disabled = false; btn.innerText = old; }
+      }
+    }
+
+    function watchBackupInfo() {
+      dbRef('meta/lastBackup').on('value', s => renderBackupInfo(s.val()), () => renderBackupInfo(null));
+    }
+    function renderBackupInfo(info) {
+      const el = document.getElementById('backup-info');
+      if (!el) return;
+      if (!info || !info.at) {
+        el.className = 'text-[11px] font-extrabold px-3 py-1.5 rounded-xl bg-rose-100 text-rose-700';
+        el.innerText = '⚠️ Chưa sao lưu lần nào — bấm "Tải Bản Sao Lưu"';
+        return;
+      }
+      const days = Math.floor((Date.now() - info.at) / 86400000);
+      const late = days >= BACKUP_REMIND_DAYS;
+      el.className = 'text-[11px] font-extrabold px-3 py-1.5 rounded-xl ' + (late ? 'bg-rose-100 text-rose-700' : 'bg-emerald-50 text-emerald-700');
+      el.innerText = `${late ? '⚠️' : '💾'} Sao lưu gần nhất: ${fmtDateTime(info.at)} (${days === 0 ? 'hôm nay' : days + ' ngày trước'})${late ? ' — nên sao lưu lại!' : ''}`;
+    }
+
+    // ===== KHÔI PHỤC TỪ FILE: chỉ THÊM LẠI đơn đang bị thiếu; không sửa, không xóa đơn đang có =====
+    function openRestoreFromFile() {
+      const inp = document.createElement('input');
+      inp.type = 'file';
+      inp.accept = '.json,application/json';
+      inp.onchange = () => { if (inp.files && inp.files[0]) restoreFromFile(inp.files[0]); };
+      inp.click();
+    }
+    async function restoreFromFile(file) {
+      if (!guardWrite()) return;
+      let data;
+      try { data = JSON.parse(await file.text()); } catch (e) { alert('File không đúng định dạng sao lưu!'); return; }
+      if (!data || typeof data.trips !== 'object') { alert('File không phải file sao lưu của app này!'); return; }
+      const fileEnv = data.env || 'ban-chinh', curEnv = DB_PREFIX || 'ban-chinh';
+      if (fileEnv !== curEnv && !confirm(`File này sao lưu từ ${fileEnv === 'ban-chinh' ? 'BẢN CHÍNH' : 'BẢN THỬ'}, đang khôi phục vào ${curEnv === 'ban-chinh' ? 'BẢN CHÍNH' : 'BẢN THỬ'}. Vẫn tiếp tục?`)) return;
+      showTopNotice('⏳ Đang so sánh với dữ liệu hiện có...');
+      try {
+        const cur = (await dbRef('trips').once('value')).val() || {};
+        const missing = Object.values(data.trips).filter(t => t && t.id && !cur[t.id]);
+        // Danh mục: chỉ thêm mục đang thiếu
+        const listAdds = {};
+        for (const k of Object.keys(LIST_STATE)) {
+          const fromFile = data.settings && data.settings[k] ? (Array.isArray(data.settings[k]) ? data.settings[k] : Object.values(data.settings[k])) : [];
+          const add = fromFile.filter(x => x && !LIST_STATE[k].get().includes(x));
+          if (add.length) listAdds[k] = add;
+        }
+        showTopNotice('');
+        const nList = Object.values(listAdds).reduce((a, b) => a + b.length, 0);
+        if (!missing.length && !nList) { alert(`File sao lưu lúc ${data.createdAt ? fmtDateTime(data.createdAt) : '?'}: dữ liệu hiện tại đã đủ, không thiếu đơn nào.`); return; }
+        if (!confirm(`File sao lưu lúc ${data.createdAt ? fmtDateTime(data.createdAt) : '?'} có ${Object.keys(data.trips).length} đơn.\nHiện đang THIẾU ${missing.length} đơn và ${nList} mục danh mục so với file.\n\nKhôi phục lại những phần thiếu này? (Không sửa, không xóa đơn đang có)`)) return;
+        const updates = {};
+        missing.forEach(t0 => {
+          const t = cleanTrip(t0);
+          if (!t.dateKey) t.dateKey = tripDateKey(t) || fallbackDateKey(t);
+          updates[`trips/${t.id}`] = t;
+          if (t.createdBy) updates[`users_trips/${t.createdBy}/${t.id}`] = t;
+        });
+        showTopNotice(`⏳ Đang khôi phục ${missing.length} đơn...`);
+        await writeInChunks(updates);
+        for (const [k, add] of Object.entries(listAdds)) await listTxn(k, arr => [...arr, ...add.filter(x => !arr.includes(x))]);
+        showTopNotice('');
+        alert(`Đã khôi phục ${missing.length} đơn và ${nList} mục danh mục!`);
+      } catch (e) {
+        showTopNotice('');
+        alert('Lỗi khôi phục: ' + authErrorText(e));
+      }
+    }
+
+    // ===== XÓA ĐƠN -> CHUYỂN VÀO THÙNG RÁC (deleted_trips), Quản lý khôi phục được trong 30 ngày =====
+    const TRASH_DAYS = 30;
+    function cleanTrip(t) {
+      const c = Object.assign({}, t);
+      delete c.deletedAt; delete c.deletedBy;
+      return c;
+    }
+    // Xóa danh sách đơn: xóa ở trips + users_trips, đồng thời lưu bản sao vào thùng rác (ghi cùng lúc)
+    async function deleteTripsToTrash(trips) {
+      if (!guardWrite()) return false;
+      const now = Date.now();
+      const updates = {}, trash = {};
+      trips.forEach(t => {
+        if (!t || !t.id) return;
+        updates[`trips/${t.id}`] = null;
+        if (t.createdBy) updates[`users_trips/${t.createdBy}/${t.id}`] = null;
+        trash[`deleted_trips/${t.id}`] = Object.assign(cleanTrip(t), { deletedAt: now, deletedBy: loggedInUser ? loggedInUser.user : '' });
+      });
+      try {
+        await dbRoot().update(Object.assign({}, updates, trash));
+      } catch (e) {
+        // Quy tắc cũ chưa cho ghi thùng rác -> vẫn xóa như trước (nút Khôi Phục 10 giây vẫn dùng được)
+        console.warn('Chưa ghi được thùng rác:', e);
+        await dbRoot().update(updates);
+      }
+      lastDeletedTripBackup = trips.map(cleanTrip);
+      showUndoButton(`Đã xóa ${trips.length} đơn hàng! (Quản lý khôi phục được trong Thùng Rác ${TRASH_DAYS} ngày)`);
+      return true;
+    }
+
+    function deleteSelectedPersonalTrips() {
+      const checkboxes = document.querySelectorAll('.personal-trip-checkbox:checked');
+      if (checkboxes.length === 0) { alert("Vui lòng tích chọn ít nhất một đơn hàng để xóa!"); return; }
+      if (!confirm(`Bạn có chắc chắn muốn xóa ${checkboxes.length} đơn hàng đã chọn không?`)) return;
+      const list = [];
+      checkboxes.forEach(cb => {
+        const trip = personalTrips.find(x => x.id === cb.value);
+        if (trip && canDeleteTrip(trip.timestamp)) list.push(trip);
+      });
+      deleteTripsToTrash(list).catch(err => alert("Lỗi khi xóa: " + err.message));
+    }
+
+    function deletePersonalTrip(id) {
+      if (!loggedInUser) return;
+      dbRef(`users_trips/${loggedInUser.user}/${id}`).once('value', snap => {
+        const trip = snap.val();
+        if (!trip) return;
+        if (!canDeleteTrip(trip.timestamp)) {
+          alert(`Đã quá giờ quy định của ngày hôm sau, đơn hàng đã bị khóa và không thể xóa!`);
+          return;
+        }
+        if (confirm("Vui lòng xác nhận xóa đơn hàng này?")) {
+          deleteTripsToTrash([trip]).catch(err => alert("Lỗi khi xóa: " + err.message));
+        }
+      });
+    }
+
+    function restoreDeletedTrips() {
+      if (!lastDeletedTripBackup || lastDeletedTripBackup.length === 0) { alert("Không có đơn hàng nào để khôi phục!"); return; }
+      if (!guardWrite()) return;
+      const list = lastDeletedTripBackup;
+      restoreTripsFromTrash(list, true).then(() => {
+        alert("Đã khôi phục đơn hàng thành công!");
+        lastDeletedTripBackup = null;
+        const container = document.getElementById('floating-undo-container');
+        if (container) container.remove();
+      }).catch(err => alert("Lỗi khôi phục: " + err.message));
+    }
+
+    // Đưa đơn trở lại trips + users_trips và bỏ khỏi thùng rác
+    async function restoreTripsFromTrash(list, tolerant) {
+      const updates = {}, trashDel = {};
+      list.forEach(t0 => {
+        const trip = cleanTrip(t0);
+        if (!trip.dateKey) trip.dateKey = tripDateKey(trip) || fallbackDateKey(trip);
+        updates[`trips/${trip.id}`] = trip;
+        if (trip.createdBy) updates[`users_trips/${trip.createdBy}/${trip.id}`] = trip;
+        trashDel[`deleted_trips/${trip.id}`] = null;
+      });
+      try {
+        await dbRoot().update(Object.assign({}, updates, trashDel));
+      } catch (e) {
+        if (!tolerant) throw e;
+        await dbRoot().update(updates); // nhân viên không xóa được thùng rác -> chỉ khôi phục đơn
+      }
+    }
+
     function deleteSelectedManagerTrips() {
       const checkboxes = document.querySelectorAll('.manager-trip-checkbox:checked');
       if (checkboxes.length === 0) { alert("Vui lòng tích chọn ít nhất một đơn hàng để xóa!"); return; }
-
+      const ids = [...checkboxes].map(cb => cb.value);
       verifyAndDelete(() => {
-        let updates = {};
-        let deletedList = [];
-        checkboxes.forEach(cb => {
-          const id = cb.value;
-          const trip = allCompanyTrips.find(x => x.id === id);
-          if (trip) {
-            updates[`trips/${id}`] = null;
-            if (trip.createdBy) {
-              updates[`users_trips/${trip.createdBy}/${id}`] = null;
-            }
-            deletedList.push(trip);
-          }
-        });
-
-        dbRoot().update(updates).then(() => {
-          lastDeletedTripBackup = deletedList;
-          showUndoButton(`Đã xóa ${deletedList.length} đơn hàng!`);
-        });
+        const list = ids.map(id => allCompanyTrips.find(x => x.id === id)).filter(Boolean);
+        deleteTripsToTrash(list).catch(err => alert("Lỗi khi xóa: " + err.message));
       });
     }
 
     function adminDeleteTrip(id, createdBy) {
       verifyAndDelete(() => {
-        let trip = allCompanyTrips.find(x => x.id === id);
+        const trip = allCompanyTrips.find(x => x.id === id);
         if (!trip) return;
-
-        let updates = {};
-        updates[`trips/${id}`] = null;
-        if (createdBy) {
-          updates[`users_trips/${createdBy}/${id}`] = null;
-        }
-
-        dbRoot().update(updates).then(() => {
-          lastDeletedTripBackup = [trip];
-          showUndoButton("Đã xóa đơn hàng!");
-        });
+        deleteTripsToTrash([trip]).catch(err => alert("Lỗi khi xóa: " + err.message));
       });
     }
+
+    // Màn hình Thùng Rác (Quản lý)
+    async function openTrashModal() {
+      closeLoginModals();
+      const ex = document.getElementById('trash-modal'); if (ex) ex.remove();
+      document.body.insertAdjacentHTML('beforeend', `
+        <div id="trash-modal" class="fixed inset-0 bg-slate-900/85 z-50 flex items-center justify-center p-3 backdrop-blur-sm">
+          <div class="bg-white rounded-3xl shadow-2xl max-w-5xl w-full p-5 space-y-3 max-h-[92vh] flex flex-col">
+            <div class="flex items-center justify-between border-b pb-3 gap-2">
+              <div>
+                <h3 class="text-sm font-extrabold text-slate-900 uppercase">🗑️ Thùng Rác — đơn đã xóa trong ${TRASH_DAYS} ngày gần nhất</h3>
+                <p class="text-[11px] text-slate-500">Tích chọn rồi bấm Khôi Phục để đưa đơn trở lại.</p>
+              </div>
+              <div class="flex gap-2">
+                <button onclick="restoreSelectedFromTrash()" class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold">🔄 Khôi Phục Đơn Đã Chọn</button>
+                <button onclick="document.getElementById('trash-modal').remove()" class="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold">Đóng</button>
+              </div>
+            </div>
+            <div class="overflow-auto custom-scrollbar flex-1 border rounded-2xl">
+              <table class="w-full text-left border-collapse text-xs min-w-[900px]">
+                <thead class="bg-slate-800 text-white sticky top-0"><tr>
+                  <th class="p-2.5 text-center"><input type="checkbox" onclick="document.querySelectorAll('.trash-cb').forEach(c => c.checked = this.checked)"></th>
+                  <th class="p-2.5">Xóa Lúc</th><th class="p-2.5">Người Xóa</th><th class="p-2.5">Ngày Đơn</th><th class="p-2.5">Phân Vùng</th>
+                  <th class="p-2.5">Nhân Sự</th><th class="p-2.5">Số Phiếu</th><th class="p-2.5">Biển Số</th><th class="p-2.5">Điểm Đến</th><th class="p-2.5 text-right">Tổng Tiền</th>
+                </tr></thead>
+                <tbody id="trash-tbody"><tr><td colspan="10" class="p-4 text-center text-slate-400">Đang tải...</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+        </div>`);
+      try {
+        const cutoff = Date.now() - TRASH_DAYS * 86400000;
+        const snap = await dbRef('deleted_trips').orderByChild('deletedAt').startAt(cutoff).once('value');
+        trashItems = Object.values(snap.val() || {}).filter(t => t && t.id).sort((a, b) => b.deletedAt - a.deletedAt);
+        const tb = document.getElementById('trash-tbody');
+        if (!tb) return;
+        if (!trashItems.length) { tb.innerHTML = `<tr><td colspan="10" class="p-4 text-center text-slate-400">Thùng rác trống.</td></tr>`; return; }
+        const pad = n => String(n).padStart(2, '0');
+        const roleTxt = { pos: 'Bán Vé', driver: 'Tài Xế', plan: 'Kế Hoạch' };
+        tb.innerHTML = trashItems.map(t => {
+          const d = new Date(t.deletedAt);
+          return `<tr class="border-b hover:bg-slate-50">
+            <td class="p-2.5 text-center"><input type="checkbox" class="trash-cb" value="${escHtml(t.id)}"></td>
+            <td class="p-2.5 font-mono">${pad(d.getHours())}:${pad(d.getMinutes())} ${pad(d.getDate())}/${pad(d.getMonth() + 1)}</td>
+            <td class="p-2.5 font-bold">${escHtml(t.deletedBy || '')}</td>
+            <td class="p-2.5">${escHtml(t.dateStr || '')}</td>
+            <td class="p-2.5">${escHtml(roleTxt[t.role] || t.role || '')}</td>
+            <td class="p-2.5 font-bold">${escHtml(t.staff || '')}</td>
+            <td class="p-2.5 font-mono font-bold text-blue-600">${escHtml(t.ticketNumber || '')}</td>
+            <td class="p-2.5 font-mono">${escHtml(t.plateNumber || '')}</td>
+            <td class="p-2.5">${escHtml(t.destination || '')}</td>
+            <td class="p-2.5 text-right font-bold">${Number(t.totalFare || 0).toLocaleString('vi-VN')} ₫</td>
+          </tr>`;
+        }).join('');
+      } catch (e) {
+        const tb = document.getElementById('trash-tbody');
+        if (tb) tb.innerHTML = `<tr><td colspan="10" class="p-4 text-center text-rose-600 font-bold">Chưa mở được thùng rác: ${escHtml(authErrorText(e))} (cần dán quy tắc Firebase mới)</td></tr>`;
+      }
+    }
+    let trashItems = [];
+    async function restoreSelectedFromTrash() {
+      const ids = [...document.querySelectorAll('.trash-cb:checked')].map(c => c.value);
+      if (!ids.length) { alert('Vui lòng tích chọn đơn cần khôi phục!'); return; }
+      if (!guardWrite()) return;
+      const picked = trashItems.filter(t => ids.includes(t.id));
+      try {
+        // Đơn nào đã có lại (vd đã bấm Khôi Phục 10 giây) thì không ghi đè, chỉ bỏ khỏi thùng rác
+        const list = [], already = {};
+        for (const t of picked) {
+          if ((await dbRef('trips/' + t.id).once('value')).exists()) already[`deleted_trips/${t.id}`] = null;
+          else list.push(t);
+        }
+        if (Object.keys(already).length) await dbRoot().update(already);
+        if (list.length) await restoreTripsFromTrash(list, false);
+        alert(`Đã khôi phục ${list.length} đơn hàng!` + (Object.keys(already).length ? ` (${Object.keys(already).length} đơn đã có sẵn, bỏ qua)` : ''));
+        openTrashModal();
+      } catch (e) { alert('Lỗi khôi phục: ' + authErrorText(e)); }
+    }
+
 
     // Số phiếu gốc dùng để ghép cặp: bỏ đuôi tách nhân sự "-1/2" (hoặc "-1-2" do bản cũ đổi dấu)
     function baseTicketOf(ticket) {
@@ -2165,7 +2359,7 @@
     // Sửa nhanh 1 ô: chỉ lưu khi giá trị thật sự thay đổi, và chỉ ghi đúng ô đó (không ghi đè cả đơn)
     function updateInlineTripField(tripId, field, value) {
       const trip = allCompanyTrips.find(x => x.id === tripId);
-      if (!trip) return;
+      if (!trip || !guardWrite()) return;
       if (field === 'totalFare') value = parseFloat(String(value).replace(/[^0-9]/g, '')) || 0;
       else if (field === 'plateNumber') value = String(value).trim().toUpperCase();
       else value = String(value).trim();
@@ -2199,6 +2393,52 @@
       updateManagerAuditTable();
     }
 
+    // ===== DANH MỤC: thêm/xóa ĐÚNG MỤC bằng transaction (2 quản lý sửa cùng lúc không đè nhau) =====
+    const LIST_STATE = {
+      sources: { get: () => sourceOptions, render: () => renderSourcesTable() },
+      staff: { get: () => staffOptions, render: () => renderStaffTable() },
+      carTypes: { get: () => carTypeOptions, render: () => renderCarTypesTable() },
+      payments: { get: () => paymentOptions, render: () => renderPaymentsTable() },
+      planPayments: { get: () => planPaymentOptions, render: () => renderPlanPaymentsTable() }
+    };
+    function listTxn(key, fn) {
+      if (!guardWrite()) return Promise.reject(new Error('Bản app đã cũ'));
+      return dbRef('settings/' + key).transaction(cur => {
+        const arr = cur ? (Array.isArray(cur) ? cur : Object.values(cur)).filter(x => x !== null && x !== undefined && x !== '') : [];
+        return fn(arr);
+      });
+    }
+    function addListItem(key, inputId, label) {
+      const input = document.getElementById(inputId);
+      const val = input ? input.value.trim() : '';
+      if (!val) { alert(`Vui lòng nhập ${label}!`); return; }
+      if (LIST_STATE[key].get().includes(val)) { alert(`${label[0].toUpperCase() + label.slice(1)} này đã tồn tại!`); return; }
+      listTxn(key, arr => arr.includes(val) ? arr : [...arr, val])
+        .then(() => { if (input) input.value = ''; })
+        .catch(e => alert('Lỗi lưu: ' + authErrorText(e)));
+    }
+    function addListBulk(key, textareaId, label) {
+      const textarea = document.getElementById(textareaId);
+      const raw = textarea ? textarea.value.trim() : '';
+      if (!raw) { alert('Vui lòng dán danh sách vào ô!'); return; }
+      const lines = [...new Set(raw.split('\n').map(l => l.trim()).filter(Boolean))];
+      let added = 0;
+      listTxn(key, arr => { const add = lines.filter(l => !arr.includes(l)); added = add.length; return [...arr, ...add]; })
+        .then(() => { if (textarea) textarea.value = ''; alert(`Đã thêm thành công ${added} ${label} mới!`); })
+        .catch(e => alert('Lỗi lưu: ' + authErrorText(e)));
+    }
+    function deleteListItem(key, idx, label) {
+      const list = LIST_STATE[key].get();
+      const val = list[idx];
+      if (val === undefined) return;
+      if (list.length <= 1) { alert(`Cần giữ lại ít nhất 1 ${label}!`); return; }
+      if (!confirm(`Bạn có chắc muốn xóa ${label} "${val}" không?`)) return;
+      listTxn(key, arr => {
+        const out = arr.filter(x => x !== val);
+        return out.length ? out : undefined; // không cho xóa hết
+      }).catch(e => alert('Lỗi lưu: ' + authErrorText(e)));
+    }
+
     function renderSourcesTable() {
       const container = document.getElementById('sources-tag-list');
       if (!container) return;
@@ -2209,36 +2449,9 @@
         </span>
       `).join('');
     }
-    function addNewSource() {
-      const input = document.getElementById('new-source-name');
-      const val = input ? input.value.trim() : '';
-      if (!val) { alert("Vui lòng nhập tên nguồn đơn!"); return; }
-      if (sourceOptions.includes(val)) { alert("Nguồn đơn này đã tồn tại!"); return; }
-      sourceOptions.push(val);
-      dbRef('settings/sources').set(sourceOptions).then(() => { input.value = ''; renderSourcesTable(); });
-    }
-    function addBulkSource() {
-      const textarea = document.getElementById('bulk-source-text');
-      const raw = textarea ? textarea.value.trim() : '';
-      if (!raw) { alert("Vui lòng dán danh sách nguồn đơn vào ô!"); return; }
-      const lines = raw.split('\n').map(l => l.trim()).filter(Boolean);
-      let added = 0;
-      lines.forEach(src => {
-        if (!sourceOptions.includes(src)) { sourceOptions.push(src); added++; }
-      });
-      dbRef('settings/sources').set(sourceOptions).then(() => {
-        textarea.value = '';
-        renderSourcesTable();
-        alert(`Đã thêm thành công ${added} nguồn đơn mới!`);
-      });
-    }
-    function deleteSource(idx) {
-      if (sourceOptions.length <= 1) { alert("Cần giữ lại ít nhất 1 nguồn đơn!"); return; }
-      if (confirm(`Bạn có chắc muốn xóa nguồn "${sourceOptions[idx]}" không?`)) {
-        sourceOptions.splice(idx, 1);
-        dbRef('settings/sources').set(sourceOptions).then(() => { renderSourcesTable(); });
-      }
-    }
+    function addNewSource() { addListItem('sources', 'new-source-name', 'nguồn đơn'); }
+    function addBulkSource() { addListBulk('sources', 'bulk-source-text', 'nguồn đơn'); }
+    function deleteSource(idx) { deleteListItem('sources', idx, 'nguồn đơn'); }
 
     function renderStaffTable() {
       const container = document.getElementById('staff-tag-list');
@@ -2250,36 +2463,9 @@
         </span>
       `).join('');
     }
-    function addNewStaff() {
-      const input = document.getElementById('new-staff-name');
-      const val = input ? input.value.trim() : '';
-      if (!val) { alert("Vui lòng nhập tên nhân sự!"); return; }
-      if (staffOptions.includes(val)) { alert("Tên nhân sự này đã tồn tại!"); return; }
-      staffOptions.push(val);
-      dbRef('settings/staff').set(staffOptions).then(() => { input.value = ''; renderStaffTable(); });
-    }
-    function addBulkStaff() {
-      const textarea = document.getElementById('bulk-staff-text');
-      const raw = textarea ? textarea.value.trim() : '';
-      if (!raw) { alert("Vui lòng dán danh sách nhân sự vào ô!"); return; }
-      const lines = raw.split('\n').map(l => l.trim()).filter(Boolean);
-      let added = 0;
-      lines.forEach(name => {
-        if (!staffOptions.includes(name)) { staffOptions.push(name); added++; }
-      });
-      dbRef('settings/staff').set(staffOptions).then(() => {
-        textarea.value = '';
-        renderStaffTable();
-        alert(`Đã thêm thành công ${added} nhân sự mới!`);
-      });
-    }
-    function deleteStaff(idx) {
-      if (staffOptions.length <= 1) { alert("Cần giữ lại ít nhất 1 nhân sự!"); return; }
-      if (confirm(`Bạn có chắc muốn xóa nhân sự "${staffOptions[idx]}" không?`)) {
-        staffOptions.splice(idx, 1);
-        dbRef('settings/staff').set(staffOptions).then(() => { renderStaffTable(); });
-      }
-    }
+    function addNewStaff() { addListItem('staff', 'new-staff-name', 'nhân sự'); }
+    function addBulkStaff() { addListBulk('staff', 'bulk-staff-text', 'nhân sự'); }
+    function deleteStaff(idx) { deleteListItem('staff', idx, 'nhân sự'); }
 
     function renderCarTypesTable() {
       const container = document.getElementById('cartype-tag-list');
@@ -2291,21 +2477,8 @@
         </span>
       `).join('');
     }
-    function addNewCarType() {
-      const input = document.getElementById('new-cartype-name');
-      const val = input ? input.value.trim() : '';
-      if (!val) { alert("Vui lòng nhập tên loại xe!"); return; }
-      if (carTypeOptions.includes(val)) { alert("Loại xe này đã tồn tại!"); return; }
-      carTypeOptions.push(val);
-      dbRef('settings/carTypes').set(carTypeOptions).then(() => { input.value = ''; renderCarTypesTable(); });
-    }
-    function deleteCarType(idx) {
-      if (carTypeOptions.length <= 1) { alert("Cần giữ lại ít nhất 1 loại xe!"); return; }
-      if (confirm(`Bạn có chắc muốn xóa loại xe "${carTypeOptions[idx]}" không?`)) {
-        carTypeOptions.splice(idx, 1);
-        dbRef('settings/carTypes').set(carTypeOptions).then(() => { renderCarTypesTable(); });
-      }
-    }
+    function addNewCarType() { addListItem('carTypes', 'new-cartype-name', 'loại xe'); }
+    function deleteCarType(idx) { deleteListItem('carTypes', idx, 'loại xe'); }
 
     function renderPaymentsTable() {
       const container = document.getElementById('payment-tag-list');
@@ -2317,36 +2490,9 @@
         </span>
       `).join('');
     }
-    function addNewPayment() {
-      const input = document.getElementById('new-payment-name');
-      const val = input ? input.value.trim() : '';
-      if (!val) { alert("Vui lòng nhập hình thức thanh toán!"); return; }
-      if (paymentOptions.includes(val)) { alert("Hình thức thanh toán này đã tồn tại!"); return; }
-      paymentOptions.push(val);
-      dbRef('settings/payments').set(paymentOptions).then(() => { input.value = ''; renderPaymentsTable(); });
-    }
-    function addBulkPayment() {
-      const textarea = document.getElementById('bulk-payment-text');
-      const raw = textarea ? textarea.value.trim() : '';
-      if (!raw) { alert("Vui lòng dán danh sách hình thức thanh toán vào ô!"); return; }
-      const lines = raw.split('\n').map(l => l.trim()).filter(Boolean);
-      let added = 0;
-      lines.forEach(pt => {
-        if (!paymentOptions.includes(pt)) { paymentOptions.push(pt); added++; }
-      });
-      dbRef('settings/payments').set(paymentOptions).then(() => {
-        textarea.value = '';
-        renderPaymentsTable();
-        alert(`Đã thêm thành công ${added} hình thức thanh toán mới!`);
-      });
-    }
-    function deletePayment(idx) {
-      if (paymentOptions.length <= 1) { alert("Cần giữ lại ít nhất 1 hình thức thanh toán!"); return; }
-      if (confirm(`Bạn có chắc muốn xóa hình thức "${paymentOptions[idx]}" không?`)) {
-        paymentOptions.splice(idx, 1);
-        dbRef('settings/payments').set(paymentOptions).then(() => { renderPaymentsTable(); });
-      }
-    }
+    function addNewPayment() { addListItem('payments', 'new-payment-name', 'hình thức thanh toán'); }
+    function addBulkPayment() { addListBulk('payments', 'bulk-payment-text', 'hình thức thanh toán'); }
+    function deletePayment(idx) { deleteListItem('payments', idx, 'hình thức thanh toán'); }
 
     // ===== ĐỐI SOÁT: một hàm dùng chung cho màn hình và file Excel (để 2 nơi luôn ra cùng kết quả) =====
     const AUDIT_STATUS = {

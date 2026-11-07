@@ -77,7 +77,13 @@
     },
     "deleted_trips": {
       ".read": "((auth != null && root.child('roles/'+auth.uid+'/active').val() === true) && root.child('roles/'+auth.uid+'/role').val() === 'manager')",
-      ".write": "((auth != null && root.child('roles/'+auth.uid+'/active').val() === true) && root.child('roles/'+auth.uid+'/role').val() === 'manager')"
+      ".write": "((auth != null && root.child('roles/'+auth.uid+'/active').val() === true) && root.child('roles/'+auth.uid+'/role').val() === 'manager')",
+      ".indexOn": [
+        "deletedAt"
+      ],
+      "$id": {
+        ".write": "((auth != null && root.child('roles/'+auth.uid+'/active').val() === true) && root.child('roles/'+auth.uid+'/role').val() === 'manager') || ((auth != null && root.child('roles/'+auth.uid+'/active').val() === true) && ((!data.exists() && newData.child('createdBy').val() === root.child('roles/'+auth.uid+'/user').val()) || (!newData.exists() && data.child('createdBy').val() === root.child('roles/'+auth.uid+'/user').val())))"
+      }
     },
     "drivers": {
       ".read": "((auth != null && root.child('roles/'+auth.uid+'/active').val() === true) && root.child('roles/'+auth.uid+'/role').val() === 'manager')",
@@ -161,7 +167,13 @@
       },
       "deleted_trips": {
         ".read": "((auth != null && root.child('test_env/roles/'+auth.uid+'/active').val() === true) && root.child('test_env/roles/'+auth.uid+'/role').val() === 'manager')",
-        ".write": "((auth != null && root.child('test_env/roles/'+auth.uid+'/active').val() === true) && root.child('test_env/roles/'+auth.uid+'/role').val() === 'manager')"
+        ".write": "((auth != null && root.child('test_env/roles/'+auth.uid+'/active').val() === true) && root.child('test_env/roles/'+auth.uid+'/role').val() === 'manager')",
+        ".indexOn": [
+          "deletedAt"
+        ],
+        "$id": {
+          ".write": "((auth != null && root.child('test_env/roles/'+auth.uid+'/active').val() === true) && root.child('test_env/roles/'+auth.uid+'/role').val() === 'manager') || ((auth != null && root.child('test_env/roles/'+auth.uid+'/active').val() === true) && ((!data.exists() && newData.child('createdBy').val() === root.child('test_env/roles/'+auth.uid+'/user').val()) || (!newData.exists() && data.child('createdBy').val() === root.child('test_env/roles/'+auth.uid+'/user').val())))"
+        }
       },
       "drivers": {
         ".read": "((auth != null && root.child('test_env/roles/'+auth.uid+'/active').val() === true) && root.child('test_env/roles/'+auth.uid+'/role').val() === 'manager')",

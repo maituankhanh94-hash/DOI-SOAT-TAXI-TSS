@@ -22,7 +22,8 @@ function strict(B){
       "$p": { ".write": active,
         ".validate": "newData.hasChildren(['name', 'n']) && newData.child('name').isString() && newData.child('name').val().length <= 200 && newData.child('n').isNumber()" } },
     "meta": { ".read": active, ".write": mgr },
-    "deleted_trips": { ".read": mgr, ".write": mgr },
+    "deleted_trips": { ".read": mgr, ".write": mgr, ".indexOn": ["deletedAt"],
+      "$id": { ".write": `${mgr} || (${active} && ((!data.exists() && newData.child('createdBy').val() === ${me}) || (!newData.exists() && data.child('createdBy').val() === ${me})))` } },
     "drivers": { ".read": mgr, ".write": mgr }
   };
 }

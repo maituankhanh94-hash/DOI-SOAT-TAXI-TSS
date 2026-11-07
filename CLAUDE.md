@@ -47,6 +47,7 @@
 - Nếu quy tắc chưa cho đọc `meta` (quy tắc cũ) → chế độ `full` (tải toàn bộ như cũ), vẫn chạy bình thường.
 - Gợi ý địa chỉ: `places/<slug>={name,n}` (slug bỏ dấu), tăng `n` khi lưu đơn (`recordPlaces`, ghi riêng, lỗi thì bỏ qua). Gõ ≥2 ký tự không dấu cũng tìm được (`removeAccents`). Ô gợi ý dùng chung `renderSuggestBox` (chuột, ↑↓ Enter, Esc), dùng cho tên nhân sự + điểm đến (nhập hàng loạt và modal sửa).
 - Quy tắc mới (đã thêm `.indexOn` dateKey cho trips & users_trips/$user, `places`, `meta`): `firebase-rules/quy-tac-buoc-2.json`, sinh bằng `firebase-rules/sinh-quy-tac.js` (`node sinh-quy-tac.js firebase-rules`). Quy tắc mới tương thích ngược với app cũ.
+- ĐÃ LÊN MAIN 08/11; ảnh console xác nhận quy tắc mới (có .indexOn, places, meta) đã Publish. Chờ người dùng xác nhận quản lý đã đăng nhập để chạy nâng cấp dateKey.
 - Bản thử: nút "Chép Dữ Liệu Thật" hỏi tài khoản QUẢN LÝ BẢN CHÍNH (đọc bằng app Firebase phụ, đọc settings từng mục vì quy tắc không cho đọc cả `settings`).
 
 ## Lỗi/rủi ro đã phát hiện (06/11/2026) — 3–9 ĐÃ SỬA ở nhánh `cai-tien-doi-soat` (08/11)

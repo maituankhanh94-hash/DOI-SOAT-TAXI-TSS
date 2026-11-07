@@ -35,6 +35,10 @@
 - Nhập hàng loạt 20 dòng; tên nhân sự "A + B" → tách đơn chia đều tiền (phiếu `123-1/2`). Chặn trùng (phiếu+biển số+ngày) trong tài khoản. Khóa sửa/xóa sau `lockHour` giờ sáng hôm sau.
 - Đối soát (Quản lý): gom nhóm theo `số phiếu gốc + biển số + ngày`; so bên Quầy/Kế hoạch với bên Tài xế: lệch tiền < 1.000đ và cùng hình thức TT (hoặc thuộc nhóm đối tác/kế hoạch) → Trùng khớp; thiếu 1 bên → Chưa khớp; còn lại → Lệch. Xuất Excel bằng SheetJS (không màu).
 
+## Chức năng thêm (nhánh bao-mat-dang-nhap)
+- Ô tìm tài khoản `#acc-search` (lọc theo tên/phân vùng/trạng thái; không có → báo "CHƯA được tạo").
+- Chưa báo cáo: nhóm thiếu 1 bên mà quá hạn `reportDeadline` = ngày đơn +1 lúc `lockHourSetting` giờ → "Quá hạn: Tài xế/Bán vé chưa báo". Bộ lọc trạng thái `overdue`, `overdue_driver`, `overdue_pos`; khung nhắc `#overdue-box` (14 ngày gần nhất, nhóm theo biển số / tên tài xế); từ khóa "chưa báo"/"quá hạn". Excel ghi rõ và tô cam đậm.
+
 ## Lỗi/rủi ro đã phát hiện (06/11/2026, chưa sửa)
 1. BẢO MẬT: quy tắc RTDB thật đang là `.read/.write: true` (đã xác nhận qua ảnh console 07/11). Đang sửa ở nhánh `bao-mat-dang-nhap`. Số liệu 07/11: lưu 1,61 MB, tải về 121 MB/6 ngày, kết nối đỉnh 33/100 (gói Spark). DB thật còn 2 nhánh cũ không dùng: `deleted_trips`, `drivers`.
 2. ĐÃ SỬA (nhánh bao-mat-dang-nhap): màn hình & Excel dùng chung `computeAuditGroups`/`getAuditStatus`. Excel xuất bằng ExcelJS 4.4.0 (tải khi cần): sheet "Đối Soát" (màu theo trạng thái, kẻ ô, nhóm theo ngày, gộp ô STT/Trạng thái, dòng cộng ngày + tổng cộng, ký tên) và sheet "Tổng Hợp" (theo trạng thái / hình thức TT / nhân sự). Ngày gõ thiếu dấu ("01/112026") được `normalizeDateInput` tự sửa; nhập đơn kiểm tra ngày hợp lệ (`isValidDateStr`).

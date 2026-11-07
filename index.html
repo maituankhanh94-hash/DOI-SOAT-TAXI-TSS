@@ -1652,6 +1652,7 @@
               <button onclick="saveAccount()" class="p-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold shadow-sm" id="btn-save-acc">+ Thêm Tài Khoản</button>
             </div>
             <p class="text-[11px] text-slate-500">🔒 Mật khẩu được Firebase mã hóa, không ai xem được. Nhân viên quên mật khẩu: bấm <b>Đặt Lại MK</b>.</p>
+            <input type="text" id="acc-search" autocomplete="off" placeholder="🔍 Tìm tài khoản (gõ tên tài khoản hoặc phân vùng)..." class="w-full sm:w-80 p-2.5 bg-white border-2 border-indigo-200 focus:border-indigo-500 rounded-xl font-bold text-xs outline-none" oninput="renderAccountsTable()">
             <div class="overflow-x-auto pt-1">
               <table class="w-full text-left border-collapse text-xs min-w-[640px]">
                 <thead>
@@ -1697,11 +1698,15 @@
                   <option value="unmatched">⏳ Đơn Chưa Khớp (Thiếu 1 bên)</option>
                   <option value="match">🟢 Trùng Khớp</option>
                   <option value="mismatch">🔴 Đơn Lệch</option>
+                  <option value="overdue">⏰ Quá Hạn Chưa Báo Cáo (cả 2 bên)</option>
+                  <option value="overdue_driver">⏰ Tài Xế Chưa Báo Cáo</option>
+                  <option value="overdue_pos">⏰ Bán Vé / Kế Hoạch Chưa Báo Cáo</option>
                 </select>
 
                 <input type="text" id="audit-search-input" autocomplete="off" placeholder="🔍 Lọc từ khóa..." class="px-3 py-1.5 bg-slate-50 border rounded-xl font-bold text-xs w-44" oninput="updateManagerAuditTable()">
               </div>
             </div>
+            <div id="overdue-box"></div>
             <div class="overflow-x-auto custom-scrollbar max-h-[550px]">
               <table class="w-full text-left border-collapse text-xs min-w-[1500px]">
                 <thead class="sticky top-0 z-20">
@@ -2158,6 +2163,26 @@
       return (p.length === 3 && p[2].length === 4) ? `${p[2]}-${p[1]}-${p[0]}` : '';
     }
 
+    // Hạn báo cáo của đơn ngày D = D+1 lúc lockHourSetting giờ (giống giờ khóa đơn)
+    function reportDeadline(dateKey) {
+      if (!dateKey) return null;
+      const p = dateKey.split('-').map(Number);
+      return new Date(p[0], p[1] - 1, p[2] + 1, lockHourSetting, 0, 0);
+    }
+    // Thông tin chi tiết: bên nào còn thiếu, đã quá hạn chưa
+    function auditDetail(trips, status, dateKey) {
+      if (status !== 'unmatched') return { missing: null, overdue: false };
+      const hasPos = trips.some(t => t.role === 'pos' || t.role === 'plan');
+      const missing = hasPos ? 'driver' : 'pos';
+      const dl = reportDeadline(dateKey);
+      return { missing, overdue: !!(dl && Date.now() >= dl.getTime()) };
+    }
+    function auditStatusText(g) {
+      if (g.status !== 'unmatched') return AUDIT_STATUS[g.status].text;
+      const who = g.missing === 'driver' ? 'Tài xế' : 'Bán vé/KH';
+      return g.overdue ? `Quá hạn: ${who} chưa báo` : `Chờ ${who} báo`;
+    }
+
     function getAuditStatus(group) {
       const posTrips = group.filter(x => x.role === 'pos' || x.role === 'plan');
       const driverTrips = group.filter(x => x.role === 'driver');
@@ -2212,17 +2237,25 @@
       Object.values(pairMap).forEach(trips => {
         trips.sort((a, b) => ((a.role === 'pos' || a.role === 'plan') ? 0 : 1) - ((b.role === 'pos' || b.role === 'plan') ? 0 : 1) || (a.timestamp || 0) - (b.timestamp || 0));
         const status = getAuditStatus(trips);
-        if (f.matchStatusFilter !== 'all' && status !== f.matchStatusFilter) return;
+        const dateKey = tripDateKey(trips[0]);
+        const det = auditDetail(trips, status, dateKey);
+        const sf = f.matchStatusFilter;
+        if (sf.startsWith('overdue')) {
+          if (!det.overdue) return;
+          if (sf === 'overdue_driver' && det.missing !== 'driver') return;
+          if (sf === 'overdue_pos' && det.missing !== 'pos') return;
+        } else if (sf !== 'all' && status !== sf) return;
         const kw = f.keyword;
         if (kw) {
           let pass;
           if (kw === 'khớp' || kw === 'trùng khớp') pass = status === 'match';
           else if (kw === 'lệch' || kw === 'đơn lệch') pass = status === 'mismatch';
           else if (kw === 'chưa khớp' || kw === 'đơn lẻ' || kw === 'thiếu') pass = status === 'unmatched';
+          else if (kw === 'chưa báo' || kw === 'quá hạn') pass = det.overdue;
           else pass = trips.some(t => `${t.dateStr} ${t.timeStr} ${t.role} ${t.staff} ${t.ticketNumber} ${t.plateNumber} ${t.carType || ''} ${t.source || ''} ${t.destination} ${t.paymentMethod || defaultPay} ${t.note || ''} ${t.totalFare}`.toLowerCase().includes(kw));
           if (!pass) return;
         }
-        groups.push({ trips, status, dateKey: tripDateKey(trips[0]), ts: Math.min(...trips.map(t => t.timestamp || 0)) });
+        groups.push({ trips, status, dateKey, missing: det.missing, overdue: det.overdue, ts: Math.min(...trips.map(t => t.timestamp || 0)) });
       });
       return groups;
     }
@@ -2234,6 +2267,7 @@
         tb.innerHTML = `<tr><td colspan="15" class="p-4 text-center text-slate-400">Chưa có dữ liệu đơn hàng.</td></tr>`;
         return;
       }
+      renderOverdueBox();
       const groupList = computeAuditGroups(getAuditFilters());
       if (groupList.length === 0) {
         tb.innerHTML = `<tr><td colspan="15" class="p-4 text-center text-slate-400">Không tìm thấy dữ liệu đối soát phù hợp.</td></tr>`;
@@ -2249,8 +2283,14 @@
       };
 
       let rowsHtml = '';
-      groupList.forEach(({ trips: group, status }) => {
-        const statusHtml = statusBadge[status];
+      groupList.forEach(g => {
+        const group = g.trips, status = g.status;
+        let statusHtml = statusBadge[status];
+        if (status === 'unmatched') {
+          statusHtml = g.overdue
+            ? `<span class="px-2 py-1 bg-orange-600 text-white font-extrabold rounded-lg text-[10px] inline-block">⏰ Quá hạn: ${g.missing === 'driver' ? '🚗 Tài xế' : '🚖 Bán vé/KH'} chưa báo</span>`
+            : `<span class="px-2 py-1 bg-amber-100 text-amber-800 font-bold rounded-lg text-[10px] inline-block">⏳ Chờ ${g.missing === 'driver' ? 'Tài xế' : 'Bán vé/KH'} báo</span>`;
+        }
         group.forEach((t, idx) => {
           const isPos = t.role === 'pos';
           const isPlan = t.role === 'plan';
@@ -2304,6 +2344,46 @@
       });
 
       tb.innerHTML = rowsHtml;
+    }
+
+    // Khung nhắc: đơn quá hạn mà 1 bên chưa báo cáo (14 ngày gần nhất, không phụ thuộc bộ lọc ngày)
+    const OVERDUE_DAYS = 14;
+    function localDateKey(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
+    function renderOverdueBox() {
+      const box = document.getElementById('overdue-box');
+      if (!box) return;
+      const from = new Date(); from.setDate(from.getDate() - OVERDUE_DAYS);
+      const fromKey = localDateKey(from);
+      const gs = computeAuditGroups({ startDateVal: fromKey, endDateVal: '', roleFilter: 'all', matchStatusFilter: 'overdue', keyword: '' });
+      if (gs.length === 0) {
+        box.innerHTML = `<div class="bg-emerald-50 border border-emerald-200 rounded-2xl px-3 py-2 text-xs font-bold text-emerald-800">✅ ${OVERDUE_DAYS} ngày gần nhất: không có đơn nào quá hạn chưa báo cáo.</div>`;
+        return;
+      }
+      const drv = gs.filter(g => g.missing === 'driver'), pos = gs.filter(g => g.missing === 'pos');
+      // Tài xế chưa báo: nhóm theo biển số xe. Bán vé chưa báo: nhóm theo tên tài xế/chủ xe đã báo.
+      const list = (arr, keyFn) => {
+        const m = {};
+        arr.forEach(g => { const t = g.trips[0]; const k = keyFn(t); (m[k] = m[k] || []).push(`${formatDisplayTicket(t.originalTicket || t.ticketNumber)} (${fmtDateKeyVN(g.dateKey).slice(0, 5)})`); });
+        return Object.entries(m).sort((a, b) => b[1].length - a[1].length).map(([k, v]) =>
+          `<span class="inline-block bg-white border border-orange-200 rounded-lg px-2 py-0.5 mr-1 mb-1"><b>${escHtml(k)}</b>: ${v.length} đơn <span class="text-slate-500 font-normal">${escHtml(v.slice(0, 4).join(', '))}${v.length > 4 ? '…' : ''}</span></span>`).join('');
+      };
+      box.innerHTML = `
+        <div class="bg-orange-50 border-2 border-orange-300 rounded-2xl p-3 space-y-2 text-xs">
+          <div class="font-extrabold text-orange-800">⏰ QUÁ HẠN CHƯA BÁO CÁO (${OVERDUE_DAYS} ngày gần nhất, hạn ${lockHourSetting}:00 sáng hôm sau): ${gs.length} đơn</div>
+          ${drv.length ? `<div><button onclick="showOverdue('overdue_driver')" class="px-2.5 py-1 bg-orange-600 hover:bg-orange-700 text-white rounded-lg font-bold mr-2 mb-1">🚗 Tài xế chưa báo: ${drv.length} đơn → Xem</button>${list(drv, t => 'Xe ' + (t.plateNumber || '?'))}</div>` : ''}
+          ${pos.length ? `<div><button onclick="showOverdue('overdue_pos')" class="px-2.5 py-1 bg-orange-600 hover:bg-orange-700 text-white rounded-lg font-bold mr-2 mb-1">🚖 Bán vé/KH chưa báo: ${pos.length} đơn → Xem</button>${list(pos, t => (t.staff || '?') + ' – xe ' + (t.plateNumber || '?'))}</div>` : ''}
+        </div>`;
+    }
+    function showOverdue(kind) {
+      const from = new Date(); from.setDate(from.getDate() - OVERDUE_DAYS);
+      const s = document.getElementById('audit-start-date'), e = document.getElementById('audit-end-date');
+      if (s) s.value = localDateKey(from);
+      if (e) e.value = '';
+      const st = document.getElementById('audit-match-status-filter');
+      if (st) st.value = kind;
+      const kw = document.getElementById('audit-search-input');
+      if (kw) kw.value = '';
+      updateManagerAuditTable();
     }
 
     // ===== XUẤT EXCEL CÓ ĐỊNH DẠNG (ExcelJS, tải khi cần) =====
@@ -2391,7 +2471,7 @@
 
     function filterDescription(f) {
       const roleTxt = { all: 'Tất cả', pos: 'Bán vé', driver: 'Tài xế', plan: 'Kế hoạch' }[f.roleFilter] || f.roleFilter;
-      const stTxt = { all: 'Tất cả', match: 'Trùng khớp', mismatch: 'Đơn lệch', unmatched: 'Chưa khớp' }[f.matchStatusFilter] || f.matchStatusFilter;
+      const stTxt = { all: 'Tất cả', match: 'Trùng khớp', mismatch: 'Đơn lệch', unmatched: 'Chưa khớp', overdue: 'Quá hạn chưa báo cáo', overdue_driver: 'Tài xế chưa báo cáo', overdue_pos: 'Bán vé/KH chưa báo cáo' }[f.matchStatusFilter] || f.matchStatusFilter;
       return `Phân vùng: ${roleTxt}  •  Trạng thái: ${stTxt}` + (f.keyword ? `  •  Từ khóa: "${f.keyword}"` : '');
     }
     function periodDescription(f) {
@@ -2569,7 +2649,7 @@
             const role = XL.role[t.role] || { label: t.role || '', color: 'FF334155' };
             const vals = [stt, normalizeDateInput(t.dateStr) || '',t.timeStr || '', role.label, t.staff || '', t.ticketNumber || '', t.plateNumber || '',
               t.carType || '', t.source || '', t.pickup ? 'Ga ' + t.pickup : '', t.destination || '', t.paymentMethod || (paymentOptions[0] || ''), t.note || '',
-              Number(t.totalFare || 0), AUDIT_STATUS[g.status].text];
+              Number(t.totalFare || 0), auditStatusText(g)];
             const row = ws.getRow(r);
             vals.forEach((v, i) => {
               const c = row.getCell(i + 1);
@@ -2590,7 +2670,7 @@
           // STT và Trạng thái gộp ô theo nhóm
           if (last > first) { ws.mergeCells(first, 1, last, 1); ws.mergeCells(first, 15, last, 15); }
           const sc = ws.getCell(first, 15);
-          xlFill(sc, st.badge);
+          xlFill(sc, g.overdue ? 'FFC2410C' : st.badge);
           xlFont(sc, { bold: true, color: { argb: 'FFFFFFFF' } });
           sc.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
           const sn = ws.getCell(first, 1);
@@ -2732,9 +2812,19 @@
       renderLegacyMigrateBox();
       const tb = document.getElementById('tbody-acc');
       if (!tb) return;
-      const users = Object.keys(accountsMap).sort();
-      if (users.length === 0) {
+      const qEl = document.getElementById('acc-search');
+      const q = qEl ? qEl.value.trim().toLowerCase() : '';
+      const allUsers = Object.keys(accountsMap).sort();
+      if (allUsers.length === 0) {
         tb.innerHTML = `<tr><td colspan="5" class="p-4 text-center text-slate-400">Chưa có tài khoản nào.</td></tr>`;
+        return;
+      }
+      const users = !q ? allUsers : allUsers.filter(u => {
+        const a = accountsMap[u] || {};
+        return `${u} ${ROLE_LABELS[a.role] || ''} ${a.active === false ? 'đã khóa khóa' : 'hoạt động'}`.toLowerCase().includes(q);
+      });
+      if (users.length === 0) {
+        tb.innerHTML = `<tr><td colspan="5" class="p-4 text-center font-bold text-rose-600">❌ Không có tài khoản nào khớp "${escHtml(q)}" — tài khoản này CHƯA được tạo.</td></tr>`;
         return;
       }
       tb.innerHTML = users.map(u => {

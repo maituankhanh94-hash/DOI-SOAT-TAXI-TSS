@@ -2218,6 +2218,12 @@
       const catsDrv = [...new Set(driverTrips.map(paymentCategory))];
       // "Free nội bộ" ở bất kỳ bên nào: khớp với mọi hình thức thanh toán (vẫn so tiền)
       const hasFree = catsPos.includes('FREE') || catsDrv.includes('FREE');
+      // Nhưng đã chọn Free thì tiền phải là 0đ
+      const freeWithMoney = group.filter(t => paymentCategory(t) === 'FREE' && Number(t.totalFare || 0) > 0);
+      if (freeWithMoney.length) {
+        const who = [...new Set(freeWithMoney.map(t => t.role === 'driver' ? 'Tài xế' : (t.role === 'plan' ? 'Kế hoạch' : 'Bán vé')))].join(', ');
+        reasons.push(`${who} chọn Free nhưng có nhập tiền`);
+      }
       if (!hasFree && !(catsPos.length === 1 && catsDrv.length === 1 && catsPos[0] === catsDrv[0])) {
         const lb = trips => [...new Set(trips.map(t => t.role === 'plan' && !t.paymentMethod ? 'Kế Hoạch' : (t.paymentMethod || '(chưa ghi)')))].join('/');
         reasons.push(`Khác thanh toán: ${lb(posTrips)} ≠ ${lb(driverTrips)}`);

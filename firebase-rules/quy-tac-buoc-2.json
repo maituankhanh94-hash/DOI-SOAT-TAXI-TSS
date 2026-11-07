@@ -1,0 +1,132 @@
+{
+  "rules": {
+    "login_index": {
+      ".read": true,
+      "$u": {
+        ".write": "((auth != null && root.child('roles/'+auth.uid+'/active').val() === true) && root.child('roles/'+auth.uid+'/role').val() === 'manager') || (auth != null && !root.child('roles').exists())"
+      }
+    },
+    "roles": {
+      ".read": "((auth != null && root.child('roles/'+auth.uid+'/active').val() === true) && root.child('roles/'+auth.uid+'/role').val() === 'manager')",
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        ".write": "((auth != null && root.child('roles/'+auth.uid+'/active').val() === true) && root.child('roles/'+auth.uid+'/role').val() === 'manager') || ((auth != null && !root.child('roles').exists()) && auth.uid === $uid && newData.child('role').val() === 'manager' && newData.child('active').val() === true)"
+      }
+    },
+    "accounts": {
+      ".read": "((auth != null && root.child('roles/'+auth.uid+'/active').val() === true) && root.child('roles/'+auth.uid+'/role').val() === 'manager')",
+      "$u": {
+        ".write": "((auth != null && root.child('roles/'+auth.uid+'/active').val() === true) && root.child('roles/'+auth.uid+'/role').val() === 'manager') || (auth != null && !root.child('roles').exists())"
+      }
+    },
+    "settings": {
+      ".write": "((auth != null && root.child('roles/'+auth.uid+'/active').val() === true) && root.child('roles/'+auth.uid+'/role').val() === 'manager')",
+      "accounts": {
+        ".read": "((auth != null && root.child('roles/'+auth.uid+'/active').val() === true) && root.child('roles/'+auth.uid+'/role').val() === 'manager')"
+      },
+      "sources": {
+        ".read": "(auth != null && root.child('roles/'+auth.uid+'/active').val() === true)"
+      },
+      "staff": {
+        ".read": "(auth != null && root.child('roles/'+auth.uid+'/active').val() === true)"
+      },
+      "carTypes": {
+        ".read": "(auth != null && root.child('roles/'+auth.uid+'/active').val() === true)"
+      },
+      "payments": {
+        ".read": "(auth != null && root.child('roles/'+auth.uid+'/active').val() === true)"
+      },
+      "planPayments": {
+        ".read": "(auth != null && root.child('roles/'+auth.uid+'/active').val() === true)"
+      },
+      "lockHour": {
+        ".read": "(auth != null && root.child('roles/'+auth.uid+'/active').val() === true)"
+      }
+    },
+    "trips": {
+      ".read": "((auth != null && root.child('roles/'+auth.uid+'/active').val() === true) && root.child('roles/'+auth.uid+'/role').val() === 'manager')",
+      "$id": {
+        ".write": "((auth != null && root.child('roles/'+auth.uid+'/active').val() === true) && root.child('roles/'+auth.uid+'/role').val() === 'manager') || ((auth != null && root.child('roles/'+auth.uid+'/active').val() === true) && (!data.exists() || data.child('createdBy').val() === root.child('roles/'+auth.uid+'/user').val()) && (!newData.exists() || newData.child('createdBy').val() === root.child('roles/'+auth.uid+'/user').val()))"
+      }
+    },
+    "users_trips": {
+      "$user": {
+        ".read": "((auth != null && root.child('roles/'+auth.uid+'/active').val() === true) && root.child('roles/'+auth.uid+'/role').val() === 'manager') || ((auth != null && root.child('roles/'+auth.uid+'/active').val() === true) && $user === root.child('roles/'+auth.uid+'/user').val())",
+        ".write": "((auth != null && root.child('roles/'+auth.uid+'/active').val() === true) && root.child('roles/'+auth.uid+'/role').val() === 'manager') || ((auth != null && root.child('roles/'+auth.uid+'/active').val() === true) && $user === root.child('roles/'+auth.uid+'/user').val())"
+      }
+    },
+    "deleted_trips": {
+      ".read": "((auth != null && root.child('roles/'+auth.uid+'/active').val() === true) && root.child('roles/'+auth.uid+'/role').val() === 'manager')",
+      ".write": "((auth != null && root.child('roles/'+auth.uid+'/active').val() === true) && root.child('roles/'+auth.uid+'/role').val() === 'manager')"
+    },
+    "drivers": {
+      ".read": "((auth != null && root.child('roles/'+auth.uid+'/active').val() === true) && root.child('roles/'+auth.uid+'/role').val() === 'manager')",
+      ".write": "((auth != null && root.child('roles/'+auth.uid+'/active').val() === true) && root.child('roles/'+auth.uid+'/role').val() === 'manager')"
+    },
+    "test_env": {
+      "login_index": {
+        ".read": true,
+        "$u": {
+          ".write": "((auth != null && root.child('test_env/roles/'+auth.uid+'/active').val() === true) && root.child('test_env/roles/'+auth.uid+'/role').val() === 'manager') || (auth != null && !root.child('test_env/roles').exists())"
+        }
+      },
+      "roles": {
+        ".read": "((auth != null && root.child('test_env/roles/'+auth.uid+'/active').val() === true) && root.child('test_env/roles/'+auth.uid+'/role').val() === 'manager')",
+        "$uid": {
+          ".read": "auth != null && auth.uid === $uid",
+          ".write": "((auth != null && root.child('test_env/roles/'+auth.uid+'/active').val() === true) && root.child('test_env/roles/'+auth.uid+'/role').val() === 'manager') || ((auth != null && !root.child('test_env/roles').exists()) && auth.uid === $uid && newData.child('role').val() === 'manager' && newData.child('active').val() === true)"
+        }
+      },
+      "accounts": {
+        ".read": "((auth != null && root.child('test_env/roles/'+auth.uid+'/active').val() === true) && root.child('test_env/roles/'+auth.uid+'/role').val() === 'manager')",
+        "$u": {
+          ".write": "((auth != null && root.child('test_env/roles/'+auth.uid+'/active').val() === true) && root.child('test_env/roles/'+auth.uid+'/role').val() === 'manager') || (auth != null && !root.child('test_env/roles').exists())"
+        }
+      },
+      "settings": {
+        ".write": "((auth != null && root.child('test_env/roles/'+auth.uid+'/active').val() === true) && root.child('test_env/roles/'+auth.uid+'/role').val() === 'manager')",
+        "accounts": {
+          ".read": "((auth != null && root.child('test_env/roles/'+auth.uid+'/active').val() === true) && root.child('test_env/roles/'+auth.uid+'/role').val() === 'manager')"
+        },
+        "sources": {
+          ".read": "(auth != null && root.child('test_env/roles/'+auth.uid+'/active').val() === true)"
+        },
+        "staff": {
+          ".read": "(auth != null && root.child('test_env/roles/'+auth.uid+'/active').val() === true)"
+        },
+        "carTypes": {
+          ".read": "(auth != null && root.child('test_env/roles/'+auth.uid+'/active').val() === true)"
+        },
+        "payments": {
+          ".read": "(auth != null && root.child('test_env/roles/'+auth.uid+'/active').val() === true)"
+        },
+        "planPayments": {
+          ".read": "(auth != null && root.child('test_env/roles/'+auth.uid+'/active').val() === true)"
+        },
+        "lockHour": {
+          ".read": "(auth != null && root.child('test_env/roles/'+auth.uid+'/active').val() === true)"
+        }
+      },
+      "trips": {
+        ".read": "((auth != null && root.child('test_env/roles/'+auth.uid+'/active').val() === true) && root.child('test_env/roles/'+auth.uid+'/role').val() === 'manager')",
+        "$id": {
+          ".write": "((auth != null && root.child('test_env/roles/'+auth.uid+'/active').val() === true) && root.child('test_env/roles/'+auth.uid+'/role').val() === 'manager') || ((auth != null && root.child('test_env/roles/'+auth.uid+'/active').val() === true) && (!data.exists() || data.child('createdBy').val() === root.child('test_env/roles/'+auth.uid+'/user').val()) && (!newData.exists() || newData.child('createdBy').val() === root.child('test_env/roles/'+auth.uid+'/user').val()))"
+        }
+      },
+      "users_trips": {
+        "$user": {
+          ".read": "((auth != null && root.child('test_env/roles/'+auth.uid+'/active').val() === true) && root.child('test_env/roles/'+auth.uid+'/role').val() === 'manager') || ((auth != null && root.child('test_env/roles/'+auth.uid+'/active').val() === true) && $user === root.child('test_env/roles/'+auth.uid+'/user').val())",
+          ".write": "((auth != null && root.child('test_env/roles/'+auth.uid+'/active').val() === true) && root.child('test_env/roles/'+auth.uid+'/role').val() === 'manager') || ((auth != null && root.child('test_env/roles/'+auth.uid+'/active').val() === true) && $user === root.child('test_env/roles/'+auth.uid+'/user').val())"
+        }
+      },
+      "deleted_trips": {
+        ".read": "((auth != null && root.child('test_env/roles/'+auth.uid+'/active').val() === true) && root.child('test_env/roles/'+auth.uid+'/role').val() === 'manager')",
+        ".write": "((auth != null && root.child('test_env/roles/'+auth.uid+'/active').val() === true) && root.child('test_env/roles/'+auth.uid+'/role').val() === 'manager')"
+      },
+      "drivers": {
+        ".read": "((auth != null && root.child('test_env/roles/'+auth.uid+'/active').val() === true) && root.child('test_env/roles/'+auth.uid+'/role').val() === 'manager')",
+        ".write": "((auth != null && root.child('test_env/roles/'+auth.uid+'/active').val() === true) && root.child('test_env/roles/'+auth.uid+'/role').val() === 'manager')"
+      }
+    }
+  }
+}

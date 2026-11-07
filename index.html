@@ -8,6 +8,7 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap');
     body { font-family: 'Plus Jakarta Sans', sans-serif; touch-action: pan-x pan-y; }
@@ -41,6 +42,7 @@
   <header class="bg-blue-600 text-white px-4 py-3 flex items-center justify-between shadow-md flex-none z-30">
     <div class="flex items-center space-x-3">
       <span class="font-extrabold text-sm">✈️ TSS POS</span>
+      <span id="test-env-badge" class="hidden text-[10px] bg-amber-400 text-slate-900 px-2 py-1 rounded-lg font-extrabold" title="Dữ liệu ở vùng thử nghiệm riêng, không ảnh hưởng dữ liệu thật">🧪 BẢN THỬ</span>
       <span id="header-status" class="text-xs bg-blue-700 px-2.5 py-1 rounded-lg">Màn hình đăng nhập</span>
       <div id="firebase-status-badge" class="px-2.5 py-1 bg-emerald-500 text-white text-[10px] font-extrabold rounded-lg shadow-sm flex items-center space-x-1.5 transition-all">
         <span id="firebase-dot" class="w-2 h-2 rounded-full bg-white animate-ping"></span>
@@ -49,7 +51,8 @@
     </div>
     <div class="flex items-center space-x-2">
       <button onclick="logoutSession()" id="btn-logout" class="px-3 py-1.5 bg-rose-500 hover:bg-rose-600 text-white rounded-lg text-xs font-bold hidden">Đăng Xuất</button>
-      <button onclick="location.reload()" class="px-2.5 py-1.5 bg-slate-700 hover:bg-slate-800 text-white rounded-lg text-xs font-bold">Thoát App</button>
+      <button onclick="openChangeOwnPasswordModal()" id="btn-change-pass" class="px-2.5 py-1.5 bg-blue-500 hover:bg-blue-700 text-white rounded-lg text-xs font-bold hidden">🔑 Đổi Mật Khẩu</button>
+      <button onclick="logoutSession()" class="px-2.5 py-1.5 bg-slate-700 hover:bg-slate-800 text-white rounded-lg text-xs font-bold">Thoát App</button>
     </div>
   </header>
 
@@ -76,19 +79,65 @@
     };
     firebase.initializeApp(firebaseConfig);
     const rtdb = firebase.database();
+    const fbAuth = firebase.auth();
 
-    let loggedInUser = null; 
+    // ===== MÔI TRƯỜNG: BẢN THỬ dùng vùng dữ liệu riêng "test_env/", BẢN CHÍNH dùng gốc =====
+    // Trên nhánh thử nghiệm đặt FORCE_TEST_ENV = true. Trước khi đưa lên bản chính (main) đặt lại = false.
+    const FORCE_TEST_ENV = true;
+    const IS_TEST_ENV = FORCE_TEST_ENV || /-git-|localhost|127\.0\.0\.1/.test(location.hostname) || location.protocol === 'file:';
+    const DB_PREFIX = IS_TEST_ENV ? 'test_env' : '';
+    const EMAIL_DOMAIN = IS_TEST_ENV ? 'test.taxi-tss.local' : 'taxi-tss.local';
+    function dbRef(path) { return DB_PREFIX ? rtdb.ref(DB_PREFIX + '/' + path) : rtdb.ref(path); }
+    function dbRoot() { return DB_PREFIX ? rtdb.ref(DB_PREFIX) : rtdb.ref(); }
+
+    // Tài khoản app (vd TSS01) <-> tài khoản đăng nhập Firebase (email nội bộ, không phải email thật)
+    function accountEmail(user, ver) { return `${String(user).toLowerCase()}${ver ? '.v' + ver : ''}@${EMAIL_DOMAIN}`; }
+    // Firebase yêu cầu mật khẩu >= 6 ký tự, nên thêm tiền tố cố định để mật khẩu cũ ngắn (vd "123") vẫn dùng được
+    function authPassword(pass) { return 'tss-pw:' + pass; }
+    function escHtml(v) { return String(v == null ? '' : v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+    // Tạo tài khoản Firebase mới mà KHÔNG làm người đang đăng nhập (quản lý) bị đăng xuất
+    let secondaryApp = null;
+    async function createAuthUserFor(user, pass, startVer) {
+      if (!secondaryApp) secondaryApp = firebase.initializeApp(firebaseConfig, 'tao-tai-khoan');
+      const secAuth = secondaryApp.auth();
+      if (secAuth.setPersistence) { try { await secAuth.setPersistence(firebase.auth.Auth.Persistence.NONE); } catch (e) {} }
+      let ver = startVer || 0;
+      for (let tries = 0; tries < 30; tries++, ver++) {
+        try {
+          const cred = await secAuth.createUserWithEmailAndPassword(accountEmail(user, ver), authPassword(pass));
+          const uid = cred.user.uid;
+          await secAuth.signOut();
+          return { uid, ver };
+        } catch (e) {
+          if (e && e.code === 'auth/email-already-in-use') continue;
+          throw e;
+        }
+      }
+      throw new Error('Không tạo được tài khoản (quá nhiều phiên bản).');
+    }
+
+    function authErrorText(e) {
+      const c = (e && e.code) || '';
+      if (c === 'auth/wrong-password' || c === 'auth/user-not-found' || c === 'auth/invalid-credential' || c === 'auth/invalid-login-credentials') return 'Tài khoản hoặc mật khẩu không đúng!';
+      if (c === 'auth/too-many-requests') return 'Nhập sai quá nhiều lần. Vui lòng đợi vài phút rồi thử lại!';
+      if (c === 'auth/network-request-failed') return 'Mất kết nối mạng. Vui lòng kiểm tra Internet!';
+      if (c === 'auth/operation-not-allowed') return 'Firebase chưa bật đăng nhập Email/Password. Báo quản trị viên bật trong Firebase > Authentication.';
+      if (c === 'auth/weak-password') return 'Mật khẩu quá yếu!';
+      if (c === 'PERMISSION_DENIED' || /permission/i.test((e && e.message) || '')) return 'Không có quyền thực hiện thao tác này.';
+      return 'Lỗi: ' + ((e && e.message) || e);
+    }
+
+    let loggedInUser = null;
+    let myUid = null;
+    let accountsMap = {};       // accounts/<USER> = {role, active, uid, ver}
+    let accountsLoaded = false;
+    let legacyAccounts = [];    // settings/accounts cũ (mật khẩu dạng chữ) - chỉ dùng để chuyển đổi 1 lần
     let personalTrips = []; 
     let allCompanyTrips = []; 
     let lastDeletedTripBackup = null;
     let celebratedStaffToday = {}; // Lưu lại nhân viên đã được chúc mừng trong ngày để chỉ hiện 1 lần/ngày
     
-    let userAccounts = [
-      { user: 'TSS01', pass: '123', role: 'pos' },
-      { user: 'TSS02', pass: '123', role: 'driver' },
-      { user: 'TSS03', pass: '123', role: 'plan' }
-    ];
-
     let sourceOptions = ["SQ", "G1", "VTO", "Khách Quầy", "City Tour", "ThanhLong", "JOVIA", "VDT", "MONICA", "NOVEMBER", "STELLAR", "SANNA", "LA SIESTA"];
     let staffOptions = ["Mai Tuấn Khanh", "Nguyễn Văn An", "Trần Thị Tâm", "Lê Văn Liên", "Hoàng Đức Tài", "Lê Chí Bình", "Mẫn"];
     let carTypeOptions = ["Xe 4 Chỗ", "Xe 7 Chỗ", "Xe 16 Chỗ"];
@@ -97,12 +146,51 @@
     
     let lockHourSetting = 8; 
     const TERMINAL_OPTIONS = ["T2", "T1", "T3"];
+    const ROLE_LABELS = { 'pos': 'Bán Vé (Quầy)', 'driver': 'Cổng Chủ Xe', 'plan': 'Team Kế Hoạch', 'manager': 'Quản Lý' };
 
-    window.addEventListener('DOMContentLoaded', () => {
+    window.addEventListener('DOMContentLoaded', async () => {
       initCloudStatusMonitor();
-      loadCloudSettings();
-      renderHomeSelection();
+      if (IS_TEST_ENV) {
+        const b = document.getElementById('test-env-badge');
+        if (b) b.classList.remove('hidden');
+      }
+      try { await fbAuth.setPersistence(firebase.auth.Auth.Persistence.SESSION); } catch (e) {}
+      let firstCheck = true;
+      fbAuth.onAuthStateChanged(async (u) => {
+        if (!firstCheck) return;
+        firstCheck = false;
+        if (u) {
+          // Tải lại trang (F5) trong cùng tab: giữ phiên đăng nhập
+          try { await enterSessionForUid(u.uid, null); return; } catch (e) { try { await fbAuth.signOut(); } catch (e2) {} }
+        }
+        renderHomeSelection();
+      });
     });
+
+    function isManager() { return !!(loggedInUser && loggedInUser.role === 'manager'); }
+
+    // Sau khi đăng nhập Firebase: kiểm tra quyền trong roles/<uid>, rồi mở đúng màn hình
+    async function enterSessionForUid(uid, expectedRole) {
+      const snap = await dbRef('roles/' + uid).once('value');
+      const r = snap.val();
+      if (!r || r.active !== true) throw { code: 'app/inactive' };
+      if (expectedRole && r.role !== expectedRole) throw { code: 'app/wrong-role' };
+      myUid = uid;
+      loggedInUser = { user: r.user, role: r.role };
+      // Bị quản lý khóa/xóa tài khoản trong lúc đang dùng -> tự đăng xuất
+      dbRef('roles/' + uid).on('value', s => {
+        const v = s.val();
+        if (loggedInUser && (!v || v.active !== true)) {
+          alert('Tài khoản của bạn đã bị khóa hoặc thay đổi. Vui lòng đăng nhập lại!');
+          logoutSession();
+        }
+      }, () => {});
+      document.getElementById('btn-logout').classList.remove('hidden');
+      document.getElementById('btn-change-pass').classList.remove('hidden');
+      await loadCloudSettings();
+      if (r.role === 'manager') startManagerSession();
+      else startWorkerSession(r.role);
+    }
 
     function initCloudStatusMonitor() {
       const badge = document.getElementById('firebase-status-badge');
@@ -122,86 +210,56 @@
       });
     }
 
+    // Tải danh mục cấu hình. Trả về Promise xong khi đã nhận lần đầu (để màn hình nhập có đủ danh mục).
     function loadCloudSettings() {
-      rtdb.ref('settings/accounts').on('value', snap => {
-        if (snap.val()) {
-          const val = snap.val();
-          userAccounts = Array.isArray(val) ? val : Object.values(val);
-          if (loggedInUser && loggedInUser.role === 'manager') renderAccountsTable();
-        } else {
-          rtdb.ref('settings/accounts').set(userAccounts);
-        }
-      });
-
-      rtdb.ref('settings/sources').on('value', snap => {
-        if (snap.val()) {
-          const val = snap.val();
-          sourceOptions = Array.isArray(val) ? val : Object.values(val);
-          if (loggedInUser && loggedInUser.role === 'manager') renderSourcesTable();
-        } else {
-          rtdb.ref('settings/sources').set(sourceOptions);
-        }
-      });
-
-      rtdb.ref('settings/staff').on('value', snap => {
-        if (snap.val()) {
-          const val = snap.val();
-          staffOptions = Array.isArray(val) ? val : Object.values(val);
-          if (loggedInUser && loggedInUser.role === 'manager') renderStaffTable();
-        } else {
-          rtdb.ref('settings/staff').set(staffOptions);
-        }
-      });
-
-      rtdb.ref('settings/carTypes').on('value', snap => {
-        if (snap.val()) {
-          const val = snap.val();
-          carTypeOptions = Array.isArray(val) ? val : Object.values(val);
-          if (loggedInUser && loggedInUser.role === 'manager') renderCarTypesTable();
-        } else {
-          rtdb.ref('settings/carTypes').set(carTypeOptions);
-        }
-      });
-
-      rtdb.ref('settings/payments').on('value', snap => {
-        if (snap.val()) {
-          const val = snap.val();
-          paymentOptions = Array.isArray(val) ? val : Object.values(val);
-          if (loggedInUser && loggedInUser.role === 'manager') renderPaymentsTable();
-        } else {
-          rtdb.ref('settings/payments').set(paymentOptions);
-        }
-      });
-
-      rtdb.ref('settings/planPayments').on('value', snap => {
-        if (snap.val()) {
-          const val = snap.val();
-          planPaymentOptions = Array.isArray(val) ? val : Object.values(val);
-          if (loggedInUser && loggedInUser.role === 'manager') renderPlanPaymentsTable();
-        } else {
-          rtdb.ref('settings/planPayments').set(planPaymentOptions);
-        }
-      });
-
-      rtdb.ref('settings/lockHour').on('value', snap => {
-        if (snap.val() !== null) {
-          lockHourSetting = parseInt(snap.val(), 10);
+      const toArr = v => Array.isArray(v) ? v.filter(x => x !== null && x !== undefined) : Object.values(v);
+      const defs = [
+        ['sources', () => sourceOptions, v => { sourceOptions = toArr(v); }, () => renderSourcesTable()],
+        ['staff', () => staffOptions, v => { staffOptions = toArr(v); }, () => renderStaffTable()],
+        ['carTypes', () => carTypeOptions, v => { carTypeOptions = toArr(v); }, () => renderCarTypesTable()],
+        ['payments', () => paymentOptions, v => { paymentOptions = toArr(v); }, () => renderPaymentsTable()],
+        ['planPayments', () => planPaymentOptions, v => { planPaymentOptions = toArr(v); }, () => renderPlanPaymentsTable()],
+        ['lockHour', () => lockHourSetting, v => {
+          lockHourSetting = parseInt(v, 10);
           const inp = document.getElementById('lock-hour-input');
           if (inp) inp.value = lockHourSetting;
-        } else {
-          rtdb.ref('settings/lockHour').set(lockHourSetting);
-        }
-      });
+        }, null]
+      ];
+      if (isManager()) {
+        dbRef('accounts').on('value', snap => {
+          accountsMap = snap.val() || {};
+          accountsLoaded = true;
+          renderAccountsTable();
+        }, () => {});
+        dbRef('settings/accounts').on('value', snap => {
+          const val = snap.val();
+          legacyAccounts = val ? toArr(val).filter(a => a && a.user) : [];
+          renderAccountsTable();
+        }, () => {});
+      }
+      return Promise.all(defs.map(([key, getDefault, apply, rerender]) => new Promise(resolve => {
+        let done = false;
+        const finish = () => { if (!done) { done = true; resolve(); } };
+        dbRef('settings/' + key).on('value', snap => {
+          const val = snap.val();
+          if (val !== null && val !== undefined) {
+            apply(val);
+            if (rerender && isManager()) rerender();
+          } else if (isManager()) {
+            dbRef('settings/' + key).set(getDefault()).catch(() => {});
+          }
+          finish();
+        }, () => finish());
+        setTimeout(finish, 8000);
+      })));
     }
-
-    function saveCloudAccounts() { rtdb.ref('settings/accounts').set(userAccounts); }
     function saveLockHour() {
       const inp = document.getElementById('lock-hour-input');
       if (!inp) return;
       const val = parseInt(inp.value, 10);
       if (isNaN(val) || val < 0 || val > 23) { alert("Vui lòng nhập giờ hợp lệ từ 0 đến 23!"); return; }
       lockHourSetting = val;
-      rtdb.ref('settings/lockHour').set(lockHourSetting).then(() => {
+      dbRef('settings/lockHour').set(lockHourSetting).then(() => {
         alert(`Đã cập nhật giờ khóa đơn thành ${lockHourSetting}:00 sáng hôm sau!`);
       });
     }
@@ -284,100 +342,171 @@
       `;
     }
 
-    function promptLogin(role) {
-      if (role === 'manager') {
-        const html = `
-          <div id="manager-login-modal" class="fixed inset-0 bg-slate-900/80 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-            <div class="bg-white rounded-3xl shadow-2xl max-w-xs w-full p-6 text-center space-y-4">
-              <div class="bg-slate-900 text-white w-12 h-12 rounded-2xl flex items-center justify-center mx-auto text-xl font-bold">📊</div>
-              <h3 class="text-sm font-bold text-slate-900">Đăng Nhập Quản Lý</h3>
-              <input type="password" id="mgr-pwd" autocomplete="current-password" placeholder="Mật khẩu quản lý..." class="w-full px-3 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-center" onkeydown="if(event.key==='Enter') executeManagerLogin()">
-              <div class="flex space-x-2 pt-1">
-                <button onclick="executeManagerLogin()" class="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold">Xác Nhận</button>
-                <button onclick="document.getElementById('manager-login-modal').remove()" class="w-full py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold">Hủy</button>
-              </div>
-            </div>
-          </div>
-        `;
-        document.getElementById('main-container').insertAdjacentHTML('beforeend', html);
-        setTimeout(() => { const inp = document.getElementById('mgr-pwd'); if (inp) inp.focus(); }, 100);
-      } else {
-        promptUserLoginModal(role);
-      }
-    }
-
-    function executeManagerLogin() {
-      const inp = document.getElementById('mgr-pwd');
-      const val = inp ? inp.value.trim() : '';
-      if (val === '999') {
-        loggedInUser = { user: 'Admin', role: 'manager' };
-        document.getElementById('header-status').innerText = "Quản Lý (Admin)";
-        document.getElementById('btn-logout').classList.remove('hidden');
-        
-        rtdb.ref('trips').on('value', s => {
-          const dataVal = s.val();
-          allCompanyTrips = dataVal ? Object.values(dataVal) : [];
-          updateManagerAuditTable();
-          updateManagerRevenueSummary();
-        });
-        renderManagerDashboard();
-      } else {
-        alert("Mật khẩu quản lý không chính xác!");
-        if (inp) { inp.value = ''; inp.focus(); }
-      }
-    }
-
-    function promptUserLoginModal(role) {
-      const roleTitles = {
-        'pos': 'Bán Vé',
-        'driver': 'Tài Xế',
-        'plan': 'Team Kế Hoạch'
-      };
-      const title = `Đăng Nhập ${roleTitles[role] || role}`;
-      const html = `
-        <div class="fixed inset-0 bg-slate-900/80 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+    function loginModalHtml(id, iconBg, icon, title, bodyHtml, okLabel, okAction, okClass) {
+      return `
+        <div id="${id}" class="login-modal fixed inset-0 bg-slate-900/80 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
           <div class="bg-white rounded-3xl shadow-2xl max-w-xs w-full p-6 text-center space-y-4">
-            <div class="bg-blue-600 text-white w-12 h-12 rounded-2xl flex items-center justify-center mx-auto text-xl font-bold">🔐</div>
+            <div class="${iconBg} text-white w-12 h-12 rounded-2xl flex items-center justify-center mx-auto text-xl font-bold">${icon}</div>
             <h3 class="text-sm font-bold text-slate-900">${title}</h3>
-            <div class="space-y-2 text-left">
-              <input type="text" id="modal-user" autocomplete="off" placeholder="Tài khoản..." class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold">
-              <input type="password" id="modal-pwd" autocomplete="off" placeholder="Mật khẩu..." class="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold" onkeydown="if(event.key==='Enter') executeUserLogin('${role}')">
-            </div>
+            <div class="space-y-2 text-left">${bodyHtml}</div>
+            <div id="${id}-msg" class="text-[11px] font-bold text-rose-600 min-h-[14px]"></div>
             <div class="flex space-x-2 pt-1">
-              <button onclick="executeUserLogin('${role}')" class="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold">Xác Nhận</button>
-              <button onclick="renderHomeSelection()" class="w-full py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold">Hủy</button>
+              <button id="${id}-ok" onclick="${okAction}" class="w-full py-2.5 ${okClass || 'bg-blue-600 hover:bg-blue-700'} text-white rounded-xl text-xs font-bold">${okLabel}</button>
+              <button onclick="closeLoginModals()" class="w-full py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold">Hủy</button>
             </div>
           </div>
-        </div>
-      `;
-      document.getElementById('main-container').insertAdjacentHTML('beforeend', html);
-      document.getElementById('modal-user').focus();
+        </div>`;
     }
+    function closeLoginModals() { document.querySelectorAll('.login-modal').forEach(m => m.remove()); }
+    function setModalBusy(id, busy, msg) {
+      const ok = document.getElementById(id + '-ok');
+      const m = document.getElementById(id + '-msg');
+      if (ok) { ok.disabled = busy; ok.style.opacity = busy ? '0.6' : '1'; }
+      if (m) { m.className = 'text-[11px] font-bold min-h-[14px] ' + (busy ? 'text-blue-600' : 'text-rose-600'); m.innerText = msg || ''; }
+    }
+    const inputCls = 'w-full px-3 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold';
 
-    function executeUserLogin(role) {
+    async function promptLogin(role) {
+      closeLoginModals();
+      if (role === 'manager') {
+        // Chưa có tài khoản nào trong hệ thống mới -> thiết lập quản lý lần đầu
+        let isEmpty = false;
+        try { isEmpty = !(await dbRef('login_index').limitToFirst(1).once('value')).exists(); } catch (e) {}
+        if (isEmpty) { promptBootstrapManager(); return; }
+      }
+      const titles = { pos: 'Đăng Nhập Bán Vé', driver: 'Đăng Nhập Chủ Xe / Tài Xế', plan: 'Đăng Nhập Team Kế Hoạch', manager: 'Đăng Nhập Quản Lý' };
+      const body = `
+        <input type="text" id="modal-user" autocomplete="username" placeholder="Tài khoản..." class="${inputCls}">
+        <input type="password" id="modal-pwd" autocomplete="current-password" placeholder="Mật khẩu..." class="${inputCls}" onkeydown="if(event.key==='Enter') executeUserLogin('${role}')">`;
+      const icon = role === 'manager' ? '📊' : '🔐';
+      const bg = role === 'manager' ? 'bg-slate-900' : 'bg-blue-600';
+      document.body.insertAdjacentHTML('beforeend', loginModalHtml('login-modal', bg, icon, titles[role] || 'Đăng Nhập', body, 'Xác Nhận', `executeUserLogin('${role}')`));
+      setTimeout(() => { const i = document.getElementById('modal-user'); if (i) i.focus(); }, 50);
+    }
+    function promptUserLoginModal(role) { promptLogin(role); }
+
+    async function executeUserLogin(role) {
       const u = document.getElementById('modal-user').value.trim().toUpperCase();
       const p = document.getElementById('modal-pwd').value.trim();
-      const found = userAccounts.find(x => x.user === u && x.pass === p && x.role === role);
-      if (found) {
-        loggedInUser = found;
-        const roleLabels = { 'pos': 'Bán Vé', 'driver': 'Tài Xế', 'plan': 'Team Kế Hoạch' };
-        document.getElementById('header-status').innerText = `${roleLabels[role] || role}: ${found.user}`;
-        document.getElementById('btn-logout').classList.remove('hidden');
-
-        rtdb.ref(`users_trips/${loggedInUser.user}`).on('value', s => {
-          personalTrips = s.val() ? Object.values(s.val()) : [];
-          updatePersonalSummary(role);
-          renderActiveWorksheetTrips(role);
-        });
-
-        renderWorksheetView(role);
-      } else {
-        alert("Tài khoản hoặc mật khẩu không đúng hoặc không đúng phân vùng!");
+      if (!u || !p) { setModalBusy('login-modal', false, 'Vui lòng nhập tài khoản và mật khẩu!'); return; }
+      setModalBusy('login-modal', true, 'Đang đăng nhập...');
+      try {
+        const idxSnap = await dbRef('login_index/' + u).once('value');
+        const idx = idxSnap.val();
+        if (!idx) throw { code: 'app/no-account' };
+        const cred = await fbAuth.signInWithEmailAndPassword(accountEmail(u, idx.ver || 0), authPassword(p));
+        try {
+          await enterSessionForUid(cred.user.uid, role);
+        } catch (e) {
+          loggedInUser = null; myUid = null;
+          try { await fbAuth.signOut(); } catch (e2) {}
+          throw e;
+        }
+        closeLoginModals();
+      } catch (e) {
+        let msg = authErrorText(e);
+        if (e && e.code === 'app/no-account') msg = 'Tài khoản không tồn tại! (Nếu là tài khoản cũ, báo quản lý bấm "Chuyển Đổi Tài Khoản Cũ")';
+        if (e && e.code === 'app/inactive') msg = 'Tài khoản đã bị khóa. Vui lòng liên hệ quản lý!';
+        if (e && e.code === 'app/wrong-role') msg = 'Tài khoản này không thuộc phân vùng bạn chọn!';
+        setModalBusy('login-modal', false, msg);
+        const pw = document.getElementById('modal-pwd'); if (pw) { pw.value = ''; pw.focus(); }
       }
     }
 
-    function logoutSession() {
+    function promptBootstrapManager() {
+      const body = `
+        <p class="text-[11px] text-slate-600 font-semibold text-center">Lần đầu dùng hệ thống bảo mật mới. Hãy tạo tài khoản Quản Lý.</p>
+        <input type="password" id="boot-old" autocomplete="off" placeholder="Mật khẩu quản lý cũ..." class="${inputCls}">
+        <input type="text" id="boot-user" autocomplete="username" value="ADMIN" placeholder="Tên tài khoản quản lý..." class="${inputCls}">
+        <input type="password" id="boot-pass" autocomplete="new-password" placeholder="Mật khẩu mới (ít nhất 6 ký tự)..." class="${inputCls}">
+        <input type="password" id="boot-pass2" autocomplete="new-password" placeholder="Nhập lại mật khẩu mới..." class="${inputCls}" onkeydown="if(event.key==='Enter') executeBootstrapManager()">`;
+      document.body.insertAdjacentHTML('beforeend', loginModalHtml('boot-modal', 'bg-slate-900', '🛡️', 'Thiết Lập Quản Lý Lần Đầu', body, 'Tạo & Đăng Nhập', 'executeBootstrapManager()'));
+    }
+
+    async function executeBootstrapManager() {
+      const oldP = document.getElementById('boot-old').value.trim();
+      const u = document.getElementById('boot-user').value.trim().toUpperCase();
+      const p = document.getElementById('boot-pass').value.trim();
+      const p2 = document.getElementById('boot-pass2').value.trim();
+      if (oldP !== '999') { setModalBusy('boot-modal', false, 'Mật khẩu quản lý cũ không đúng!'); return; }
+      if (!/^[A-Z0-9_.-]{2,30}$/.test(u)) { setModalBusy('boot-modal', false, 'Tên tài khoản chỉ gồm chữ không dấu, số (2-30 ký tự)!'); return; }
+      if (p.length < 6) { setModalBusy('boot-modal', false, 'Mật khẩu mới phải có ít nhất 6 ký tự!'); return; }
+      if (p !== p2) { setModalBusy('boot-modal', false, 'Hai lần nhập mật khẩu không giống nhau!'); return; }
+      setModalBusy('boot-modal', true, 'Đang tạo tài khoản...');
+      try {
+        const { uid, ver } = await createAuthUserFor(u, p, 0);
+        await fbAuth.signInWithEmailAndPassword(accountEmail(u, ver), authPassword(p));
+        const now = Date.now();
+        const updates = {};
+        updates[`roles/${uid}`] = { user: u, role: 'manager', active: true };
+        updates[`accounts/${u}`] = { role: 'manager', active: true, uid, ver, createdAt: now };
+        updates[`login_index/${u}`] = { ver };
+        await dbRoot().update(updates);
+        await enterSessionForUid(uid, 'manager');
+        closeLoginModals();
+        alert(`Đã tạo tài khoản quản lý ${u}. Từ nay đăng nhập Trang Quản Lý bằng tài khoản này!`);
+      } catch (e) {
+        try { await fbAuth.signOut(); } catch (e2) {}
+        loggedInUser = null;
+        setModalBusy('boot-modal', false, authErrorText(e));
+      }
+    }
+
+    function startManagerSession() {
+      document.getElementById('header-status').innerText = `Quản Lý: ${loggedInUser.user}`;
+      dbRef('trips').on('value', s => {
+        const dataVal = s.val();
+        allCompanyTrips = dataVal ? Object.values(dataVal) : [];
+        updateManagerAuditTable();
+        updateManagerRevenueSummary();
+      });
+      renderManagerDashboard();
+    }
+
+    function startWorkerSession(role) {
+      const roleLabels = { 'pos': 'Bán Vé', 'driver': 'Tài Xế', 'plan': 'Team Kế Hoạch' };
+      document.getElementById('header-status').innerText = `${roleLabels[role] || role}: ${loggedInUser.user}`;
+      dbRef(`users_trips/${loggedInUser.user}`).on('value', s => {
+        personalTrips = s.val() ? Object.values(s.val()) : [];
+        updatePersonalSummary(role);
+        renderActiveWorksheetTrips(role);
+      });
+      renderWorksheetView(role);
+    }
+
+    async function logoutSession() {
+      loggedInUser = null;
+      try { await fbAuth.signOut(); } catch (e) {}
       location.reload();
+    }
+
+    // Đổi mật khẩu của chính mình (mọi tài khoản)
+    function openChangeOwnPasswordModal() {
+      if (!loggedInUser) return;
+      closeLoginModals();
+      const body = `
+        <input type="password" id="own-old" autocomplete="current-password" placeholder="Mật khẩu hiện tại..." class="${inputCls}">
+        <input type="password" id="own-new" autocomplete="new-password" placeholder="Mật khẩu mới (ít nhất 6 ký tự)..." class="${inputCls}">
+        <input type="password" id="own-new2" autocomplete="new-password" placeholder="Nhập lại mật khẩu mới..." class="${inputCls}" onkeydown="if(event.key==='Enter') executeChangeOwnPassword()">`;
+      document.body.insertAdjacentHTML('beforeend', loginModalHtml('ownpw-modal', 'bg-blue-600', '🔑', `Đổi Mật Khẩu (${escHtml(loggedInUser.user)})`, body, 'Lưu Mật Khẩu', 'executeChangeOwnPassword()'));
+    }
+    async function executeChangeOwnPassword() {
+      const o = document.getElementById('own-old').value.trim();
+      const n = document.getElementById('own-new').value.trim();
+      const n2 = document.getElementById('own-new2').value.trim();
+      if (n.length < 6) { setModalBusy('ownpw-modal', false, 'Mật khẩu mới phải có ít nhất 6 ký tự!'); return; }
+      if (n !== n2) { setModalBusy('ownpw-modal', false, 'Hai lần nhập mật khẩu mới không giống nhau!'); return; }
+      setModalBusy('ownpw-modal', true, 'Đang lưu...');
+      try {
+        const cu = fbAuth.currentUser;
+        const cred = firebase.auth.EmailAuthProvider.credential(cu.email, authPassword(o));
+        await cu.reauthenticateWithCredential(cred);
+        await cu.updatePassword(authPassword(n));
+        closeLoginModals();
+        alert('Đã đổi mật khẩu thành công!');
+      } catch (e) {
+        setModalBusy('ownpw-modal', false, (e && (e.code === 'auth/wrong-password' || e.code === 'auth/invalid-credential' || e.code === 'auth/invalid-login-credentials')) ? 'Mật khẩu hiện tại không đúng!' : authErrorText(e));
+      }
     }
 
     function canDeleteTrip(tripTimestamp) {
@@ -1138,7 +1267,7 @@
       updates[`users_trips/${loggedInUser.user}/${id}`] = trip;
       updates[`trips/${id}`] = trip;
 
-      rtdb.ref().update(updates).then(() => {
+      dbRoot().update(updates).then(() => {
         alert("Đã cập nhật đơn hàng thành công!");
         document.getElementById('edit-trip-modal').remove();
         updatePersonalSummary(role);
@@ -1170,7 +1299,7 @@
           }
         });
 
-        rtdb.ref().update(updates).then(() => {
+        dbRoot().update(updates).then(() => {
           lastDeletedTripBackup = deletedList;
           showUndoButton(`Đã xóa ${deletedList.length} đơn hàng!`);
         });
@@ -1180,7 +1309,7 @@
     function deletePersonalTrip(id) {
       if (!loggedInUser) return;
       
-      rtdb.ref(`users_trips/${loggedInUser.user}/${id}`).once('value', snap => {
+      dbRef(`users_trips/${loggedInUser.user}/${id}`).once('value', snap => {
         const trip = snap.val();
         
         if (trip && !canDeleteTrip(trip.timestamp)) {
@@ -1193,7 +1322,7 @@
           updates[`users_trips/${loggedInUser.user}/${id}`] = null;
           updates[`trips/${id}`] = null;
 
-          rtdb.ref().update(updates).then(() => {
+          dbRoot().update(updates).then(() => {
             lastDeletedTripBackup = [trip || { id }];
             showUndoButton("Đã xóa đơn hàng!");
           }).catch(err => {
@@ -1228,7 +1357,7 @@
           updates[`users_trips/${trip.createdBy}/${trip.id}`] = trip;
         }
       });
-      rtdb.ref().update(updates).then(() => {
+      dbRoot().update(updates).then(() => {
         alert("Đã khôi phục đơn hàng thành công!");
         lastDeletedTripBackup = null;
         const container = document.getElementById('floating-undo-container');
@@ -1352,7 +1481,7 @@
       }
 
       if (count > 0) {
-        rtdb.ref().update(updates).then(() => {
+        dbRoot().update(updates).then(() => {
           alert(`Đã lưu thành công và phân tách hoa hồng cho ${count} đơn!`);
           renderBatchRows(role);
           const histInput = document.getElementById('filter-history-date');
@@ -1380,7 +1509,10 @@
         <div class="space-y-6 pb-24 w-full">
           <div class="bg-white p-4 sm:p-5 rounded-3xl shadow-md border border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-3">
             <h3 class="text-xs sm:text-sm font-extrabold text-slate-900 uppercase">📊 Quản Lý Hệ Thống & Cấu Hình</h3>
-            <button onclick="exportCustomExcel()" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-sm">📥 Xuất Excel (Đã Lọc & Có Thanh Toán, Ghi Chú)</button>
+            <div class="flex flex-wrap gap-2 justify-center">
+              ${IS_TEST_ENV ? `<button onclick="copyRealDataToTest()" class="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-slate-900 rounded-xl text-xs font-extrabold shadow-sm">🧪 Chép Dữ Liệu Thật Vào Bản Thử</button>` : ''}
+              <button onclick="exportCustomExcel()" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-sm">📥 Xuất Excel (Đã Lọc & Có Thanh Toán, Ghi Chú)</button>
+            </div>
           </div>
 
           <!-- MỤC 0: BÁO CÁO TỔNG DOANH THU TRONG NGÀY -->
@@ -1481,27 +1613,30 @@
             <div class="flex flex-wrap gap-2 pt-2" id="planpayment-tag-list"></div>
           </div>
 
-          <!-- MỤC 5: QUẢN LÝ TÀI KHOẢN -->
+          <!-- MỤC 5: QUẢN LÝ TÀI KHOẢN (Firebase Authentication) -->
           <div class="bg-white rounded-3xl shadow-md border border-slate-200 p-4 sm:p-5 space-y-3">
-            <h4 class="text-xs font-extrabold text-blue-900 uppercase">🔑 Cấp Phát Tài Khoản & Mật Khẩu (Đồng Bộ Firebase Cloud)</h4>
-            <input type="hidden" id="edit-user-idx" value="-1">
+            <h4 class="text-xs font-extrabold text-blue-900 uppercase">🔑 Cấp Phát Tài Khoản & Mật Khẩu (Bảo Mật Firebase)</h4>
+            <div id="legacy-migrate-box"></div>
             <div class="grid grid-cols-1 sm:grid-cols-4 gap-2 text-xs">
-              <input type="text" id="new-user" autocomplete="off" placeholder="Tài khoản..." class="p-2.5 bg-slate-50 border rounded-xl font-bold">
-              <input type="text" id="new-pass" autocomplete="off" placeholder="Mật khẩu..." class="p-2.5 bg-slate-50 border rounded-xl font-bold">
+              <input type="text" id="new-user" autocomplete="off" placeholder="Tài khoản (vd TSS05)..." class="p-2.5 bg-slate-50 border rounded-xl font-bold uppercase">
+              <input type="text" id="new-pass" autocomplete="off" placeholder="Mật khẩu (ít nhất 6 ký tự)..." class="p-2.5 bg-slate-50 border rounded-xl font-bold">
               <select id="new-role" class="p-2.5 bg-slate-50 border rounded-xl font-bold">
                 <option value="pos">Bán Vé (Quầy)</option>
                 <option value="driver">Cổng Chủ Xe</option>
                 <option value="plan">Team Kế Hoạch</option>
+                <option value="manager">Quản Lý</option>
               </select>
               <button onclick="saveAccount()" class="p-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold shadow-sm" id="btn-save-acc">+ Thêm Tài Khoản</button>
             </div>
-            <div class="overflow-x-auto pt-2">
-              <table class="w-full text-left border-collapse text-xs">
+            <p class="text-[11px] text-slate-500">🔒 Mật khẩu được Firebase mã hóa, không ai xem được. Nhân viên quên mật khẩu: bấm <b>Đặt Lại MK</b>.</p>
+            <div class="overflow-x-auto pt-1">
+              <table class="w-full text-left border-collapse text-xs min-w-[640px]">
                 <thead>
                   <tr class="bg-slate-900 text-white font-bold uppercase tracking-wider">
                     <th class="p-3">Tài Khoản</th>
                     <th class="p-3">Mật Khẩu</th>
                     <th class="p-3">Phân Vùng</th>
+                    <th class="p-3">Trạng Thái</th>
                     <th class="p-3 text-center">Thao Tác</th>
                   </tr>
                 </thead>
@@ -1613,7 +1748,7 @@
       if (!val) { alert("Vui lòng nhập hình thức thanh toán!"); return; }
       if (planPaymentOptions.includes(val)) { alert("Hình thức này đã tồn tại!"); return; }
       planPaymentOptions.push(val);
-      rtdb.ref('settings/planPayments').set(planPaymentOptions).then(() => { input.value = ''; renderPlanPaymentsTable(); });
+      dbRef('settings/planPayments').set(planPaymentOptions).then(() => { input.value = ''; renderPlanPaymentsTable(); });
     }
 
     function addBulkPlanPayment() {
@@ -1625,7 +1760,7 @@
       lines.forEach(pt => {
         if (!planPaymentOptions.includes(pt)) { planPaymentOptions.push(pt); added++; }
       });
-      rtdb.ref('settings/planPayments').set(planPaymentOptions).then(() => {
+      dbRef('settings/planPayments').set(planPaymentOptions).then(() => {
         textarea.value = '';
         renderPlanPaymentsTable();
         alert(`Đã thêm thành công ${added} hình thức mới!`);
@@ -1636,7 +1771,7 @@
       if (planPaymentOptions.length <= 1) { alert("Cần giữ lại ít nhất 1 hình thức thanh toán!"); return; }
       if (confirm(`Bạn có chắc muốn xóa hình thức "${planPaymentOptions[idx]}" không?`)) {
         planPaymentOptions.splice(idx, 1);
-        rtdb.ref('settings/planPayments').set(planPaymentOptions).then(() => { renderPlanPaymentsTable(); });
+        dbRef('settings/planPayments').set(planPaymentOptions).then(() => { renderPlanPaymentsTable(); });
       }
     }
 
@@ -1737,38 +1872,27 @@
       checkboxes.forEach(cb => cb.checked = masterCheckbox.checked);
     }
 
+    // Xác nhận xóa đơn bằng chính mật khẩu của quản lý đang đăng nhập
     function verifyAndDelete(callback) {
-      const existingModal = document.getElementById('custom-pwd-modal');
-      if (existingModal) existingModal.remove();
+      closeLoginModals();
+      const body = `
+        <p class="text-xs text-slate-500 text-center">Nhập mật khẩu tài khoản quản lý của bạn để xóa:</p>
+        <input type="password" id="custom-pwd-input" autocomplete="current-password" placeholder="Mật khẩu..." class="${inputCls} text-center" onkeydown="if(event.key==='Enter') submitCustomPwd()">`;
+      document.body.insertAdjacentHTML('beforeend', loginModalHtml('custom-pwd-modal', 'bg-rose-600', '🔒', 'Xác Nhận Xóa Đơn Hàng', body, 'Xác Nhận Xóa', 'submitCustomPwd()', 'bg-rose-600 hover:bg-rose-700'));
+      setTimeout(() => { const inp = document.getElementById('custom-pwd-input'); if (inp) inp.focus(); }, 100);
 
-      const modalHtml = `
-        <div id="custom-pwd-modal" class="fixed inset-0 bg-slate-900/80 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-          <div class="bg-white rounded-3xl shadow-2xl max-w-xs w-full p-6 text-center space-y-4">
-            <div class="bg-rose-600 text-white w-12 h-12 rounded-2xl flex items-center justify-center mx-auto text-xl font-bold">🔒</div>
-            <h3 class="text-sm font-bold text-slate-900">Xác Nhận Xóa Đơn Hàng</h3>
-            <p class="text-xs text-slate-500">Vui lòng nhập mật khẩu quản trị để tiếp tục:</p>
-            <input type="password" id="custom-pwd-input" autocomplete="new-password" placeholder="Mật khẩu..." class="w-full px-3 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-center" onkeydown="if(event.key==='Enter') submitCustomPwd()">
-            <div class="flex space-x-2 pt-1">
-              <button onclick="submitCustomPwd()" class="w-full py-2.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold">Xác Nhận Xóa</button>
-              <button onclick="document.getElementById('custom-pwd-modal').remove()" class="w-full py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold">Hủy</button>
-            </div>
-          </div>
-        </div>
-      `;
-      document.body.insertAdjacentHTML('beforeend', modalHtml);
-      setTimeout(() => {
-        const inp = document.getElementById('custom-pwd-input');
-        if (inp) inp.focus();
-      }, 100);
-
-      window.submitCustomPwd = function() {
+      window.submitCustomPwd = async function() {
         const inp = document.getElementById('custom-pwd-input');
         const val = inp ? inp.value.trim() : '';
-        document.getElementById('custom-pwd-modal').remove();
-        if (val === "0105") {
+        if (!val) { setModalBusy('custom-pwd-modal', false, 'Vui lòng nhập mật khẩu!'); return; }
+        setModalBusy('custom-pwd-modal', true, 'Đang kiểm tra...');
+        try {
+          const cu = fbAuth.currentUser;
+          await cu.reauthenticateWithCredential(firebase.auth.EmailAuthProvider.credential(cu.email, authPassword(val)));
+          closeLoginModals();
           callback();
-        } else {
-          alert("Mật khẩu bảo mật không chính xác! Hủy thao tác xóa.");
+        } catch (e) {
+          setModalBusy('custom-pwd-modal', false, (e && (e.code === 'auth/wrong-password' || e.code === 'auth/invalid-credential' || e.code === 'auth/invalid-login-credentials')) ? 'Mật khẩu không chính xác! Hủy thao tác xóa.' : authErrorText(e));
         }
       };
     }
@@ -1792,7 +1916,7 @@
           }
         });
 
-        rtdb.ref().update(updates).then(() => {
+        dbRoot().update(updates).then(() => {
           lastDeletedTripBackup = deletedList;
           showUndoButton(`Đã xóa ${deletedList.length} đơn hàng!`);
         });
@@ -1810,7 +1934,7 @@
           updates[`users_trips/${createdBy}/${id}`] = null;
         }
 
-        rtdb.ref().update(updates).then(() => {
+        dbRoot().update(updates).then(() => {
           lastDeletedTripBackup = [trip];
           showUndoButton("Đã xóa đơn hàng!");
         });
@@ -1833,7 +1957,7 @@
         updates[`users_trips/${trip.createdBy}/${tripId}`] = trip;
       }
 
-      rtdb.ref().update(updates).then(() => {
+      dbRoot().update(updates).then(() => {
         updateManagerRevenueSummary();
       }).catch(err => {
         alert("Lỗi cập nhật: " + err.message);
@@ -1864,7 +1988,7 @@
       if (!val) { alert("Vui lòng nhập tên nguồn đơn!"); return; }
       if (sourceOptions.includes(val)) { alert("Nguồn đơn này đã tồn tại!"); return; }
       sourceOptions.push(val);
-      rtdb.ref('settings/sources').set(sourceOptions).then(() => { input.value = ''; renderSourcesTable(); });
+      dbRef('settings/sources').set(sourceOptions).then(() => { input.value = ''; renderSourcesTable(); });
     }
     function addBulkSource() {
       const textarea = document.getElementById('bulk-source-text');
@@ -1875,7 +1999,7 @@
       lines.forEach(src => {
         if (!sourceOptions.includes(src)) { sourceOptions.push(src); added++; }
       });
-      rtdb.ref('settings/sources').set(sourceOptions).then(() => {
+      dbRef('settings/sources').set(sourceOptions).then(() => {
         textarea.value = '';
         renderSourcesTable();
         alert(`Đã thêm thành công ${added} nguồn đơn mới!`);
@@ -1885,7 +2009,7 @@
       if (sourceOptions.length <= 1) { alert("Cần giữ lại ít nhất 1 nguồn đơn!"); return; }
       if (confirm(`Bạn có chắc muốn xóa nguồn "${sourceOptions[idx]}" không?`)) {
         sourceOptions.splice(idx, 1);
-        rtdb.ref('settings/sources').set(sourceOptions).then(() => { renderSourcesTable(); });
+        dbRef('settings/sources').set(sourceOptions).then(() => { renderSourcesTable(); });
       }
     }
 
@@ -1905,7 +2029,7 @@
       if (!val) { alert("Vui lòng nhập tên nhân sự!"); return; }
       if (staffOptions.includes(val)) { alert("Tên nhân sự này đã tồn tại!"); return; }
       staffOptions.push(val);
-      rtdb.ref('settings/staff').set(staffOptions).then(() => { input.value = ''; renderStaffTable(); });
+      dbRef('settings/staff').set(staffOptions).then(() => { input.value = ''; renderStaffTable(); });
     }
     function addBulkStaff() {
       const textarea = document.getElementById('bulk-staff-text');
@@ -1916,7 +2040,7 @@
       lines.forEach(name => {
         if (!staffOptions.includes(name)) { staffOptions.push(name); added++; }
       });
-      rtdb.ref('settings/staff').set(staffOptions).then(() => {
+      dbRef('settings/staff').set(staffOptions).then(() => {
         textarea.value = '';
         renderStaffTable();
         alert(`Đã thêm thành công ${added} nhân sự mới!`);
@@ -1926,7 +2050,7 @@
       if (staffOptions.length <= 1) { alert("Cần giữ lại ít nhất 1 nhân sự!"); return; }
       if (confirm(`Bạn có chắc muốn xóa nhân sự "${staffOptions[idx]}" không?`)) {
         staffOptions.splice(idx, 1);
-        rtdb.ref('settings/staff').set(staffOptions).then(() => { renderStaffTable(); });
+        dbRef('settings/staff').set(staffOptions).then(() => { renderStaffTable(); });
       }
     }
 
@@ -1946,13 +2070,13 @@
       if (!val) { alert("Vui lòng nhập tên loại xe!"); return; }
       if (carTypeOptions.includes(val)) { alert("Loại xe này đã tồn tại!"); return; }
       carTypeOptions.push(val);
-      rtdb.ref('settings/carTypes').set(carTypeOptions).then(() => { input.value = ''; renderCarTypesTable(); });
+      dbRef('settings/carTypes').set(carTypeOptions).then(() => { input.value = ''; renderCarTypesTable(); });
     }
     function deleteCarType(idx) {
       if (carTypeOptions.length <= 1) { alert("Cần giữ lại ít nhất 1 loại xe!"); return; }
       if (confirm(`Bạn có chắc muốn xóa loại xe "${carTypeOptions[idx]}" không?`)) {
         carTypeOptions.splice(idx, 1);
-        rtdb.ref('settings/carTypes').set(carTypeOptions).then(() => { renderCarTypesTable(); });
+        dbRef('settings/carTypes').set(carTypeOptions).then(() => { renderCarTypesTable(); });
       }
     }
 
@@ -1972,7 +2096,7 @@
       if (!val) { alert("Vui lòng nhập hình thức thanh toán!"); return; }
       if (paymentOptions.includes(val)) { alert("Hình thức thanh toán này đã tồn tại!"); return; }
       paymentOptions.push(val);
-      rtdb.ref('settings/payments').set(paymentOptions).then(() => { input.value = ''; renderPaymentsTable(); });
+      dbRef('settings/payments').set(paymentOptions).then(() => { input.value = ''; renderPaymentsTable(); });
     }
     function addBulkPayment() {
       const textarea = document.getElementById('bulk-payment-text');
@@ -1983,7 +2107,7 @@
       lines.forEach(pt => {
         if (!paymentOptions.includes(pt)) { paymentOptions.push(pt); added++; }
       });
-      rtdb.ref('settings/payments').set(paymentOptions).then(() => {
+      dbRef('settings/payments').set(paymentOptions).then(() => {
         textarea.value = '';
         renderPaymentsTable();
         alert(`Đã thêm thành công ${added} hình thức thanh toán mới!`);
@@ -1993,7 +2117,7 @@
       if (paymentOptions.length <= 1) { alert("Cần giữ lại ít nhất 1 hình thức thanh toán!"); return; }
       if (confirm(`Bạn có chắc muốn xóa hình thức "${paymentOptions[idx]}" không?`)) {
         paymentOptions.splice(idx, 1);
-        rtdb.ref('settings/payments').set(paymentOptions).then(() => { renderPaymentsTable(); });
+        dbRef('settings/payments').set(paymentOptions).then(() => { renderPaymentsTable(); });
       }
     }
 
@@ -2299,71 +2423,212 @@
       el.value = num.toLocaleString('vi-VN');
     }
 
+    // ===== QUẢN LÝ TÀI KHOẢN (accounts/<USER>, roles/<uid>, login_index/<USER>) =====
+    const USER_RE = /^[A-Z0-9_.-]{2,30}$/;
+
     function renderAccountsTable() {
+      renderLegacyMigrateBox();
       const tb = document.getElementById('tbody-acc');
       if (!tb) return;
-      if (userAccounts.length === 0) {
-        tb.innerHTML = `<tr><td colspan="4" class="p-4 text-center text-slate-400">Chưa có tài khoản nào.</td></tr>`;
+      const users = Object.keys(accountsMap).sort();
+      if (users.length === 0) {
+        tb.innerHTML = `<tr><td colspan="5" class="p-4 text-center text-slate-400">Chưa có tài khoản nào.</td></tr>`;
         return;
       }
-      tb.innerHTML = userAccounts.map((x, i) => {
-        const roleLabels = { 'pos': 'Bán Vé', 'driver': 'Cổng Chủ Xe', 'plan': 'Team Kế Hoạch' };
+      tb.innerHTML = users.map(u => {
+        const a = accountsMap[u] || {};
+        const isMe = loggedInUser && loggedInUser.user === u;
+        const ue = escHtml(u);
+        const roleSel = `<select class="inline-edit-input w-36" ${isMe ? 'disabled' : ''} onchange="changeAccountRole('${ue}', this.value)">
+            ${Object.keys(ROLE_LABELS).map(r => `<option value="${r}" ${a.role === r ? 'selected' : ''}>${ROLE_LABELS[r]}</option>`).join('')}
+          </select>`;
+        const status = a.active === false
+          ? `<span class="px-2 py-1 bg-rose-100 text-rose-700 rounded-lg font-bold text-[10px]">⛔ Đã Khóa</span>`
+          : `<span class="px-2 py-1 bg-emerald-100 text-emerald-700 rounded-lg font-bold text-[10px]">✅ Hoạt Động</span>`;
+        const actions = isMe
+          ? `<span class="text-[11px] text-slate-400 italic">(Tài khoản của bạn — dùng nút 🔑 Đổi Mật Khẩu ở trên)</span>`
+          : `<button onclick="openResetPasswordModal('${ue}')" class="px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-600 rounded-lg font-bold">🔑 Đặt Lại MK</button>
+             <button onclick="toggleAccountActive('${ue}')" class="px-2.5 py-1 ${a.active === false ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700' : 'bg-amber-50 hover:bg-amber-100 text-amber-700'} rounded-lg font-bold">${a.active === false ? '🔓 Mở Khóa' : '⛔ Khóa'}</button>
+             <button onclick="deleteAccount('${ue}')" class="px-2.5 py-1 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-lg font-bold">🗑️ Xóa</button>`;
         return `
           <tr>
-            <td class="p-3 font-mono font-bold text-blue-700">${x.user}</td>
-            <td class="p-3 font-mono font-bold text-slate-700">${x.pass}</td>
-            <td class="p-3 font-bold">${roleLabels[x.role] || x.role}</td>
-            <td class="p-3 text-center space-x-1">
-              <button onclick="editAccount(${i})" class="px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-600 rounded-lg font-bold">Sửa</button>
-              <button onclick="deleteAccount(${i})" class="px-2.5 py-1 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-lg font-bold">Xóa</button>
-            </td>
-          </tr>
-        `;
+            <td class="p-3 font-mono font-bold text-blue-700">${ue}${isMe ? ' <span class="text-[10px] text-slate-400">(bạn)</span>' : ''}</td>
+            <td class="p-3 font-mono font-bold text-slate-400">●●●●●●</td>
+            <td class="p-3">${roleSel}</td>
+            <td class="p-3">${status}</td>
+            <td class="p-3 text-center space-x-1 whitespace-nowrap">${actions}</td>
+          </tr>`;
       }).join('');
     }
 
-    function saveAccount() {
-      const idx = parseInt(document.getElementById('edit-user-idx').value, 10);
+    function pendingLegacyAccounts() {
+      return legacyAccounts.filter(a => a && a.user && !accountsMap[String(a.user).trim().toUpperCase()]);
+    }
+
+    function renderLegacyMigrateBox() {
+      const box = document.getElementById('legacy-migrate-box');
+      if (!box) return;
+      const pending = pendingLegacyAccounts();
+      if (pending.length === 0) {
+        box.innerHTML = '';
+        // Tất cả tài khoản cũ đã chuyển xong mà vẫn còn mật khẩu dạng chữ (vd do máy còn mở bản app cũ ghi lại) -> xóa đi
+        if (accountsLoaded && legacyAccounts.length > 0 && isManager()) dbRef('settings/accounts').set(null).catch(() => {});
+        return;
+      }
+      box.innerHTML = `
+        <div class="bg-amber-50 border-2 border-amber-300 rounded-2xl p-3.5 flex flex-col sm:flex-row items-center justify-between gap-3">
+          <div class="text-xs text-amber-900">
+            <div class="font-extrabold">⚠️ Còn ${pending.length} tài khoản cũ chưa chuyển sang hệ thống bảo mật mới</div>
+            <div class="mt-0.5">${pending.map(a => escHtml(String(a.user).toUpperCase())).join(', ')} — nhân viên giữ nguyên tài khoản & mật khẩu cũ.</div>
+          </div>
+          <button id="btn-migrate" onclick="migrateLegacyAccounts()" class="px-4 py-2.5 bg-amber-500 hover:bg-amber-600 text-slate-900 rounded-xl text-xs font-extrabold shadow whitespace-nowrap">🔄 Chuyển Đổi Tài Khoản Cũ</button>
+        </div>`;
+    }
+
+    async function writeAccount(u, uid, ver, role, active, oldUid) {
+      const updates = {};
+      if (oldUid && oldUid !== uid) updates[`roles/${oldUid}`] = null;
+      updates[`roles/${uid}`] = { user: u, role, active: active !== false };
+      updates[`accounts/${u}`] = { role, active: active !== false, uid, ver, updatedAt: Date.now() };
+      updates[`login_index/${u}`] = { ver };
+      await dbRoot().update(updates);
+    }
+
+    async function migrateLegacyAccounts() {
+      const pending = pendingLegacyAccounts();
+      if (pending.length === 0) return;
+      if (!confirm(`Chuyển ${pending.length} tài khoản cũ sang hệ thống bảo mật mới?\nNhân viên vẫn đăng nhập bằng tài khoản & mật khẩu cũ.`)) return;
+      const btn = document.getElementById('btn-migrate');
+      if (btn) { btn.disabled = true; btn.innerText = '⏳ Đang chuyển...'; }
+      const ok = [], fail = [];
+      for (const a of pending) {
+        const u = String(a.user).trim().toUpperCase();
+        const p = String(a.pass == null ? '' : a.pass).trim();
+        const role = ['pos', 'driver', 'plan', 'manager'].includes(a.role) ? a.role : 'pos';
+        try {
+          if (!p) throw new Error('không có mật khẩu');
+          if (accountsMap[u]) { ok.push(u); continue; }
+          const { uid, ver } = await createAuthUserFor(u, p, 0);
+          await writeAccount(u, uid, ver, role, true, null);
+          accountsMap[u] = { role, active: true, uid, ver };
+          ok.push(u);
+        } catch (e) {
+          fail.push({ a, u, why: authErrorText(e) });
+        }
+      }
+      // Xóa mật khẩu dạng chữ của các tài khoản đã chuyển xong; chỉ giữ lại tài khoản bị lỗi
+      try {
+        await dbRef('settings/accounts').set(fail.length ? fail.map(f => f.a) : null);
+      } catch (e) {}
+      renderAccountsTable();
+      alert(`Đã chuyển xong ${ok.length} tài khoản.` + (fail.length ? `\nLỗi ${fail.length} tài khoản:\n` + fail.map(f => `- ${f.u}: ${f.why}`).join('\n') : ''));
+    }
+
+    async function saveAccount() {
       const u = document.getElementById('new-user').value.trim().toUpperCase();
       const p = document.getElementById('new-pass').value.trim();
       const r = document.getElementById('new-role').value;
-      if (!u || !p) { alert("Vui lòng điền tài khoản và mật khẩu!"); return; }
-
-      if (idx >= 0) {
-        userAccounts[idx] = { user: u, pass: p, role: r };
-      } else {
-        if (userAccounts.some(acc => acc.user === u)) {
-          alert("Tài khoản này đã tồn tại trong hệ thống!");
-          return;
-        }
-        userAccounts.push({ user: u, pass: p, role: r });
+      if (!USER_RE.test(u)) { alert("Tên tài khoản chỉ gồm chữ không dấu, số, dấu . _ - (2-30 ký tự)!"); return; }
+      if (p.length < 6) { alert("Mật khẩu phải có ít nhất 6 ký tự!"); return; }
+      if (accountsMap[u] || pendingLegacyAccounts().some(a => String(a.user).toUpperCase() === u)) {
+        alert("Tài khoản này đã tồn tại trong hệ thống!");
+        return;
       }
-
-      saveCloudAccounts();
-      renderAccountsTable();
-      document.getElementById('edit-user-idx').value = '-1';
-      document.getElementById('new-user').value = '';
-      document.getElementById('new-pass').value = '';
-      document.getElementById('btn-save-acc').innerText = "+ Thêm Tài Khoản";
-      alert("Đã lưu tài khoản lên Cloud thành công!");
+      const btn = document.getElementById('btn-save-acc');
+      btn.disabled = true; btn.innerText = '⏳ Đang tạo...';
+      try {
+        const { uid, ver } = await createAuthUserFor(u, p, 0);
+        await writeAccount(u, uid, ver, r, true, null);
+        document.getElementById('new-user').value = '';
+        document.getElementById('new-pass').value = '';
+        alert(`Đã tạo tài khoản ${u} (${ROLE_LABELS[r]}). Nhân viên đăng nhập được ngay!`);
+      } catch (e) {
+        alert("Không tạo được tài khoản: " + authErrorText(e));
+      } finally {
+        btn.disabled = false; btn.innerText = '+ Thêm Tài Khoản';
+      }
     }
 
-    function editAccount(i) {
-      const a = userAccounts[i];
+    function openResetPasswordModal(u) {
+      closeLoginModals();
+      const body = `
+        <input type="text" id="reset-pass" autocomplete="off" placeholder="Mật khẩu mới (ít nhất 6 ký tự)..." class="${inputCls}" onkeydown="if(event.key==='Enter') executeResetPassword('${escHtml(u)}')">
+        <p class="text-[11px] text-slate-500">Nhân viên đăng nhập bằng tài khoản <b>${escHtml(u)}</b> với mật khẩu mới. Đơn hàng cũ giữ nguyên.</p>`;
+      document.body.insertAdjacentHTML('beforeend', loginModalHtml('reset-modal', 'bg-blue-600', '🔑', `Đặt Lại Mật Khẩu: ${escHtml(u)}`, body, 'Lưu Mật Khẩu Mới', `executeResetPassword('${escHtml(u)}')`));
+      setTimeout(() => { const i = document.getElementById('reset-pass'); if (i) i.focus(); }, 50);
+    }
+
+    // Firebase không cho đổi mật khẩu người khác từ trình duyệt -> tạo tài khoản đăng nhập phiên bản mới, giữ nguyên tên tài khoản
+    async function executeResetPassword(u) {
+      const a = accountsMap[u];
+      const p = document.getElementById('reset-pass').value.trim();
       if (!a) return;
-      document.getElementById('edit-user-idx').value = i;
-      document.getElementById('new-user').value = a.user;
-      document.getElementById('new-pass').value = a.pass;
-      document.getElementById('new-role').value = a.role;
-      document.getElementById('btn-save-acc').innerText = "💾 Cập Nhật";
-      window.scrollTo({ top: document.getElementById('new-user').offsetTop - 100, behavior: 'smooth' });
+      if (p.length < 6) { setModalBusy('reset-modal', false, 'Mật khẩu phải có ít nhất 6 ký tự!'); return; }
+      setModalBusy('reset-modal', true, 'Đang lưu...');
+      try {
+        const { uid, ver } = await createAuthUserFor(u, p, (a.ver || 0) + 1);
+        await writeAccount(u, uid, ver, a.role, a.active !== false, a.uid);
+        closeLoginModals();
+        alert(`Đã đặt lại mật khẩu cho ${u}!`);
+      } catch (e) {
+        setModalBusy('reset-modal', false, authErrorText(e));
+      }
     }
 
-    function deleteAccount(i) {
-      if (confirm(`Bạn có chắc chắn muốn xóa tài khoản ${userAccounts[i].user} không?`)) {
-        userAccounts.splice(i, 1);
-        saveCloudAccounts();
-        renderAccountsTable();
+    function activeManagerCount() {
+      return Object.values(accountsMap).filter(a => a && a.role === 'manager' && a.active !== false).length;
+    }
+
+    async function toggleAccountActive(u) {
+      const a = accountsMap[u];
+      if (!a || !a.uid) return;
+      const newActive = a.active === false;
+      if (!newActive && a.role === 'manager' && activeManagerCount() <= 1) { alert("Phải còn ít nhất 1 quản lý hoạt động!"); return; }
+      if (!newActive && !confirm(`Khóa tài khoản ${u}? Người này sẽ bị đăng xuất ngay.`)) return;
+      const updates = {};
+      updates[`roles/${a.uid}/active`] = newActive;
+      updates[`accounts/${u}/active`] = newActive;
+      try { await dbRoot().update(updates); } catch (e) { alert(authErrorText(e)); }
+    }
+
+    async function changeAccountRole(u, role) {
+      const a = accountsMap[u];
+      if (!a || !a.uid) return;
+      if (a.role === 'manager' && role !== 'manager' && activeManagerCount() <= 1) { alert("Phải còn ít nhất 1 quản lý!"); renderAccountsTable(); return; }
+      const updates = {};
+      updates[`roles/${a.uid}/role`] = role;
+      updates[`accounts/${u}/role`] = role;
+      try { await dbRoot().update(updates); } catch (e) { alert(authErrorText(e)); renderAccountsTable(); }
+    }
+
+    async function deleteAccount(u) {
+      const a = accountsMap[u];
+      if (!a) return;
+      if (a.role === 'manager' && a.active !== false && activeManagerCount() <= 1) { alert("Phải còn ít nhất 1 quản lý!"); return; }
+      if (!confirm(`Bạn có chắc chắn muốn xóa tài khoản ${u} không?\n(Đơn hàng đã nhập của tài khoản này vẫn được giữ lại)`)) return;
+      const updates = {};
+      if (a.uid) updates[`roles/${a.uid}`] = null;
+      updates[`accounts/${u}`] = null;
+      updates[`login_index/${u}`] = null;
+      try { await dbRoot().update(updates); } catch (e) { alert(authErrorText(e)); }
+    }
+
+    // CHỈ DÙNG Ở BẢN THỬ: chép danh mục + đơn hàng từ dữ liệu thật sang vùng thử (chỉ ĐỌC dữ liệu thật)
+    async function copyRealDataToTest() {
+      if (!IS_TEST_ENV || !DB_PREFIX) return;
+      if (!confirm('Chép danh mục, tài khoản cũ và toàn bộ đơn hàng từ DỮ LIỆU THẬT sang BẢN THỬ?\n(Dữ liệu thật chỉ được đọc, không bị thay đổi. Đơn trong bản thử sẽ bị thay bằng bản chép.)')) return;
+      try {
+        const [st, tr, ut] = await Promise.all(['settings', 'trips', 'users_trips'].map(p => rtdb.ref(p).once('value')));
+        const updates = {};
+        const s = st.val() || {};
+        Object.keys(s).forEach(k => { updates['settings/' + k] = s[k]; });
+        const trips = tr.val() || {}, uTrips = ut.val() || {};
+        Object.keys(trips).forEach(id => { updates['trips/' + id] = trips[id]; });
+        Object.keys(uTrips).forEach(u => { updates['users_trips/' + u] = uTrips[u]; });
+        await dbRoot().update(updates);
+        alert(`Đã chép ${Object.keys(tr.val() || {}).length} đơn hàng và danh mục vào bản thử!`);
+      } catch (e) {
+        alert('Không chép được: ' + authErrorText(e));
       }
     }
   </script>

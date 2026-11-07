@@ -2178,6 +2178,7 @@
       return { missing, overdue: !!(dl && Date.now() >= dl.getTime()) };
     }
     function auditStatusText(g) {
+      if (g.status === 'mismatch') return `Đơn Lệch (${getMismatchReason(g.trips)})`;
       if (g.status !== 'unmatched') return AUDIT_STATUS[g.status].text;
       const who = g.missing === 'driver' ? 'Tài xế' : 'Bán vé/KH';
       return g.overdue ? `Quá hạn: ${who} chưa báo` : `Chờ ${who} báo`;
@@ -2186,17 +2187,46 @@
     // "50E-123.27", "50e 12327" -> "50E12327" (để 2 bên gõ khác kiểu vẫn ghép được)
     function normalizePlate(p) { return String(p || '').toUpperCase().replace(/[^A-Z0-9]/g, ''); }
 
-    function getAuditStatus(group) {
+    // Quy đổi hình thức thanh toán về 1 nhóm để so 2 bên:
+    //  NVQ = Nhân viên quầy thu, THE = Thẻ, TXT = Tài xế thu, KH = Kế hoạch / Công nợ / đối tác.
+    //  Đơn của Team Kế Hoạch luôn là KH. Đơn cũ không ghi thanh toán -> lấy theo nguồn đơn (đối tác = KH), nếu không thì là "chưa ghi".
+    function paymentCategory(t) {
+      if (t.role === 'plan') return 'KH';
+      const raw = String(t.paymentMethod || '').trim().toLowerCase();
+      if (!raw) {
+        const src = String(t.source || '').toLowerCase();
+        return PARTNER_KEYWORDS.some(k => src.includes(k)) ? 'KH' : 'CHUA_GHI';
+      }
+      if (/nhân viên quầy|^nvq/.test(raw)) return 'NVQ';
+      if (/^thẻ|^the\b|quẹt|card|pos/.test(raw)) return 'THE';
+      if (/tài xế thu|^txt\b/.test(raw)) return 'TXT';
+      if (/kế hoạch|công nợ|chuyển khoản/.test(raw) || PARTNER_KEYWORDS.some(k => raw.includes(k))) return 'KH';
+      return raw;
+    }
+    const PAY_CAT_LABEL = { NVQ: 'Nhân Viên Quầy Thu', THE: 'Thẻ', TXT: 'Tài Xế Thu', KH: 'Kế Hoạch', CHUA_GHI: '(chưa ghi)' };
+
+    // Trả về '' nếu khớp, ngược lại là lý do lệch (để hiện cho người xem)
+    function getMismatchReason(group) {
       const posTrips = group.filter(x => x.role === 'pos' || x.role === 'plan');
       const driverTrips = group.filter(x => x.role === 'driver');
-      if (posTrips.length === 0 || driverTrips.length === 0) return 'unmatched';
       const sumPos = posTrips.reduce((acc, x) => acc + Number(x.totalFare || 0), 0);
       const sumDriver = driverTrips.reduce((acc, x) => acc + Number(x.totalFare || 0), 0);
-      const posPay = (posTrips[0].paymentMethod || posTrips[0].source || '').toLowerCase();
-      const driverPay = (driverTrips[0].paymentMethod || driverTrips[0].source || '').toLowerCase();
-      // Cả hai bên thuộc nhóm Kế Hoạch / Đối tác thì không so tên hình thức thanh toán, chỉ xét tổng tiền
-      const isBothPlanOrPartner = PARTNER_KEYWORDS.some(k => posPay.includes(k) || driverPay.includes(k));
-      return (Math.abs(sumPos - sumDriver) < 1000 && (posPay === driverPay || isBothPlanOrPartner)) ? 'match' : 'mismatch';
+      const reasons = [];
+      if (Math.abs(sumPos - sumDriver) >= 1000) reasons.push(`Lệch tiền ${Math.abs(sumPos - sumDriver).toLocaleString('vi-VN')} ₫`);
+      const catsPos = [...new Set(posTrips.map(paymentCategory))];
+      const catsDrv = [...new Set(driverTrips.map(paymentCategory))];
+      if (!(catsPos.length === 1 && catsDrv.length === 1 && catsPos[0] === catsDrv[0])) {
+        const lb = trips => [...new Set(trips.map(t => t.role === 'plan' && !t.paymentMethod ? 'Kế Hoạch' : (t.paymentMethod || '(chưa ghi)')))].join('/');
+        reasons.push(`Khác thanh toán: ${lb(posTrips)} ≠ ${lb(driverTrips)}`);
+      }
+      return reasons.join('; ');
+    }
+
+    function getAuditStatus(group) {
+      const hasPos = group.some(x => x.role === 'pos' || x.role === 'plan');
+      const hasDrv = group.some(x => x.role === 'driver');
+      if (!hasPos || !hasDrv) return 'unmatched';
+      return getMismatchReason(group) ? 'mismatch' : 'match';
     }
 
     function getAuditFilters() {
@@ -2289,6 +2319,7 @@
       groupList.forEach(g => {
         const group = g.trips, status = g.status;
         let statusHtml = statusBadge[status];
+        if (status === 'mismatch') statusHtml += `<div class="text-[10px] font-bold text-rose-700 mt-1">${escHtml(getMismatchReason(group))}</div>`;
         if (status === 'unmatched') {
           statusHtml = g.overdue
             ? `<span class="px-2 py-1 bg-orange-600 text-white font-extrabold rounded-lg text-[10px] inline-block">⏰ Quá hạn: ${g.missing === 'driver' ? '🚗 Tài xế' : '🚖 Bán vé/KH'} chưa báo</span>`
@@ -2310,7 +2341,10 @@
           const auditCell = (idx === 0) ? `<td class="p-3 text-center align-middle" rowspan="${group.length}">${statusHtml}</td>` : '';
           const borderClass = (idx === group.length - 1) ? 'border-b-2 border-slate-300' : 'border-b';
 
-          const currentPaymentsList = isPlan ? planPaymentOptions : paymentOptions;
+          const basePayList = isPlan ? planPaymentOptions : paymentOptions;
+          const currentPaymentsList = (t.paymentMethod && !basePayList.includes(t.paymentMethod)) ? [t.paymentMethod, ...basePayList] : basePayList;
+          const payOptionsHtml = (t.paymentMethod ? '' : `<option value="" selected>⚠️ Chưa ghi</option>`) +
+            currentPaymentsList.map(opt => `<option value="${escHtml(opt)}" ${t.paymentMethod === opt ? 'selected' : ''}>${escHtml(opt)}</option>`).join('');
 
           rowsHtml += `
             <tr class="${rowBg} hover:bg-slate-100/80 transition-all ${borderClass}">
@@ -2334,7 +2368,7 @@
               <td class="p-2.5"><input type="text" value="${t.destination || ''}" class="inline-edit-input w-36" onblur="updateInlineTripField('${t.id}', 'destination', this.value)"></td>
               <td class="p-2.5">
                 <select class="inline-edit-input w-32 font-bold" onchange="updateInlineTripField('${t.id}', 'paymentMethod', this.value)">
-                  ${currentPaymentsList.map(opt => `<option value="${opt}" ${(t.paymentMethod || currentPaymentsList[0]) === opt ? 'selected' : ''}>${opt}</option>`).join('')}
+                  ${payOptionsHtml}
                 </select>
               </td>
               <td class="p-2.5"><input type="text" value="${t.note || ''}" class="inline-edit-input w-32" onblur="updateInlineTripField('${t.id}', 'note', this.value)"></td>
@@ -2565,7 +2599,7 @@
       });
       const cols = [
         ['STT', 6], ['Ngày', 11], ['Giờ Nộp', 8], ['Phân Vùng', 15], ['Nhân Sự', 24], ['Số Phiếu', 12], ['Biển Số', 11],
-        ['Loại Xe', 11], ['Nguồn Đơn', 14], ['Điểm Đón', 9], ['Điểm Đến', 26], ['Thanh Toán', 18], ['Ghi Chú', 20], ['Tổng Tiền', 14], ['Trạng Thái', 17]
+        ['Loại Xe', 11], ['Nguồn Đơn', 14], ['Điểm Đón', 9], ['Điểm Đến', 26], ['Thanh Toán', 18], ['Ghi Chú', 20], ['Tổng Tiền', 14], ['Trạng Thái', 24]
       ];
       const N = cols.length;
       ws.columns = cols.map(([, w]) => ({ width: w }));
@@ -2661,7 +2695,7 @@
           g.trips.forEach(t => {
             const role = XL.role[t.role] || { label: t.role || '', color: 'FF334155' };
             const vals = [stt, normalizeDateInput(t.dateStr) || '',t.timeStr || '', role.label, t.staff || '', t.ticketNumber || '', t.plateNumber || '',
-              t.carType || '', t.source || '', t.pickup ? 'Ga ' + t.pickup : '', t.destination || '', t.paymentMethod || (paymentOptions[0] || ''), t.note || '',
+              t.carType || '', t.source || '', t.pickup ? 'Ga ' + t.pickup : '', t.destination || '', t.paymentMethod || '(Chưa ghi)', t.note || '',
               Number(t.totalFare || 0), auditStatusText(g)];
             const row = ws.getRow(r);
             vals.forEach((v, i) => {
@@ -2781,7 +2815,7 @@
       header(['Hình thức thanh toán', 'Số đơn Quầy + KH', 'Tiền Quầy + KH', 'Số đơn Chủ xe', 'Tiền Chủ xe', '']);
       const payMap = {};
       allTrips.forEach(t => {
-        const k = t.paymentMethod || paymentOptions[0] || '(Không ghi)';
+        const k = t.paymentMethod || '(Chưa ghi)';
         if (!payMap[k]) payMap[k] = { posN: 0, pos: 0, drvN: 0, drv: 0 };
         const v = Number(t.totalFare || 0);
         if (t.role === 'driver') { payMap[k].drvN++; payMap[k].drv += v; } else { payMap[k].posN++; payMap[k].pos += v; }

@@ -50,6 +50,9 @@
 - ĐÃ LÊN MAIN 08/11; ảnh console xác nhận quy tắc mới (có .indexOn, places, meta) đã Publish. Chờ người dùng xác nhận quản lý đã đăng nhập để chạy nâng cấp dateKey.
 - Bản thử: nút "Chép Dữ Liệu Thật" hỏi tài khoản QUẢN LÝ BẢN CHÍNH (đọc bằng app Firebase phụ, đọc settings từng mục vì quy tắc không cho đọc cả `settings`).
 
+## Đếm số đơn theo bill (07/11)
+- Đơn chia tiền nhiều nhân sự (A + B → "123-1/2", "123-2/2") vẫn lưu nhiều dòng nhưng ĐẾM là 1 đơn: `billKey` (phía + phiếu gốc + biển số chuẩn hóa + dateKey), `countBills`, `billCountText` → "3 đơn (4 dòng chia tiền)". Dùng ở tổng ngày/tháng/ảnh báo cáo của nhân viên, doanh thu ngày của quản lý, Excel. Số phiếu hiển thị đúng "123-1/2". Excel không còn ký hiệu ₫.
+
 ## Lỗi/rủi ro đã phát hiện (06/11/2026) — 3–9 ĐÃ SỬA ở nhánh `cai-tien-doi-soat` (08/11)
 1. ĐÃ SỬA 07/11: quy tắc RTDB thật trước đây `.read/.write: true`; nay là quy-tac-buoc-2 + Firebase Auth. Còn tồn: dữ liệu thử `test_env/` và tài khoản Auth `@test.taxi-tss.local`. Số liệu 07/11: lưu 1,61 MB, tải về 121 MB/6 ngày, kết nối đỉnh 33/100 (gói Spark). DB thật còn 2 nhánh cũ không dùng: `deleted_trips`, `drivers`.
 2. ĐÃ SỬA: màn hình & Excel dùng chung `computeAuditGroups`/`getAuditStatus`; Excel ExcelJS có màu/kẻ ô/nhóm ngày/tổng/ký tên + sheet Tổng Hợp; ngày gõ thiếu dấu tự sửa, ngày sai bị chặn.

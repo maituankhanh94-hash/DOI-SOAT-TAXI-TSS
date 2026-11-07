@@ -188,6 +188,7 @@
       document.getElementById('btn-logout').classList.remove('hidden');
       document.getElementById('btn-change-pass').classList.remove('hidden');
       await loadCloudSettings();
+      loadPlaces();
       if (r.role === 'manager') startManagerSession();
       else startWorkerSession(r.role);
     }
@@ -272,50 +273,6 @@
         banner.classList.remove('hidden');
         setTimeout(() => { banner.classList.add('hidden'); }, 6000);
       }
-    }
-
-    function checkAndShowMilestoneCongratModal(staffName, todayTotalAmount, dateStr) {
-      if (todayTotalAmount > 2000000) {
-        const key = `${staffName}_${dateStr}`;
-        if (!notifiedMilestoneStaffs[key]) {
-          notifiedMilestoneStaffs[key] = true;
-          showMilestoneCongratModal(staffName, todayTotalAmount, dateStr);
-        }
-      }
-    }
-
-    function showMilestoneCongratModal(staffName, amount, dateStr) {
-      const existing = document.getElementById('congrat-milestone-modal');
-      if (existing) existing.remove();
-
-      const modalHtml = `
-        <div id="congrat-milestone-modal" class="fixed inset-0 bg-slate-950/85 z-50 flex items-center justify-center p-4 backdrop-blur-md animate-fadeIn">
-          <div class="vinh-danh-card rounded-3xl max-w-sm w-full p-6 text-center space-y-5 shadow-2xl relative">
-            <div class="flex items-center justify-center space-x-2 text-2xl">
-              <span>🏆</span>
-              <span>🎉</span>
-              <span>⭐</span>
-            </div>
-            
-            <div class="space-y-1.5">
-              <div class="text-[11px] font-extrabold tracking-widest uppercase text-amber-400">✨ VINH DANH XUẤT SẮC ✨</div>
-              <h3 class="text-sm font-bold text-slate-300">CHÚNG MỪNG NHÂN SỰ</h3>
-              <div class="text-xl sm:text-2xl font-extrabold text-amber-300 tracking-tight">${staffName}</div>
-            </div>
-
-            <div class="bg-zinc-900/90 border border-zinc-800 p-4 rounded-2xl space-y-1">
-              <div class="text-[11px] font-bold text-slate-400">Đã xuất sắc đạt doanh thu ngày ${dateStr}:</div>
-              <div class="text-2xl font-extrabold text-emerald-400">${amount.toLocaleString('vi-VN')} ₫</div>
-              <div class="text-[10px] font-bold text-amber-400 pt-0.5">🚀 Vượt mốc 2.000.000 ₫ thành công rực rỡ!</div>
-            </div>
-
-            <button onclick="document.getElementById('congrat-milestone-modal').remove()" class="w-full py-3 bg-gradient-to-r from-amber-500 via-rose-500 to-pink-600 hover:opacity-95 text-white font-extrabold text-xs rounded-xl shadow-lg transition-all uppercase tracking-wider">
-              🔥 TUYỆT VỜI QUÁ, TIẾP TỤC PHÁT HUY! 🔥
-            </button>
-          </div>
-        </div>
-      `;
-      document.body.insertAdjacentHTML('beforeend', modalHtml);
     }
 
     function renderHomeSelection() {
@@ -452,26 +409,267 @@
       }
     }
 
-    function startManagerSession() {
+    // ===== TẢI DỮ LIỆU THEO KHOẢNG NGÀY (tiết kiệm dung lượng) =====
+    // Mỗi đơn có trường dateKey (yyyy-mm-dd). Khi dữ liệu đã được nâng cấp (meta/dateKeyV1 = true) và quy tắc mới đã dán,
+    // Quản lý chỉ tải đơn trong khoảng ngày đang xem; nhân viên chỉ tải đơn từ đầu tháng trước. Nếu chưa -> tải toàn bộ như cũ.
+    async function checkDataMeta() {
+      try { const s = await dbRef('meta/dateKeyV1').once('value'); return s.val() === true; }
+      catch (e) { return null; } // null = quy tắc cũ, chưa cho đọc meta
+    }
+    async function writeInChunks(updates) {
+      const keys = Object.keys(updates);
+      for (let i = 0; i < keys.length; i += 400) {
+        const part = {};
+        keys.slice(i, i + 400).forEach(k => { part[k] = updates[k]; });
+        await dbRoot().update(part);
+      }
+    }
+    function showTopNotice(msg) {
+      let el = document.getElementById('top-notice');
+      if (!msg) { if (el) el.remove(); return; }
+      if (!el) {
+        el = document.createElement('div');
+        el.id = 'top-notice';
+        el.className = 'fixed top-16 left-1/2 -translate-x-1/2 z-50 bg-slate-900 text-white px-4 py-2.5 rounded-2xl shadow-2xl text-xs font-bold';
+        document.body.appendChild(el);
+      }
+      el.innerText = msg;
+    }
+
+    // Nâng cấp 1 lần (Quản lý): thêm dateKey cho mọi đơn cũ + tạo danh sách địa chỉ hay đi
+    async function runDateKeyBackfill() {
+      try {
+        showTopNotice('⏳ Đang nâng cấp dữ liệu lần đầu (chỉ 1 lần, khoảng vài giây)...');
+        const trips = (await dbRef('trips').once('value')).val() || {};
+        const users = new Set(Object.keys(accountsMap));
+        Object.values(trips).forEach(t => { if (t && t.createdBy) users.add(t.createdBy); });
+        const updates = {};
+        Object.entries(trips).forEach(([id, t]) => {
+          if (t && !t.dateKey) updates[`trips/${id}/dateKey`] = tripDateKey(t) || fallbackDateKey(t);
+        });
+        for (const u of users) {
+          const ut = (await dbRef('users_trips/' + u).once('value')).val() || {};
+          Object.entries(ut).forEach(([id, t]) => {
+            if (t && !t.dateKey) updates[`users_trips/${u}/${id}/dateKey`] = tripDateKey(t) || fallbackDateKey(t);
+          });
+        }
+        // Danh sách địa chỉ từ các đơn đã có
+        const places = {};
+        Object.values(trips).forEach(t => {
+          const name = String((t && t.destination) || '').trim();
+          const k = placeSlug(name);
+          if (!k) return;
+          if (!places[k]) places[k] = { name, n: 0 };
+          places[k].n++;
+        });
+        Object.entries(places).forEach(([k, v]) => { updates[`places/${k}`] = v; });
+        await writeInChunks(updates);
+        await dbRef('meta/dateKeyV1').set(true);
+        showTopNotice('');
+        return true;
+      } catch (e) {
+        console.warn('Chưa nâng cấp được dữ liệu (có thể chưa dán quy tắc mới):', e);
+        showTopNotice('');
+        return false;
+      }
+    }
+    function fallbackDateKey(t) { return t && t.timestamp ? localDateKey(new Date(Number(t.timestamp))) : '0000-00-00'; }
+
+    // Đơn do máy còn mở bản app cũ ghi (thiếu dateKey) -> bổ sung, để không bị "mất" khỏi bảng
+    async function fixMissingDateKeys(basePath, mirror) {
+      try {
+        const snap = await dbRef(basePath).orderByChild('dateKey').endAt(null).once('value');
+        const v = snap.val() || {};
+        const updates = {};
+        Object.entries(v).forEach(([id, t]) => {
+          if (!t || t.dateKey) return;
+          const dk = tripDateKey(t) || fallbackDateKey(t);
+          updates[`${basePath}/${id}/dateKey`] = dk;
+          const other = mirror(t, id);
+          if (other) updates[`${other}/dateKey`] = dk;
+        });
+        if (Object.keys(updates).length) await writeInChunks(updates);
+      } catch (e) { console.warn('fixMissingDateKeys', e); }
+    }
+
+    let mgrMode = null, mgrWinKey = null, mgrWinRef = null, mgrWinCb = null;
+    async function startManagerSession() {
       document.getElementById('header-status').innerText = `Quản Lý: ${loggedInUser.user}`;
-      dbRef('trips').on('value', s => {
+      renderManagerDashboard();
+      let ok = await checkDataMeta();
+      if (ok === false) ok = await runDateKeyBackfill();
+      if (ok === true) {
+        await fixMissingDateKeys('trips', t => t.createdBy ? `users_trips/${t.createdBy}/${t.id}` : null);
+        mgrMode = 'window';
+      } else {
+        mgrMode = 'full';
+      }
+      refreshManagerWindow(true);
+    }
+
+    // Quản lý: chọn khoảng ngày cần tải = hợp của (bảng đối soát, doanh thu ngày, nhắc báo cáo)
+    function refreshManagerWindow(force) {
+      if (!isManager() || !mgrMode) return;
+      let from = '', to = '';
+      if (mgrMode === 'window') {
+        const v = id => { const e = document.getElementById(id); return e ? e.value : ''; };
+        const today = localDateKey(new Date());
+        const aS = v('audit-start-date'), aE = v('audit-end-date');
+        if (aS) {
+          const rev = v('revenue-date-picker') || today;
+          const starts = [aS, rev, remindDateKey].filter(Boolean).sort();
+          const ends = [aE || '9999-12-31', rev, remindDateKey].filter(Boolean).sort();
+          from = starts[0];
+          to = ends[ends.length - 1];
+        }
+      }
+      const key = from + '|' + to;
+      if (!force && key === mgrWinKey) return;
+      if (mgrWinRef && mgrWinCb) mgrWinRef.off('value', mgrWinCb);
+      mgrWinKey = key;
+      let q = dbRef('trips');
+      if (from) q = q.orderByChild('dateKey').startAt(from).endAt(to);
+      mgrWinRef = q;
+      mgrWinCb = s => {
         const dataVal = s.val();
         allCompanyTrips = dataVal ? Object.values(dataVal) : [];
         updateManagerAuditTable();
         updateManagerRevenueSummary();
-      });
-      renderManagerDashboard();
+      };
+      q.on('value', mgrWinCb, err => console.warn('trips', err));
     }
 
+    let staffMode = null, staffWinFrom = null, staffRef = null, staffCb = null, staffRole = null;
+    function monthStartKey(dateKey) { return dateKey.slice(0, 8) + '01'; }
     function startWorkerSession(role) {
       const roleLabels = { 'pos': 'Bán Vé', 'driver': 'Tài Xế', 'plan': 'Team Kế Hoạch' };
       document.getElementById('header-status').innerText = `${roleLabels[role] || role}: ${loggedInUser.user}`;
-      dbRef(`users_trips/${loggedInUser.user}`).on('value', s => {
-        personalTrips = s.val() ? Object.values(s.val()) : [];
-        updatePersonalSummary(role);
-        renderActiveWorksheetTrips(role);
-      });
+      staffRole = role;
       renderWorksheetView(role);
+      (async () => {
+        const ok = await checkDataMeta();
+        staffMode = ok === true ? 'window' : 'full';
+        if (ok === true) {
+          const u = loggedInUser.user;
+          await fixMissingDateKeys(`users_trips/${u}`, (t, id) => `trips/${id}`);
+        }
+        // Mặc định: từ đầu tháng trước
+        const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - 1);
+        setStaffWindow(localDateKey(d), true);
+      })();
+    }
+    function setStaffWindow(from, force) {
+      if (!loggedInUser || !staffMode) return;
+      if (staffMode === 'full') { if (staffRef && !force) return; from = ''; }
+      else if (!force && staffWinFrom && from >= staffWinFrom) return;
+      if (staffRef && staffCb) staffRef.off('value', staffCb);
+      staffWinFrom = from;
+      let q = dbRef(`users_trips/${loggedInUser.user}`);
+      if (from) q = q.orderByChild('dateKey').startAt(from);
+      staffRef = q;
+      staffCb = s => {
+        personalTrips = s.val() ? Object.values(s.val()) : [];
+        updatePersonalSummary(staffRole);
+        renderActiveWorksheetTrips(staffRole);
+        const snapModal = document.getElementById('snapshot-report-modal');
+        if (snapModal) updateSnapshotModalData(staffRole);
+      };
+      q.on('value', staffCb, err => console.warn('users_trips', err));
+    }
+    // Nhân viên chọn xem ngày cũ hơn khoảng đã tải -> tải thêm
+    function ensureStaffDate(dateKey) {
+      if (staffMode === 'window' && dateKey && staffWinFrom && dateKey < staffWinFrom) setStaffWindow(monthStartKey(dateKey));
+    }
+
+    // ===== GỢI Ý ĐỊA CHỈ (từ các điểm đến công ty đã từng nhập) =====
+    let placesMap = {};
+    function removeAccents(str) {
+      return String(str || '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D').toLowerCase();
+    }
+    function placeSlug(name) {
+      return removeAccents(name).replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 80);
+    }
+    function loadPlaces() {
+      dbRef('places').orderByChild('n').limitToLast(3000).on('value', s => { placesMap = s.val() || {}; }, () => {});
+    }
+    function recordPlaces(dests) {
+      const upd = {};
+      dests.forEach(d => {
+        const name = String(d || '').trim();
+        const k = placeSlug(name);
+        if (!k || name.length > 200) return;
+        upd[`places/${k}/name`] = name;
+        upd[`places/${k}/n`] = firebase.database.ServerValue.increment(1);
+      });
+      if (Object.keys(upd).length) dbRoot().update(upd).catch(() => {});
+    }
+    function placeCandidates() {
+      const m = {};
+      Object.entries(placesMap).forEach(([k, v]) => { if (v && v.name) m[k] = { name: v.name, n: Number(v.n) || 1 }; });
+      [...personalTrips, ...allCompanyTrips].forEach(t => {
+        const name = String((t && t.destination) || '').trim();
+        const k = placeSlug(name);
+        if (!k) return;
+        if (!m[k]) m[k] = { name, n: 0 };
+        if (!placesMap[k]) m[k].n++;
+      });
+      return Object.values(m);
+    }
+
+    // Ô gợi ý dùng chung: chọn bằng chuột hoặc phím ↑ ↓ Enter
+    function renderSuggestBox(input, dropId, items, icon) {
+      const drop = document.getElementById(dropId);
+      if (!drop) return;
+      if (!items.length) { drop.innerHTML = ''; return; }
+      drop.innerHTML = `<div class="local-dropdown">${items.map((v, i) => `
+        <div class="local-item${i === 0 ? ' bg-blue-50' : ''}" data-target="${escHtml(input.id)}" data-drop="${escHtml(dropId)}" data-v="${escHtml(v)}" onmousedown="event.preventDefault(); pickSuggest(this)">${icon} ${escHtml(v)}</div>
+      `).join('')}</div>`;
+    }
+    function pickSuggest(el) {
+      const inp = document.getElementById(el.dataset.target);
+      if (inp) { inp.value = el.dataset.v; inp.dispatchEvent(new Event('change')); }
+      const drop = document.getElementById(el.dataset.drop);
+      if (drop) drop.innerHTML = '';
+    }
+    function suggestKeydown(e, dropId) {
+      const drop = document.getElementById(dropId);
+      const items = drop ? [...drop.querySelectorAll('.local-item')] : [];
+      if (!items.length) return;
+      let idx = items.findIndex(x => x.classList.contains('bg-blue-50'));
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (idx >= 0) items[idx].classList.remove('bg-blue-50');
+        idx = e.key === 'ArrowDown' ? Math.min(items.length - 1, idx + 1) : Math.max(0, idx - 1);
+        items[idx].classList.add('bg-blue-50');
+        items[idx].scrollIntoView({ block: 'nearest' });
+      } else if (e.key === 'Enter' && idx >= 0) {
+        e.preventDefault();
+        pickSuggest(items[idx]);
+      } else if (e.key === 'Escape') {
+        drop.innerHTML = '';
+      }
+    }
+    function hideSuggestLater(dropId) { setTimeout(() => { const d = document.getElementById(dropId); if (d) d.innerHTML = ''; }, 150); }
+
+    function showStaffSuggestions(input, dropId) {
+      const q = removeAccents(input.value.trim());
+      if (!q) { renderSuggestBox(input, dropId, [], ''); return; }
+      const matches = staffOptions.filter(name => removeAccents(name).includes(q)).slice(0, 10);
+      renderSuggestBox(input, dropId, matches, '👤');
+    }
+
+    function showPlaceSuggestions(input, dropId) {
+      const raw = input.value.trim();
+      const q = removeAccents(raw);
+      if (q.length < 2) { renderSuggestBox(input, dropId, [], ''); return; }
+      const tokens = q.split(/[\s,]+/).filter(Boolean);
+      const scored = placeCandidates().map(p => {
+        const n = removeAccents(p.name);
+        if (!tokens.every(tk => n.includes(tk))) return null;
+        const starts = n.startsWith(q) ? 2 : (n.includes(q) ? 1 : 0);
+        return { name: p.name, score: starts * 100000 + p.n };
+      }).filter(Boolean).sort((a, b) => b.score - a.score).slice(0, 8).map(x => x.name);
+      renderSuggestBox(input, dropId, scored.filter(nm => nm !== raw), '📍');
     }
 
     async function logoutSession() {
@@ -720,19 +918,19 @@
             <td class="p-2.5 text-center font-bold">${i+1}</td>
             <td class="p-2.5"><input type="text" id="date-${i}" autocomplete="off" value="${defaultDate}" ${dateInputHandler} class="w-full p-2 bg-slate-50 border rounded-xl font-mono text-xs"></td>
             <td class="p-2.5 relative">
-              <input type="text" id="staff-${i}" autocomplete="off" value="" placeholder="Gõ tên để đề xuất..." class="w-full p-2 bg-slate-50 border rounded-xl font-bold text-xs" oninput="showStaffSuggestions(this, 'staff-drop-${i}')" onfocus="showStaffSuggestions(this, 'staff-drop-${i}')">
+              <input type="text" id="staff-${i}" autocomplete="off" value="" placeholder="Gõ tên để đề xuất..." class="w-full p-2 bg-slate-50 border rounded-xl font-bold text-xs" oninput="showStaffSuggestions(this, 'staff-drop-${i}')" onfocus="showStaffSuggestions(this, 'staff-drop-${i}')" onkeydown="suggestKeydown(event, 'staff-drop-${i}')" onblur="hideSuggestLater('staff-drop-${i}')">
               <div id="staff-drop-${i}"></div>
             </td>
             <td class="p-2.5"><input type="text" id="t-${i}" autocomplete="off" placeholder="Phiếu..." class="w-full p-2 bg-slate-50 border rounded-xl font-mono font-bold text-xs" onfocus="handleSmartTicketFocus(${i})"></td>
             <td class="p-2.5"><input type="text" id="p-${i}" autocomplete="off" placeholder="51H-..." class="w-full p-2 bg-slate-50 border rounded-xl font-mono font-bold uppercase text-xs"></td>
             <td class="p-2.5">
               <select id="c-${i}" class="w-full p-2 bg-slate-50 border rounded-xl font-bold text-xs">
-                ${carTypeOptions.map(ct => `<option value="${ct}" ${ct === defaultCarType ? 'selected' : ''}>${ct}</option>`).join('')}
+                ${carTypeOptions.map(ct => `<option value="${escHtml(ct)}" ${ct === defaultCarType ? 'selected' : ''}>${escHtml(ct)}</option>`).join('')}
               </select>
             </td>
             <td class="p-2.5">
               <select id="src-${i}" class="w-full p-2 bg-slate-50 border rounded-xl font-bold text-xs">
-                ${sourceOptions.map(s => `<option value="${s}">${s}</option>`).join('')}
+                ${sourceOptions.map(s => `<option value="${escHtml(s)}">${escHtml(s)}</option>`).join('')}
               </select>
             </td>
             <td class="p-2.5">
@@ -740,13 +938,14 @@
                 ${TERMINAL_OPTIONS.map(t => `<option value="${t}">Ga ${t}</option>`).join('')}
               </select>
             </td>
-            <td class="p-2.5">
-              <input type="text" id="d-${i}" autocomplete="off" placeholder="Nhập điểm đến..." class="w-full p-2 bg-amber-50 border border-amber-300 rounded-xl font-semibold text-xs">
+            <td class="p-2.5 relative">
+              <input type="text" id="d-${i}" autocomplete="off" placeholder="Gõ điểm đến (vd: đề thám)..." class="w-full p-2 bg-amber-50 border border-amber-300 rounded-xl font-semibold text-xs" oninput="showPlaceSuggestions(this, 'dest-drop-${i}')" onkeydown="suggestKeydown(event, 'dest-drop-${i}')" onblur="hideSuggestLater('dest-drop-${i}')">
+              <div id="dest-drop-${i}"></div>
             </td>
             <td class="p-2.5"><input type="text" id="f-${i}" autocomplete="off" placeholder="Số tiền..." onblur="formatCurrSmartInput(this)" class="w-full p-2 bg-emerald-50 border border-emerald-300 rounded-xl font-extrabold text-emerald-800 text-right text-xs"></td>
             <td class="p-2.5">
               <select id="m-${i}" class="w-full p-2 bg-slate-50 border rounded-xl font-bold text-xs">
-                ${activePayments.map(opt => `<option value="${opt}">${opt}</option>`).join('')}
+                ${activePayments.map(opt => `<option value="${escHtml(opt)}">${escHtml(opt)}</option>`).join('')}
               </select>
             </td>
             <td class="p-2.5">
@@ -842,6 +1041,7 @@
         if(titleEl) titleEl.innerText = `📅 Lịch Sử Đơn Hàng & Doanh Thu Ngày ${targetDateStr}`;
       }
 
+      if (rawVal) ensureStaffDate(rawVal);
       const filtered = personalTrips.filter(t => normalizeDateInput(t.dateStr) === targetDateStr);
       sortTripsByDateAndTime(filtered);
 
@@ -858,12 +1058,12 @@
 
       tbody.innerHTML = filtered.map(t => `
         <tr class="hover:bg-slate-50">
-          <td class="p-2.5">${t.dateStr}</td>
-          <td class="p-2.5 font-mono font-bold text-blue-600">${formatDisplayTicket(t.ticketNumber)}</td>
-          <td class="p-2.5 font-mono font-bold uppercase">${t.plateNumber}</td>
-          <td class="p-2.5">${t.destination}</td>
-          <td class="p-2.5 font-bold">${t.paymentMethod || activePayments[0]}</td>
-          <td class="p-2.5 text-slate-600">${t.note || '--'}</td>
+          <td class="p-2.5">${escHtml(t.dateStr)}</td>
+          <td class="p-2.5 font-mono font-bold text-blue-600">${escHtml(formatDisplayTicket(t.ticketNumber))}</td>
+          <td class="p-2.5 font-mono font-bold uppercase">${escHtml(t.plateNumber)}</td>
+          <td class="p-2.5">${escHtml(t.destination)}</td>
+          <td class="p-2.5 font-bold">${escHtml(t.paymentMethod || activePayments[0])}</td>
+          <td class="p-2.5 text-slate-600">${escHtml(t.note || '--')}</td>
           <td class="p-2.5 text-right font-bold text-emerald-600">${Number(t.totalFare || 0).toLocaleString('vi-VN')} ₫</td>
         </tr>
       `).join('');
@@ -951,12 +1151,12 @@
                   ${monthTrips.length === 0 ? `<tr><td colspan="7" class="p-4 text-center text-slate-400">Không có đơn hàng nào trong tháng này.</td></tr>` : 
                     monthTrips.map(t => `
                       <tr class="hover:bg-slate-50">
-                        <td class="p-2.5">${t.dateStr}</td>
-                        <td class="p-2.5 font-mono font-bold text-blue-600">${formatDisplayTicket(t.ticketNumber)}</td>
-                        <td class="p-2.5 font-mono font-bold uppercase">${t.plateNumber}</td>
-                        <td class="p-2.5">${t.destination}</td>
-                        <td class="p-2.5 font-bold">${t.paymentMethod || activePayments[0]}</td>
-                        <td class="p-2.5 text-slate-600">${t.note || '--'}</td>
+                        <td class="p-2.5">${escHtml(t.dateStr)}</td>
+                        <td class="p-2.5 font-mono font-bold text-blue-600">${escHtml(formatDisplayTicket(t.ticketNumber))}</td>
+                        <td class="p-2.5 font-mono font-bold uppercase">${escHtml(t.plateNumber)}</td>
+                        <td class="p-2.5">${escHtml(t.destination)}</td>
+                        <td class="p-2.5 font-bold">${escHtml(t.paymentMethod || activePayments[0])}</td>
+                        <td class="p-2.5 text-slate-600">${escHtml(t.note || '--')}</td>
                         <td class="p-2.5 text-right font-bold text-emerald-600">${Number(t.totalFare || 0).toLocaleString('vi-VN')} ₫</td>
                       </tr>
                     `).join('')}
@@ -981,6 +1181,7 @@
         }
       }
 
+      if (sumDateInp && sumDateInp.value) ensureStaffDate(sumDateInp.value);
       const selectedItems = personalTrips.filter(t => {
         if (!targetDateStr) return true;
         return normalizeDateInput(t.dateStr) === normalizeDateInput(targetDateStr);
@@ -1041,7 +1242,7 @@
         const cls = colors[idx % colors.length];
         cardsHtml += `
           <div class="${cls} border p-3.5 rounded-2xl shadow-sm">
-            <div class="text-[10px] font-bold uppercase opacity-80">${opt}</div>
+            <div class="text-[10px] font-bold uppercase opacity-80">${escHtml(opt)}</div>
             <div class="text-base font-extrabold mt-1">${(methodSums[opt] || 0).toLocaleString('vi-VN')} ₫</div>
           </div>
         `;
@@ -1100,6 +1301,7 @@
         }
       }
 
+      if (dateInp && dateInp.value) ensureStaffDate(dateInp.value);
       const filteredTrips = personalTrips.filter(t => {
         if (!targetDateStr) return true;
         return normalizeDateInput(t.dateStr) === normalizeDateInput(targetDateStr);
@@ -1127,17 +1329,17 @@
         return `
           <tr class="hover:bg-slate-50">
             <td class="p-2.5 text-center">${checkboxHtml}</td>
-            <td class="p-2.5">${t.dateStr || '--'}</td>
-            <td class="p-2.5 font-mono font-bold text-slate-600">${t.timeStr || '--'}</td>
-            <td class="p-2.5 font-extrabold text-slate-800">${t.staff || '--'}</td>
-            <td class="p-2.5 font-mono font-bold text-blue-600">${formatDisplayTicket(t.ticketNumber)}</td>
-            <td class="p-2.5 font-mono font-bold uppercase">${t.plateNumber}</td>
-            <td class="p-2.5 font-bold">${t.carType || '--'}</td>
-            <td class="p-2.5 font-bold">${t.source || '--'}</td>
-            <td class="p-2.5 font-bold">${t.pickup ? 'Ga ' + t.pickup : '--'}</td>
-            <td class="p-2.5">${t.destination}</td>
-            <td class="p-2.5 font-bold text-slate-700">${t.paymentMethod || activePayments[0]}</td>
-            <td class="p-2.5 text-slate-600">${t.note || '--'}</td>
+            <td class="p-2.5">${escHtml(t.dateStr || '--')}</td>
+            <td class="p-2.5 font-mono font-bold text-slate-600">${escHtml(t.timeStr || '--')}</td>
+            <td class="p-2.5 font-extrabold text-slate-800">${escHtml(t.staff || '--')}</td>
+            <td class="p-2.5 font-mono font-bold text-blue-600">${escHtml(formatDisplayTicket(t.ticketNumber))}</td>
+            <td class="p-2.5 font-mono font-bold uppercase">${escHtml(t.plateNumber)}</td>
+            <td class="p-2.5 font-bold">${escHtml(t.carType || '--')}</td>
+            <td class="p-2.5 font-bold">${escHtml(t.source || '--')}</td>
+            <td class="p-2.5 font-bold">${escHtml(t.pickup ? 'Ga ' + t.pickup : '--')}</td>
+            <td class="p-2.5">${escHtml(t.destination)}</td>
+            <td class="p-2.5 font-bold text-slate-700">${escHtml(t.paymentMethod || activePayments[0])}</td>
+            <td class="p-2.5 text-slate-600">${escHtml(t.note || '--')}</td>
             <td class="p-2.5 text-right font-bold text-emerald-600">${Number(t.totalFare || 0).toLocaleString('vi-VN')} ₫</td>
             <td class="p-2.5 text-center whitespace-nowrap">${editBtn} ${deleteBtn}</td>
           </tr>
@@ -1165,7 +1367,7 @@
         <div id="edit-trip-modal" class="fixed inset-0 bg-slate-900/80 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
           <div class="bg-white rounded-3xl shadow-2xl max-w-md w-full p-6 space-y-4">
             <div class="flex items-center justify-between border-b pb-3">
-              <h3 class="text-sm font-extrabold text-slate-900 uppercase">✏️ Chỉnh Sửa Đơn Hàng (${formatDisplayTicket(trip.ticketNumber)})</h3>
+              <h3 class="text-sm font-extrabold text-slate-900 uppercase">✏️ Chỉnh Sửa Đơn Hàng (${escHtml(formatDisplayTicket(trip.ticketNumber))})</h3>
               <button onclick="document.getElementById('edit-trip-modal').remove()" class="text-slate-400 hover:text-slate-600 font-bold">✕</button>
             </div>
             
@@ -1177,22 +1379,22 @@
               <div class="grid grid-cols-2 gap-2">
                 <div>
                   <label class="font-bold text-slate-600">Số Phiếu:</label>
-                  <input type="text" id="edit-modal-ticket" value="${trip.ticketNumber || ''}" class="w-full mt-1 p-2.5 bg-slate-50 border rounded-xl font-bold">
+                  <input type="text" id="edit-modal-ticket" value="${escHtml(trip.ticketNumber || '')}" class="w-full mt-1 p-2.5 bg-slate-50 border rounded-xl font-bold">
                 </div>
                 <div>
                   <label class="font-bold text-slate-600">Biển Số Xe:</label>
-                  <input type="text" id="edit-modal-plate" value="${trip.plateNumber || ''}" class="w-full mt-1 p-2.5 bg-slate-50 border rounded-xl font-bold uppercase">
+                  <input type="text" id="edit-modal-plate" value="${escHtml(trip.plateNumber || '')}" class="w-full mt-1 p-2.5 bg-slate-50 border rounded-xl font-bold uppercase">
                 </div>
               </div>
               <div class="grid grid-cols-2 gap-2">
                 <div>
                   <label class="font-bold text-slate-600">Nhân Sự:</label>
-                  <input type="text" id="edit-modal-staff" value="${trip.staff || ''}" class="w-full mt-1 p-2.5 bg-slate-50 border rounded-xl font-bold">
+                  <input type="text" id="edit-modal-staff" value="${escHtml(trip.staff || '')}" class="w-full mt-1 p-2.5 bg-slate-50 border rounded-xl font-bold">
                 </div>
                 <div>
                   <label class="font-bold text-slate-600">Loại Xe:</label>
                   <select id="edit-modal-cartype" class="w-full mt-1 p-2.5 bg-slate-50 border rounded-xl font-bold">
-                    ${carTypeOptions.map(ct => `<option value="${ct}" ${trip.carType === ct ? 'selected' : ''}>${ct}</option>`).join('')}
+                    ${carTypeOptions.map(ct => `<option value="${escHtml(ct)}" ${escHtml(trip.carType === ct ? 'selected' : '')}>${escHtml(ct)}</option>`).join('')}
                   </select>
                 </div>
               </div>
@@ -1200,19 +1402,22 @@
                 <div>
                   <label class="font-bold text-slate-600">Nguồn Đơn:</label>
                   <select id="edit-modal-source" class="w-full mt-1 p-2.5 bg-slate-50 border rounded-xl font-bold">
-                    ${sourceOptions.map(s => `<option value="${s}" ${trip.source === s ? 'selected' : ''}>${s}</option>`).join('')}
+                    ${sourceOptions.map(s => `<option value="${escHtml(s)}" ${escHtml(trip.source === s ? 'selected' : '')}>${escHtml(s)}</option>`).join('')}
                   </select>
                 </div>
                 <div>
                   <label class="font-bold text-slate-600">Điểm Đón:</label>
                   <select id="edit-modal-pickup" class="w-full mt-1 p-2.5 bg-slate-50 border rounded-xl font-bold">
-                    ${TERMINAL_OPTIONS.map(t => `<option value="${t}" ${trip.pickup === t ? 'selected' : ''}>Ga ${t}</option>`).join('')}
+                    ${TERMINAL_OPTIONS.map(t => `<option value="${t}" ${escHtml(trip.pickup === t ? 'selected' : '')}>Ga ${t}</option>`).join('')}
                   </select>
                 </div>
               </div>
               <div>
                 <label class="font-bold text-slate-600">Điểm Đến:</label>
-                <input type="text" id="edit-modal-dest" value="${trip.destination || ''}" class="w-full mt-1 p-2.5 bg-slate-50 border rounded-xl font-bold">
+                <div class="relative">
+                  <input type="text" id="edit-modal-dest" autocomplete="off" value="${escHtml(trip.destination || '')}" class="w-full mt-1 p-2.5 bg-slate-50 border rounded-xl font-bold" oninput="showPlaceSuggestions(this, 'edit-dest-drop')" onkeydown="suggestKeydown(event, 'edit-dest-drop')" onblur="hideSuggestLater('edit-dest-drop')">
+                  <div id="edit-dest-drop"></div>
+                </div>
               </div>
               <div class="grid grid-cols-2 gap-2">
                 <div>
@@ -1222,13 +1427,13 @@
                 <div>
                   <label class="font-bold text-slate-600">Thanh Toán:</label>
                   <select id="edit-modal-payment" class="w-full mt-1 p-2.5 bg-slate-50 border rounded-xl font-bold">
-                    ${activePayments.map(opt => `<option value="${opt}" ${(trip.paymentMethod || activePayments[0]) === opt ? 'selected' : ''}>${opt}</option>`).join('')}
+                    ${activePayments.map(opt => `<option value="${escHtml(opt)}" ${(trip.paymentMethod || activePayments[0]) === opt ? 'selected' : ''}>${escHtml(opt)}</option>`).join('')}
                   </select>
                 </div>
               </div>
               <div>
                 <label class="font-bold text-slate-600">Ghi Chú:</label>
-                <input type="text" id="edit-modal-note" value="${trip.note || ''}" class="w-full mt-1 p-2.5 bg-slate-50 border rounded-xl">
+                <input type="text" id="edit-modal-note" value="${escHtml(trip.note || '')}" class="w-full mt-1 p-2.5 bg-slate-50 border rounded-xl">
               </div>
             </div>
 
@@ -1265,7 +1470,9 @@
       }
 
       trip.dateStr = formattedDate;
+      trip.dateKey = tripDateKey({ dateStr: formattedDate });
       trip.ticketNumber = ticket;
+      trip.originalTicket = baseTicketOf(ticket);
       trip.plateNumber = plate;
       trip.staff = staff;
       trip.carType = carType;
@@ -1365,6 +1572,7 @@
       if (!lastDeletedTripBackup || lastDeletedTripBackup.length === 0) { alert("Không có đơn hàng nào để khôi phục!"); return; }
       let updates = {};
       lastDeletedTripBackup.forEach(trip => {
+        if (!trip.dateKey) trip.dateKey = tripDateKey(trip) || fallbackDateKey(trip);
         updates[`trips/${trip.id}`] = trip;
         if (trip.createdBy) {
           updates[`users_trips/${trip.createdBy}/${trip.id}`] = trip;
@@ -1376,20 +1584,6 @@
         const container = document.getElementById('floating-undo-container');
         if (container) container.remove();
       });
-    }
-
-    function showStaffSuggestions(input, dropId) {
-      const q = input.value.trim().toLowerCase();
-      const drop = document.getElementById(dropId);
-      if (!drop) return;
-      if (!q) { drop.innerHTML = ''; return; }
-
-      const matches = staffOptions.filter(name => name.toLowerCase().includes(q));
-      if (matches.length === 0) { drop.innerHTML = ''; return; }
-
-      drop.innerHTML = `<div class="local-dropdown">${matches.map(name => `
-        <div class="local-item" onclick="document.getElementById('${input.id}').value='${name}';document.getElementById('${dropId}').innerHTML=''">👤 ${name}</div>
-      `).join('')}</div>`;
     }
 
     function handleSmartTicketFocus(currentIndex) {
@@ -1414,8 +1608,25 @@
       }
     }
 
-    function submitBatch(role) {
+    async function submitBatch(role) {
       if (!loggedInUser) return;
+      // Đơn nhập cho ngày cũ hơn khoảng đã tải: tải thêm đơn của đúng ngày đó để kiểm tra trùng
+      let dupPool = personalTrips;
+      if (staffMode === 'window' && staffWinFrom) {
+        const oldKeys = new Set();
+        for (let i = 0; i < 20; i++) {
+          const el = document.getElementById(`date-${i}`);
+          const dk = el ? tripDateKey({ dateStr: el.value }) : '';
+          if (dk && dk < staffWinFrom && document.getElementById(`t-${i}`).value.trim()) oldKeys.add(dk);
+        }
+        for (const dk of oldKeys) {
+          try {
+            const snap = await dbRef(`users_trips/${loggedInUser.user}`).orderByChild('dateKey').equalTo(dk).once('value');
+            dupPool = dupPool.concat(Object.values(snap.val() || {}));
+          } catch (e) {}
+        }
+      }
+      const savedDests = [];
       const timeStr = new Date().toLocaleTimeString('vi-VN', {hour:'2-digit', minute:'2-digit'});
       let count = 0;
       let updates = {};
@@ -1457,7 +1668,7 @@
           );
 
           // 2. Kiểm tra trùng với lịch sử đã lưu trước đó trên Cloud của tài khoản này
-          const isDuplicateInCloud = personalTrips.some(t => {
+          const isDuplicateInCloud = dupPool.some(t => {
             const existingTicket = (t.originalTicket || t.ticketNumber || '').trim().toUpperCase();
             const existingPlate = (t.plateNumber || '').trim().toUpperCase();
             const existingDate = normalizeDateInput(t.dateStr);
@@ -1471,6 +1682,7 @@
 
           // Đưa vào mảng kiểm tra nội bộ tiếp theo
           batchEntriesToCheck.push({ ticket: cleanTicket, plate: cleanPlate, date: formattedDate });
+          savedDests.push(dest);
 
           const baseTimestamp = Date.now() + i;
 
@@ -1485,7 +1697,8 @@
             const tripData = {
               id: subId, dateStr: formattedDate, timeStr, ticketNumber: subTicket, originalTicket: ticket, plateNumber: plate,
               carType, source, pickup, destination: dest, totalFare: splitFare, originalTotalFare: totalFare, paymentMethod: pay,
-              note: note, staff: staffName, role: loggedInUser.role, createdBy: loggedInUser.user, timestamp: baseTimestamp + sIdx
+              note: note, staff: staffName, role: loggedInUser.role, createdBy: loggedInUser.user, timestamp: baseTimestamp + sIdx,
+              dateKey: tripDateKey({ dateStr: formattedDate })
             };
 
             updates[`users_trips/${loggedInUser.user}/${subId}`] = tripData;
@@ -1505,6 +1718,7 @@
 
       if (count > 0) {
         dbRoot().update(updates).then(() => {
+          recordPlaces(savedDests);
           alert(`Đã lưu thành công và phân tách hoa hồng cho ${count} đơn!`);
           renderBatchRows(role);
           const histInput = document.getElementById('filter-history-date');
@@ -1832,66 +2046,40 @@
     function updateManagerRevenueSummary() {
       const revContainer = document.getElementById('revenue-cards-container');
       if (!revContainer) return;
-
+      refreshManagerWindow();
       const revDateInp = document.getElementById('revenue-date-picker');
-      let targetDateStr = '';
-      if (revDateInp && revDateInp.value) {
-        const parts = revDateInp.value.split('-');
-        if (parts.length === 3) {
-          targetDateStr = `${parts[2]}/${parts[1]}/${parts[0]}`;
-        }
-      }
+      const dayKey = revDateInp && revDateInp.value ? revDateInp.value : '';
+      const dayTrips = allCompanyTrips.filter(t => !dayKey || tripDateKey(t) === dayKey);
+      // Doanh thu = đơn của Bán vé + Kế hoạch. Đơn Chủ xe chỉ để đối chiếu, KHÔNG cộng vào (tránh tính 2 lần)
+      const posTrips = dayTrips.filter(t => t.role !== 'driver');
+      const drvTrips = dayTrips.filter(t => t.role === 'driver');
+      const sum = arr => arr.reduce((acc, t) => acc + (Number(t.totalFare) || 0), 0);
+      const totalSum = sum(posTrips);
 
-      const selectedTrips = allCompanyTrips.filter(t => {
-        if (!targetDateStr) return true;
-        return normalizeDateInput(t.dateStr) === normalizeDateInput(targetDateStr);
+      const methodSums = {};
+      posTrips.forEach(t => {
+        const m = t.paymentMethod || '(Chưa ghi)';
+        methodSums[m] = (methodSums[m] || 0) + (Number(t.totalFare) || 0);
       });
-
-      const totalSum = selectedTrips.reduce((acc, t) => acc + (Number(t.totalFare) || 0), 0);
-
-      let allCategories = [...new Set([...paymentOptions, ...planPaymentOptions, ...sourceOptions])];
-      let methodSums = {};
-      allCategories.forEach(opt => methodSums[opt] = 0);
-
-      selectedTrips.forEach(t => {
-        const fare = Number(t.totalFare || 0);
-        const method = t.paymentMethod || paymentOptions[0];
-        const source = t.source;
-
-        if (methodSums[method] !== undefined) {
-          methodSums[method] += fare;
-        } else {
-          methodSums[method] = (methodSums[method] || 0) + fare;
-        }
-
-        if (source && methodSums[source] !== undefined && source !== method) {
-          methodSums[source] += fare;
-        }
-      });
+      const order = [...paymentOptions, ...planPaymentOptions.filter(p => !paymentOptions.includes(p))];
+      const methods = [...order.filter(m => methodSums[m] !== undefined || paymentOptions.includes(m)), ...Object.keys(methodSums).filter(m => !order.includes(m))];
 
       let cardsHtml = `
         <div class="bg-emerald-50 border border-emerald-200 p-3.5 rounded-2xl shadow-sm sm:col-span-1">
-          <div class="text-[10px] font-bold uppercase text-emerald-600">Tổng Doanh Thu Ngày</div>
+          <div class="text-[10px] font-bold uppercase text-emerald-600">Tổng Doanh Thu Ngày (Bán Vé + Kế Hoạch)</div>
           <div class="text-lg sm:text-xl font-extrabold text-emerald-800 mt-1">${totalSum.toLocaleString('vi-VN')} ₫</div>
-          <div class="text-[11px] text-slate-500 mt-0.5">${selectedTrips.length} tổng đơn</div>
+          <div class="text-[11px] text-slate-500 mt-0.5">${posTrips.length} đơn bán • Chủ xe báo: ${drvTrips.length} đơn / ${sum(drvTrips).toLocaleString('vi-VN')} ₫</div>
         </div>
       `;
-
       const colors = ['bg-blue-50 border-blue-200 text-blue-800', 'bg-indigo-50 border-indigo-200 text-indigo-800', 'bg-amber-50 border-amber-200 text-amber-800', 'bg-purple-50 border-purple-200 text-purple-800', 'bg-rose-50 border-rose-200 text-rose-800', 'bg-teal-50 border-teal-200 text-teal-800'];
-      
-      paymentOptions.concat(planPaymentOptions).forEach((opt, idx) => {
-        const cls = colors[idx % colors.length];
-        const amt = methodSums[opt] || 0;
-        if (amt > 0 || paymentOptions.includes(opt)) {
-          cardsHtml += `
-            <div class="${cls} border p-3.5 rounded-2xl shadow-sm">
-              <div class="text-[10px] font-bold uppercase opacity-80">${opt}</div>
-              <div class="text-base font-extrabold mt-1">${amt.toLocaleString('vi-VN')} ₫</div>
-            </div>
-          `;
-        }
+      methods.forEach((opt, idx) => {
+        cardsHtml += `
+          <div class="${colors[idx % colors.length]} border p-3.5 rounded-2xl shadow-sm">
+            <div class="text-[10px] font-bold uppercase opacity-80">${escHtml(opt)}</div>
+            <div class="text-base font-extrabold mt-1">${(methodSums[opt] || 0).toLocaleString('vi-VN')} ₫</div>
+          </div>
+        `;
       });
-
       revContainer.innerHTML = cardsHtml;
     }
 
@@ -1969,22 +2157,33 @@
       });
     }
 
+    // Số phiếu gốc dùng để ghép cặp: bỏ đuôi tách nhân sự "-1/2" (hoặc "-1-2" do bản cũ đổi dấu)
+    function baseTicketOf(ticket) {
+      return String(ticket || '').trim().replace(/-\d+[\/-]\d+$/, '');
+    }
+
+    // Sửa nhanh 1 ô: chỉ lưu khi giá trị thật sự thay đổi, và chỉ ghi đúng ô đó (không ghi đè cả đơn)
     function updateInlineTripField(tripId, field, value) {
-      let trip = allCompanyTrips.find(x => x.id === tripId);
+      const trip = allCompanyTrips.find(x => x.id === tripId);
       if (!trip) return;
-
-      if (field === 'totalFare') {
-        value = parseFloat(value.replace(/[^0-9]/g, '')) || 0;
+      if (field === 'totalFare') value = parseFloat(String(value).replace(/[^0-9]/g, '')) || 0;
+      else if (field === 'plateNumber') value = String(value).trim().toUpperCase();
+      else value = String(value).trim();
+      const oldVal = field === 'totalFare' ? Number(trip[field] || 0) : String(trip[field] == null ? '' : trip[field]);
+      if (value === oldVal) return;
+      if ((field === 'ticketNumber' || field === 'plateNumber') && !value) {
+        alert('Số phiếu và biển số không được để trống!');
+        updateManagerAuditTable();
+        return;
       }
-
-      trip[field] = value;
-
-      let updates = {};
-      updates[`trips/${tripId}`] = trip;
-      if (trip.createdBy) {
-        updates[`users_trips/${trip.createdBy}/${tripId}`] = trip;
-      }
-
+      const changes = { [field]: value };
+      if (field === 'ticketNumber') changes.originalTicket = baseTicketOf(value);
+      const updates = {};
+      Object.keys(changes).forEach(k => {
+        updates[`trips/${tripId}/${k}`] = changes[k];
+        if (trip.createdBy) updates[`users_trips/${trip.createdBy}/${tripId}/${k}`] = changes[k];
+      });
+      Object.assign(trip, changes);
       dbRoot().update(updates).then(() => {
         updateManagerRevenueSummary();
       }).catch(err => {
@@ -2261,10 +2460,10 @@
             if (f.endDateVal && k > f.endDateVal) return;
           }
         }
-        const ticketKey = (t.originalTicket || t.ticketNumber || '').replace(/\s+/g, '').toUpperCase();
+        const ticketKey = (t.originalTicket || baseTicketOf(t.ticketNumber)).replace(/\s+/g, '').toUpperCase();
         const plate = normalizePlate(t.plateNumber);
         if (ticketKey && plate) {
-          const baseTicket = ticketKey.split('-')[0].split('/')[0];
+          const baseTicket = ticketKey;
           // Gom chung một nhóm theo Số phiếu + Biển số + Ngày
           const key = `${baseTicket}_${plate}_${normalizeDateInput(t.dateStr)}`;
           if (!pairMap[key]) pairMap[key] = [];
@@ -2305,6 +2504,7 @@
     function updateManagerAuditTable() {
       const tb = document.getElementById('tbody-mgr');
       if (!tb) return;
+      refreshManagerWindow();
       if (allCompanyTrips.length === 0) {
         tb.innerHTML = `<tr><td colspan="15" class="p-4 text-center text-slate-400">Chưa có dữ liệu đơn hàng.</td></tr>`;
         return;
@@ -2346,41 +2546,41 @@
           const rowBg = isPlan ? 'bg-purple-50/30' : (isPos ? 'bg-blue-50/30' : 'bg-amber-50/30');
 
           const checkboxHtml = `<input type="checkbox" class="manager-trip-checkbox" value="${t.id}">`;
-          const deleteBtn = `<button onclick="adminDeleteTrip('${t.id}', '${t.createdBy}')" class="px-2 py-0.5 bg-rose-50 hover:bg-rose-100 text-rose-600 font-bold rounded-md text-[10px]">🗑️ Xóa</button>`;
+          const deleteBtn = `<button onclick="adminDeleteTrip('${t.id}', '${escHtml(t.createdBy)}')" class="px-2 py-0.5 bg-rose-50 hover:bg-rose-100 text-rose-600 font-bold rounded-md text-[10px]">🗑️ Xóa</button>`;
           const auditCell = (idx === 0) ? `<td class="p-3 text-center align-middle" rowspan="${group.length}">${statusHtml}</td>` : '';
           const borderClass = (idx === group.length - 1) ? 'border-b-2 border-slate-300' : 'border-b';
 
           const basePayList = isPlan ? planPaymentOptions : paymentOptions;
           const currentPaymentsList = (t.paymentMethod && !basePayList.includes(t.paymentMethod)) ? [t.paymentMethod, ...basePayList] : basePayList;
           const payOptionsHtml = (t.paymentMethod ? '' : `<option value="" selected>⚠️ Chưa ghi</option>`) +
-            currentPaymentsList.map(opt => `<option value="${escHtml(opt)}" ${t.paymentMethod === opt ? 'selected' : ''}>${escHtml(opt)}</option>`).join('');
+            currentPaymentsList.map(opt => `<option value="${escHtml(opt)}" ${escHtml(t.paymentMethod === opt ? 'selected' : '')}>${escHtml(opt)}</option>`).join('');
 
           rowsHtml += `
             <tr class="${rowBg} hover:bg-slate-100/80 transition-all ${borderClass}">
               <td class="p-2.5 text-center align-middle">${checkboxHtml}</td>
-              <td class="p-2.5">${t.dateStr || '--'}</td>
-              <td class="p-2.5 font-mono font-bold text-slate-600">${t.timeStr || '--'}</td>
+              <td class="p-2.5">${escHtml(t.dateStr || '--')}</td>
+              <td class="p-2.5 font-mono font-bold text-slate-600">${escHtml(t.timeStr || '--')}</td>
               <td class="p-2.5">${roleBadge}</td>
-              <td class="p-2.5 font-extrabold text-slate-800">${t.staff || 'N/A'}</td>
-              <td class="p-2.5"><input type="text" value="${formatDisplayTicket(t.ticketNumber) || ''}" class="inline-edit-input w-24 text-blue-600" onblur="updateInlineTripField('${t.id}', 'ticketNumber', this.value)"></td>
-              <td class="p-2.5"><input type="text" value="${t.plateNumber || ''}" class="inline-edit-input w-28 uppercase" onblur="updateInlineTripField('${t.id}', 'plateNumber', this.value)"></td>
+              <td class="p-2.5 font-extrabold text-slate-800">${escHtml(t.staff || 'N/A')}</td>
+              <td class="p-2.5"><input type="text" value="${escHtml(t.ticketNumber || '')}" class="inline-edit-input w-24 text-blue-600" onblur="updateInlineTripField('${t.id}', 'ticketNumber', this.value)"></td>
+              <td class="p-2.5"><input type="text" value="${escHtml(t.plateNumber || '')}" class="inline-edit-input w-28 uppercase" onblur="updateInlineTripField('${t.id}', 'plateNumber', this.value)"></td>
               <td class="p-2.5">
                 <select class="inline-edit-input w-28" onchange="updateInlineTripField('${t.id}', 'carType', this.value)">
-                  ${carTypeOptions.map(ct => `<option value="${ct}" ${t.carType === ct ? 'selected' : ''}>${ct}</option>`).join('')}
+                  ${carTypeOptions.map(ct => `<option value="${escHtml(ct)}" ${escHtml(t.carType === ct ? 'selected' : '')}>${escHtml(ct)}</option>`).join('')}
                 </select>
               </td>
               <td class="p-2.5">
                 <select class="inline-edit-input w-28" onchange="updateInlineTripField('${t.id}', 'source', this.value)">
-                  ${sourceOptions.map(s => `<option value="${s}" ${t.source === s ? 'selected' : ''}>${s}</option>`).join('')}
+                  ${sourceOptions.map(s => `<option value="${escHtml(s)}" ${escHtml(t.source === s ? 'selected' : '')}>${escHtml(s)}</option>`).join('')}
                 </select>
               </td>
-              <td class="p-2.5"><input type="text" value="${t.destination || ''}" class="inline-edit-input w-36" onblur="updateInlineTripField('${t.id}', 'destination', this.value)"></td>
+              <td class="p-2.5"><input type="text" value="${escHtml(t.destination || '')}" class="inline-edit-input w-36" onblur="updateInlineTripField('${t.id}', 'destination', this.value)"></td>
               <td class="p-2.5">
                 <select class="inline-edit-input w-32 font-bold" onchange="updateInlineTripField('${t.id}', 'paymentMethod', this.value)">
                   ${payOptionsHtml}
                 </select>
               </td>
-              <td class="p-2.5"><input type="text" value="${t.note || ''}" class="inline-edit-input w-32" onblur="updateInlineTripField('${t.id}', 'note', this.value)"></td>
+              <td class="p-2.5"><input type="text" value="${escHtml(t.note || '')}" class="inline-edit-input w-32" onblur="updateInlineTripField('${t.id}', 'note', this.value)"></td>
               <td class="p-2.5 text-right"><input type="text" value="${Number(t.totalFare || 0).toLocaleString('vi-VN')}" class="inline-edit-input w-28 text-right font-extrabold text-emerald-700" onblur="updateInlineTripField('${t.id}', 'totalFare', this.value)"></td>
               ${auditCell}
               <td class="p-2.5 text-center align-middle">${deleteBtn}</td>
@@ -2422,7 +2622,7 @@
         <div class="${ok ? 'bg-emerald-50 border-emerald-300' : 'bg-orange-50 border-orange-300'} border-2 rounded-2xl p-3 space-y-2 text-xs">
           <div class="flex flex-wrap items-center gap-2 font-extrabold text-slate-800">
             <span>📋 NHẮC BÁO CÁO NGÀY</span>
-            <input type="date" value="${day}" class="px-2 py-1 bg-white border rounded-lg font-mono font-bold" onchange="remindDateKey = this.value || localDateKey(new Date()); renderReminderBox();">
+            <input type="date" value="${day}" class="px-2 py-1 bg-white border rounded-lg font-mono font-bold" onchange="remindDateKey = this.value || localDateKey(new Date()); refreshManagerWindow(); renderReminderBox();">
             ${head}
             ${ok ? '' : `<button onclick="showReminderDetail()" class="px-2.5 py-1 bg-slate-800 hover:bg-slate-900 text-white rounded-lg font-bold">Xem chi tiết ở bảng dưới ↓</button>`}
           </div>
@@ -3061,22 +3261,51 @@
       try { await dbRoot().update(updates); } catch (e) { alert(authErrorText(e)); }
     }
 
-    // CHỈ DÙNG Ở BẢN THỬ: chép danh mục + đơn hàng từ dữ liệu thật sang vùng thử (chỉ ĐỌC dữ liệu thật)
-    async function copyRealDataToTest() {
+    // CHỈ DÙNG Ở BẢN THỬ: chép danh mục + đơn hàng từ dữ liệu thật sang vùng thử (chỉ ĐỌC dữ liệu thật).
+    // Dữ liệu thật đã khóa -> cần đăng nhập tài khoản QUẢN LÝ CỦA BẢN CHÍNH (dùng app Firebase phụ, không ảnh hưởng phiên hiện tại).
+    function copyRealDataToTest() {
       if (!IS_TEST_ENV || !DB_PREFIX) return;
-      if (!confirm('Chép danh mục, tài khoản cũ và toàn bộ đơn hàng từ DỮ LIỆU THẬT sang BẢN THỬ?\n(Dữ liệu thật chỉ được đọc, không bị thay đổi. Đơn trong bản thử sẽ bị thay bằng bản chép.)')) return;
+      closeLoginModals();
+      const body = `
+        <p class="text-[11px] text-slate-600 text-center">Nhập tài khoản <b>Quản Lý của BẢN CHÍNH</b> để đọc dữ liệu thật (chỉ đọc, không sửa).</p>
+        <input type="text" id="copy-user" autocomplete="off" placeholder="Tài khoản quản lý bản chính..." class="${inputCls} uppercase">
+        <input type="password" id="copy-pass" autocomplete="off" placeholder="Mật khẩu..." class="${inputCls}" onkeydown="if(event.key==='Enter') executeCopyRealData()">`;
+      document.body.insertAdjacentHTML('beforeend', loginModalHtml('copy-modal', 'bg-amber-500', '🧪', 'Chép Dữ Liệu Thật Vào Bản Thử', body, 'Chép Dữ Liệu', 'executeCopyRealData()'));
+    }
+    async function executeCopyRealData() {
+      const u = document.getElementById('copy-user').value.trim().toUpperCase();
+      const p = document.getElementById('copy-pass').value.trim();
+      if (!u || !p) { setModalBusy('copy-modal', false, 'Vui lòng nhập tài khoản và mật khẩu!'); return; }
+      setModalBusy('copy-modal', true, 'Đang đọc dữ liệu thật...');
+      if (!secondaryApp) secondaryApp = firebase.initializeApp(firebaseConfig, 'tao-tai-khoan');
+      const secAuth = secondaryApp.auth();
+      const secDb = secondaryApp.database();
       try {
-        const [st, tr, ut] = await Promise.all(['settings', 'trips', 'users_trips'].map(p => rtdb.ref(p).once('value')));
+        const idx = (await rtdb.ref('login_index/' + u).once('value')).val();
+        if (!idx) throw { code: 'app/no-account' };
+        await secAuth.signInWithEmailAndPassword(`${u.toLowerCase()}${idx.ver ? '.v' + idx.ver : ''}@taxi-tss.local`, authPassword(p));
+        const trips = (await secDb.ref('trips').once('value')).val() || {};
+        const users = new Set(Object.values(trips).map(t => t && t.createdBy).filter(Boolean));
         const updates = {};
-        const s = st.val() || {};
-        Object.keys(s).forEach(k => { updates['settings/' + k] = s[k]; });
-        const trips = tr.val() || {}, uTrips = ut.val() || {};
+        for (const k of ['sources', 'staff', 'carTypes', 'payments', 'planPayments', 'lockHour']) {
+          const v = (await secDb.ref('settings/' + k).once('value')).val();
+          if (v !== null && v !== undefined) updates['settings/' + k] = v;
+        }
+        const pl = (await secDb.ref('places').once('value').catch(() => null));
+        if (pl && pl.val()) Object.entries(pl.val()).forEach(([k, v]) => { updates['places/' + k] = v; });
         Object.keys(trips).forEach(id => { updates['trips/' + id] = trips[id]; });
-        Object.keys(uTrips).forEach(u => { updates['users_trips/' + u] = uTrips[u]; });
-        await dbRoot().update(updates);
-        alert(`Đã chép ${Object.keys(tr.val() || {}).length} đơn hàng và danh mục vào bản thử!`);
+        for (const usr of users) {
+          const ut = (await secDb.ref('users_trips/' + usr).once('value')).val();
+          if (ut) updates['users_trips/' + usr] = ut;
+        }
+        try { await secAuth.signOut(); } catch (e) {}
+        setModalBusy('copy-modal', true, 'Đang ghi vào bản thử...');
+        await writeInChunks(updates);
+        closeLoginModals();
+        alert(`Đã chép ${Object.keys(trips).length} đơn hàng và danh mục vào bản thử! (Tài khoản không chép — bản thử dùng tài khoản riêng)`);
       } catch (e) {
-        alert('Không chép được: ' + authErrorText(e));
+        try { await secAuth.signOut(); } catch (e2) {}
+        setModalBusy('copy-modal', false, e && e.code === 'app/no-account' ? 'Tài khoản không có ở bản chính!' : authErrorText(e));
       }
     }
   </script>

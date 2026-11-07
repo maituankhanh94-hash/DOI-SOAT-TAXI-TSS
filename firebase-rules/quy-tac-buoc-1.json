@@ -32,6 +32,14 @@
       ".read": true,
       ".write": true
     },
+    "places": {
+      ".read": true,
+      ".write": true
+    },
+    "meta": {
+      ".read": true,
+      ".write": true
+    },
     "test_env": {
       "login_index": {
         ".read": true,
@@ -78,15 +86,35 @@
       },
       "trips": {
         ".read": "((auth != null && root.child('test_env/roles/'+auth.uid+'/active').val() === true) && root.child('test_env/roles/'+auth.uid+'/role').val() === 'manager')",
+        ".indexOn": [
+          "dateKey"
+        ],
         "$id": {
           ".write": "((auth != null && root.child('test_env/roles/'+auth.uid+'/active').val() === true) && root.child('test_env/roles/'+auth.uid+'/role').val() === 'manager') || ((auth != null && root.child('test_env/roles/'+auth.uid+'/active').val() === true) && (!data.exists() || data.child('createdBy').val() === root.child('test_env/roles/'+auth.uid+'/user').val()) && (!newData.exists() || newData.child('createdBy').val() === root.child('test_env/roles/'+auth.uid+'/user').val()))"
         }
       },
       "users_trips": {
         "$user": {
+          ".indexOn": [
+            "dateKey"
+          ],
           ".read": "((auth != null && root.child('test_env/roles/'+auth.uid+'/active').val() === true) && root.child('test_env/roles/'+auth.uid+'/role').val() === 'manager') || ((auth != null && root.child('test_env/roles/'+auth.uid+'/active').val() === true) && $user === root.child('test_env/roles/'+auth.uid+'/user').val())",
           ".write": "((auth != null && root.child('test_env/roles/'+auth.uid+'/active').val() === true) && root.child('test_env/roles/'+auth.uid+'/role').val() === 'manager') || ((auth != null && root.child('test_env/roles/'+auth.uid+'/active').val() === true) && $user === root.child('test_env/roles/'+auth.uid+'/user').val())"
         }
+      },
+      "places": {
+        ".read": "(auth != null && root.child('test_env/roles/'+auth.uid+'/active').val() === true)",
+        ".indexOn": [
+          "n"
+        ],
+        "$p": {
+          ".write": "(auth != null && root.child('test_env/roles/'+auth.uid+'/active').val() === true)",
+          ".validate": "newData.hasChildren(['name', 'n']) && newData.child('name').isString() && newData.child('name').val().length <= 200 && newData.child('n').isNumber()"
+        }
+      },
+      "meta": {
+        ".read": "(auth != null && root.child('test_env/roles/'+auth.uid+'/active').val() === true)",
+        ".write": "((auth != null && root.child('test_env/roles/'+auth.uid+'/active').val() === true) && root.child('test_env/roles/'+auth.uid+'/role').val() === 'manager')"
       },
       "deleted_trips": {
         ".read": "((auth != null && root.child('test_env/roles/'+auth.uid+'/active').val() === true) && root.child('test_env/roles/'+auth.uid+'/role').val() === 'manager')",

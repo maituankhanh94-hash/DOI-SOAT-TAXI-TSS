@@ -41,16 +41,24 @@
 
 - Luật khớp thanh toán (08/11, người dùng báo "Thẻ vs NVQ vẫn khớp"): `paymentCategory` quy về NVQ / THE / TXT / KH (đơn role plan luôn KH; Công nợ, Chuyển khoản, đối tác = KH); đơn cũ không ghi thanh toán → theo nguồn (đối tác = KH) hoặc "chưa ghi". Khớp khi tiền lệch < 1.000đ VÀ mọi đơn 2 bên cùng 1 nhóm; "Free nội bộ" (FREE) ở bất kỳ bên nào thì khớp mọi hình thức (vẫn so tiền); đơn chọn Free mà tiền > 0 → Lệch "chọn Free nhưng có nhập tiền". `getMismatchReason` hiện lý do dưới nhãn Đơn Lệch và trong Excel. Ô chọn thanh toán hiện đúng giá trị thật (trước đây trống thì hiện nhầm lựa chọn đầu tiên).
 
-## Lỗi/rủi ro đã phát hiện (06/11/2026) — việc còn lại: 3–8, tối ưu tải dữ liệu, gợi ý địa chỉ
-1. ĐÃ SỬA 07/11: quy tắc RTDB thật trước đây `.read/.write: true`; nay là quy-tac-buoc-2 + Firebase Auth. Còn tồn: dữ liệu thử `test_env/` và tài khoản Auth `@test.taxi-tss.local` (xóa được trong console nếu muốn). Số liệu 07/11: lưu 1,61 MB, tải về 121 MB/6 ngày, kết nối đỉnh 33/100 (gói Spark). DB thật còn 2 nhánh cũ không dùng: `deleted_trips`, `drivers`.
-2. ĐÃ SỬA (nhánh bao-mat-dang-nhap): màn hình & Excel dùng chung `computeAuditGroups`/`getAuditStatus`. Excel xuất bằng ExcelJS 4.4.0 (tải khi cần): sheet "Đối Soát" (màu theo trạng thái, kẻ ô, nhóm theo ngày, gộp ô STT/Trạng thái, dòng cộng ngày + tổng cộng, ký tên) và sheet "Tổng Hợp" (theo trạng thái / hình thức TT / nhân sự). Ngày gõ thiếu dấu ("01/112026") được `normalizeDateInput` tự sửa; nhập đơn kiểm tra ngày hợp lệ (`isValidDateStr`).
-3. "Tổng doanh thu ngày" của Quản lý cộng cả đơn Tài xế lẫn Quầy → 1 chuyến bị tính 2 lần (đã tái hiện: 300k → 600k).
-4. Sửa số phiếu (modal Sửa hoặc ô sửa nhanh của Quản lý) không cập nhật `originalTicket` → sửa phiếu gõ nhầm vẫn không ghép cặp được.
-5. Không escape HTML: dấu `"` trong điểm đến/ghi chú bị cắt trong ô sửa nhanh, và khi rời ô sẽ lưu bản bị cắt → mất chữ (đã tái hiện).
-6. Ô sửa nhanh lưu cả đơn mỗi lần rời ô (kể cả không đổi); số phiếu tách "123-1/2" hiển thị thành "123-1-2" rồi bị ghi đè.
-7. Mã phiếu có sẵn dấu "-" bị cắt khi gom nhóm (`split('-')[0]`) → có thể ghép nhầm phiếu khác nhau.
-8. Quản lý tải lại toàn bộ `trips` mỗi lần có thay đổi → chậm dần khi dữ liệu lớn. Danh mục/tài khoản ghi đè cả mảng, sửa/xóa theo số thứ tự → 2 người sửa cùng lúc có thể đè nhau.
-9. Code chết: `checkAndShowMilestoneCongratModal` dùng biến không tồn tại (không được gọi).
+## Tải dữ liệu theo ngày & gợi ý địa chỉ (nhánh `cai-tien-doi-soat`, 08/11)
+- Mỗi đơn có `dateKey` (yyyy-mm-dd). `meta/dateKeyV1 = true` khi đã nâng cấp. Quản lý đăng nhập lần đầu với quy tắc mới → `runDateKeyBackfill` (thêm dateKey mọi đơn cũ ở `trips` + `users_trips/<u>`, tạo `places`). Mỗi lần đăng nhập `fixMissingDateKeys` (query `orderByChild('dateKey').endAt(null)`) bổ sung đơn do máy bản cũ ghi.
+- Quản lý (`refreshManagerWindow`): chỉ tải `trips` trong khoảng = hợp (ngày đối soát, ngày doanh thu, ngày nhắc báo cáo); "Xem Tất Cả" tải toàn bộ. Nhân viên (`setStaffWindow`): từ đầu tháng trước, xem ngày cũ hơn thì `ensureStaffDate` tải thêm; nhập đơn ngày cũ → `submitBatch` tải đúng ngày đó để kiểm tra trùng.
+- Nếu quy tắc chưa cho đọc `meta` (quy tắc cũ) → chế độ `full` (tải toàn bộ như cũ), vẫn chạy bình thường.
+- Gợi ý địa chỉ: `places/<slug>={name,n}` (slug bỏ dấu), tăng `n` khi lưu đơn (`recordPlaces`, ghi riêng, lỗi thì bỏ qua). Gõ ≥2 ký tự không dấu cũng tìm được (`removeAccents`). Ô gợi ý dùng chung `renderSuggestBox` (chuột, ↑↓ Enter, Esc), dùng cho tên nhân sự + điểm đến (nhập hàng loạt và modal sửa).
+- Quy tắc mới (đã thêm `.indexOn` dateKey cho trips & users_trips/$user, `places`, `meta`): `firebase-rules/quy-tac-buoc-2.json`, sinh bằng `firebase-rules/sinh-quy-tac.js` (`node sinh-quy-tac.js firebase-rules`). Quy tắc mới tương thích ngược với app cũ.
+- Bản thử: nút "Chép Dữ Liệu Thật" hỏi tài khoản QUẢN LÝ BẢN CHÍNH (đọc bằng app Firebase phụ, đọc settings từng mục vì quy tắc không cho đọc cả `settings`).
+
+## Lỗi/rủi ro đã phát hiện (06/11/2026) — 3–9 ĐÃ SỬA ở nhánh `cai-tien-doi-soat` (08/11)
+1. ĐÃ SỬA 07/11: quy tắc RTDB thật trước đây `.read/.write: true`; nay là quy-tac-buoc-2 + Firebase Auth. Còn tồn: dữ liệu thử `test_env/` và tài khoản Auth `@test.taxi-tss.local`. Số liệu 07/11: lưu 1,61 MB, tải về 121 MB/6 ngày, kết nối đỉnh 33/100 (gói Spark). DB thật còn 2 nhánh cũ không dùng: `deleted_trips`, `drivers`.
+2. ĐÃ SỬA: màn hình & Excel dùng chung `computeAuditGroups`/`getAuditStatus`; Excel ExcelJS có màu/kẻ ô/nhóm ngày/tổng/ký tên + sheet Tổng Hợp; ngày gõ thiếu dấu tự sửa, ngày sai bị chặn.
+3. ĐÃ SỬA: "Tổng doanh thu ngày" chỉ cộng Bán vé + Kế hoạch; Chủ xe hiện riêng để đối chiếu.
+4. ĐÃ SỬA: sửa số phiếu (modal / sửa nhanh) cập nhật `originalTicket = baseTicketOf(...)`.
+5. ĐÃ SỬA: escape HTML (`escHtml`) mọi chỗ chèn dữ liệu đơn/danh mục; gợi ý dùng data-attribute.
+6. ĐÃ SỬA: sửa nhanh chỉ lưu khi đổi thật và chỉ ghi đúng ô đó; ô số phiếu hiện đúng "123-1/2".
+7. ĐÃ SỬA: ghép cặp dùng `originalTicket` / `baseTicketOf` (chỉ bỏ đuôi -k/n), không cắt ở dấu "-".
+8. ĐÃ SỬA phần tải dữ liệu (xem mục trên). Còn tồn: mỗi đơn vẫn lưu 2 bản (trips + users_trips) — chấp nhận được (dung lượng nhỏ). Danh mục (nguồn đơn, nhân sự...) vẫn ghi cả mảng nhưng chỉ quản lý sửa.
+9. ĐÃ XÓA code chết.
 
 ## Cách thử trong sandbox
 - Bị chặn: cdn.tailwindcss.com, cdnjs, jsdelivr, gstatic, *.vercel.app, **firebaseio.com**. Được: npm, api.github.com.

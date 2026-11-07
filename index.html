@@ -83,7 +83,7 @@
 
     // ===== MÔI TRƯỜNG: BẢN THỬ dùng vùng dữ liệu riêng "test_env/", BẢN CHÍNH dùng gốc =====
     // Trên nhánh thử nghiệm đặt FORCE_TEST_ENV = true. Trước khi đưa lên bản chính (main) đặt lại = false.
-    const FORCE_TEST_ENV = true;
+    const FORCE_TEST_ENV = false;
     const IS_TEST_ENV = FORCE_TEST_ENV || /-git-|localhost|127\.0\.0\.1/.test(location.hostname) || location.protocol === 'file:';
     const DB_PREFIX = IS_TEST_ENV ? 'test_env' : '';
     const EMAIL_DOMAIN = IS_TEST_ENV ? 'test.taxi-tss.local' : 'taxi-tss.local';

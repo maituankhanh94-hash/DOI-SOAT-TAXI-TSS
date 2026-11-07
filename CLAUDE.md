@@ -15,7 +15,7 @@
 - Push bị 403 → người dùng cài Claude GitHub App cho repo: https://github.com/apps/claude/installations/select_target
 
 ## Kiến trúc app
-- Một file duy nhất `index.html` (~2400 dòng, gốc do Gemini Canvas tạo). Tailwind CDN, SheetJS xlsx 0.18.5, Firebase **compat 9.22 – Realtime Database** (KHÔNG phải Firestore), không dùng Firebase Auth.
+- Một file duy nhất `index.html` (~2900 dòng, gốc do Gemini Canvas tạo). Tailwind CDN, SheetJS xlsx 0.18.5 (cũ), ExcelJS 4.4.0 (tải khi xuất), Firebase **compat 9.22 – Realtime Database + Auth** (KHÔNG phải Firestore).
 - Dự án Firebase: `taxi-tss-df1a5`, DB `https://taxi-tss-df1a5-default-rtdb.firebaseio.com`.
 - Cấu trúc dữ liệu:
   - `settings/accounts` (mảng {user, pass, role} — mật khẩu dạng chữ thường), `settings/sources`, `settings/staff`, `settings/carTypes`, `settings/payments`, `settings/planPayments` (mảng, ghi đè cả mảng bằng `set`), `settings/lockHour`.
@@ -23,7 +23,7 @@
   - Trường đơn: dateStr (dd/mm/yyyy), timeStr, ticketNumber, originalTicket, plateNumber, carType, source, pickup (T1/T2/T3), destination, totalFare, originalTotalFare, paymentMethod, note, staff, role, createdBy, timestamp.
 - 4 phân vùng: `pos` Bán vé (quầy), `driver` Cổng chủ xe, `plan` Team kế hoạch, `manager` Quản lý.
 
-## Đăng nhập & bảo mật (nhánh `bao-mat-dang-nhap`, từ 07/11/2026)
+## Đăng nhập & bảo mật (lên main 07/11/2026; nhánh thử `bao-mat-dang-nhap`)
 - Firebase Auth Email/Password. Tài khoản app `TSS01` ↔ email nội bộ `tss01@taxi-tss.local` (bản thử: `@test.taxi-tss.local`); đặt lại MK lần n → `tss01.vN@…`. Mật khẩu Firebase = `'tss-pw:' + mật khẩu app` (để MK cũ ngắn như "123" vẫn dùng được).
 - Dữ liệu tài khoản: `login_index/<USER>={ver}` (công khai, để biết email khi đăng nhập), `accounts/<USER>={role,active,uid,ver}` (quản lý đọc), `roles/<uid>={user,role,active}` (quy tắc dựa vào đây).
 - Quản lý tạo/đặt lại MK bằng app Firebase phụ (`createAuthUserFor`) → không bị đăng xuất. Không đổi được MK người khác → tạo phiên bản email mới, giữ tên tài khoản.
@@ -31,7 +31,7 @@
 - Xóa đơn ở Trang Quản Lý: nhập lại MK của chính quản lý (reauthenticate). Nút 🔑 Đổi Mật Khẩu cho mọi tài khoản. Bị khóa khi đang dùng → tự đăng xuất.
 - Môi trường: `FORCE_TEST_ENV` trong index.html (nhánh thử = true, main = false) hoặc hostname có `-git-`/localhost → vùng `test_env/`, nhãn 🧪 BẢN THỬ, có nút "Chép dữ liệu thật vào bản thử" (chỉ đọc dữ liệu thật).
 - Quy tắc: `firebase-rules/quy-tac-buoc-1.json` (chuyển tiếp: đường dẫn thật vẫn công khai, `test_env` khóa chặt) và `quy-tac-buoc-2.json` (khóa chặt cả hai). Sinh bằng script trong lịch sử phiên; giữ hai file đồng bộ khi sửa.
-- Trình tự lên bản chính: bật Email/Password → dán quy tắc bước 1 → thử bản thử → đổi FORCE_TEST_ENV=false, merge main → quản lý thiết lập lần đầu + chuyển đổi tài khoản → dán quy tắc bước 2.
+- Trình tự lên bản chính: bật Email/Password (đã xong) → dán quy tắc bước 1 (đã xong) → thử bản thử (đã xong) → FORCE_TEST_ENV=false, merge main (07/11) → quản lý thiết lập lần đầu + chuyển đổi tài khoản → dán quy tắc bước 2. Kiểm tra lại với người dùng 2 bước cuối đã làm chưa. Trên nhánh thử, link `-git-` vẫn tự vào vùng thử nên giữ FORCE_TEST_ENV=false cũng được.
 - Nhập hàng loạt 20 dòng; tên nhân sự "A + B" → tách đơn chia đều tiền (phiếu `123-1/2`). Chặn trùng (phiếu+biển số+ngày) trong tài khoản. Khóa sửa/xóa sau `lockHour` giờ sáng hôm sau.
 - Đối soát (Quản lý): gom nhóm theo `số phiếu gốc + biển số + ngày`; so bên Quầy/Kế hoạch với bên Tài xế: lệch tiền < 1.000đ và cùng hình thức TT (hoặc thuộc nhóm đối tác/kế hoạch) → Trùng khớp; thiếu 1 bên → Chưa khớp; còn lại → Lệch. Xuất Excel bằng SheetJS (không màu).
 

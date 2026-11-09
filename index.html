@@ -675,6 +675,8 @@
         });
         priceById = {};
         priceItems.forEach(it => { priceById[it.id] = it; });
+        inferCache.clear();
+        if (isManager()) { updateManagerAuditTable(); renderReminderBox(); }
       }).catch(() => {});
     }
     function priceLabelOf(it) {
@@ -702,7 +704,11 @@
       let wantDistrict = null;
       q = q.replace(/\b(?:quan|q)\s*(\d{1,2})\b/g, (m, n) => { wantDistrict = 'quận ' + Number(n); return ' '; });
       q = q.replace(/\b(?:phuong|p|f)\s*(\d{1,2})\b/g, (m, n) => ` phuong ${Number(n)} `);
-      const tokens = q.split(/\s+/).filter(Boolean);
+      // Bỏ chữ chung ("phường", "xã", "quận", "đường"...) nếu không kèm số -> "phường hiệp bình" khớp "P. Hiệp Bình"
+      const STOP = ['phuong', 'p', 'xa', 'quan', 'q', 'huyen', 'tp', 'duong', 'thi', 'tran', 'tt'];
+      const tokens = q.replace(/\bphuong (\d+)\b/g, 'phuong_$1').split(/\s+/).filter(Boolean)
+        .filter(tk => !STOP.includes(tk)).map(tk => tk.startsWith('phuong_') ? tk.slice(7) : tk);
+      if (!tokens.length && !wantDistrict) return [];
       const hits = priceItems.filter(it => {
         if (wantDistrict && removeAccents(it.district) !== removeAccents(wantDistrict)) return false;
         const words = it.search.split(/\s+/);
@@ -713,7 +719,30 @@
     // Áp bảng giá cho Bán vé (quầy) và Team Kế hoạch (kể cả đơn đối tác). Không xét: đơn Chủ xe, đơn Free nội bộ, đơn không có giá bảng.
     const PRICE_ROLES = ['pos', 'plan'];
     function usesPriceList() { return !!(loggedInUser && PRICE_ROLES.includes(loggedInUser.role)); }
-    function discountInfo(t) {
+    // Đơn cũ (nhập trước khi có bảng giá) hoặc gõ tay không chọn gợi ý: suy ra giá bảng từ điểm đến + loại xe.
+    // Khớp 1 khu vực -> giá đó; khớp nhiều khu vực -> lấy GIÁ THẤP NHẤT (không bắt lỗi oan). Không khớp -> không xét.
+    const inferCache = new Map();
+    function inferListPrice(t) {
+      if (!priceItems.length || !t.destination) return null;
+      const key = `${t.destination}|${t.carType}`;
+      if (inferCache.has(key)) return inferCache.get(key);
+      const hits = findPriceMatches(t.destination, 60);
+      let res = null;
+      const priced = hits.map(it => ({ it, p: priceForItem(it, t.carType) })).filter(x => x.p);
+      if (priced.length) {
+        const min = priced.reduce((a, b) => (b.p < a.p ? b : a));
+        const anyNgoai = priced.some(x => x.it.zone === 'ngoai');
+        res = { listPrice: min.p, priceZone: anyNgoai ? 'ngoai' : min.it.zone, priceLabel: priced.length === 1 ? min.it.label : `${min.it.label} (thấp nhất trong ${priced.length} khu vực khớp)`, inferred: true };
+      }
+      inferCache.set(key, res);
+      return res;
+    }
+    function discountInfo(t0) {
+      let t = t0;
+      if (!Number(t.listPrice || 0) && PRICE_ROLES.includes(t.role)) {
+        const inf = inferListPrice(t);
+        if (inf) t = Object.assign({}, t0, inf);
+      }
       const list = Number(t.listPrice || 0);
       if (!list || !PRICE_ROLES.includes(t.role)) return null;
       if (paymentCategory(Object.assign({}, t, { role: 'pos' })) === 'FREE') return null;
@@ -721,12 +750,13 @@
       const zone = t.priceZone === 'ngoai' ? 'ngoai' : 'noi';
       const limit = DISCOUNT_LIMIT[zone];
       const pct = (list - fare) / list;
-      return { list, fare, zone, limit, pct, over: pct > limit + 1e-9 };
+      return { list, fare, zone, limit, pct, over: pct > limit + 1e-9, inferred: !!t.inferred, label: t.priceLabel || '' };
     }
     function discountText(d) {
       if (!d) return '';
-      if (d.pct <= 0) return `Giá bảng ${fmtMoney(d.list)}`;
-      return `Giá bảng ${fmtMoney(d.list)} • giảm ${(d.pct * 100).toFixed(1).replace('.0', '')}%` + (d.over ? ` > ${d.limit * 100}% ${ZONE_LABEL[d.zone]}` : '');
+      const est = d.inferred ? ' (ước tính)' : '';
+      if (d.pct <= 0) return `Giá bảng${est} ${fmtMoney(d.list)}`;
+      return `Giá bảng${est} ${fmtMoney(d.list)} • giảm ${(d.pct * 100).toFixed(1).replace('.0', '')}%` + (d.over ? ` > ${d.limit * 100}% ${ZONE_LABEL[d.zone]}` : '');
     }
 
     // --- Ô nhập hàng loạt: gắn mục bảng giá cho dòng i, tự điền giá theo loại xe ---
@@ -2721,7 +2751,7 @@
     function priceNoteHtml(t) {
       const d = discountInfo(t);
       if (!d) return '';
-      const title = escHtml(t.priceLabel || '');
+      const title = escHtml(d.label || t.priceLabel || '');
       if (d.over) return `<div class="mt-1 px-1.5 py-0.5 bg-rose-600 text-white rounded text-[10px] font-extrabold leading-tight" title="${title}">💸 ${escHtml(discountText(d))}</div>`;
       return `<div class="mt-1 text-[10px] ${d.pct > 0 ? 'text-amber-700' : 'text-slate-400'} leading-tight" title="${title}">${escHtml(discountText(d))}</div>`;
     }
@@ -2870,7 +2900,7 @@
         list.push({ t, d });
       });
       if (!list.length) return `<div class="text-emerald-700 font-bold">💸 Không có đơn giảm giá vượt mức trong ngày này.</div>`;
-      const chips = list.map(({ t, d }) => `<span class="inline-block bg-white border border-rose-300 rounded-lg px-2 py-1 mr-1 mb-1" title="${escHtml(t.priceLabel || '')}"><b>${escHtml(t.createdBy || '')}</b> – phiếu ${escHtml(t.originalTicket || t.ticketNumber)}: <b class="text-rose-700">giảm ${(d.pct * 100).toFixed(1).replace('.0', '')}%</b> <span class="text-slate-500">(${fmtMoney(d.fare)}/${fmtMoney(d.list)})</span></span>`).join('');
+      const chips = list.map(({ t, d }) => `<span class="inline-block bg-white border border-rose-300 rounded-lg px-2 py-1 mr-1 mb-1" title="${escHtml(d.label || '')}"><b>${escHtml(t.createdBy || '')}</b> – phiếu ${escHtml(t.originalTicket || t.ticketNumber)}: <b class="text-rose-700">giảm ${(d.pct * 100).toFixed(1).replace('.0', '')}%</b> <span class="text-slate-500">(${fmtMoney(d.fare)}/${fmtMoney(d.list)})</span></span>`).join('');
       return `<div><div class="font-extrabold text-rose-700 mb-1">💸 Giảm giá vượt mức: ${list.length} đơn <button onclick="showOverDiscount()" class="ml-1 px-2 py-0.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg font-bold">Xem ↓</button></div>${chips}</div>`;
     }
     function showOverDiscount() {
@@ -3243,7 +3273,7 @@
             clean(t.originalTicket || baseTicketOf(t.ticketNumber)), clean(t.plateNumber), clean(t.carType), clean(t.source),
             t.pickup ? 'Ga ' + clean(t.pickup) : '', clean(t.destination), clean(t.paymentMethod), clean(t.note),
             Number(t.totalFare || 0), st, clean(t.createdBy),
-            ...(di => di ? [di.list, Math.round(di.pct * 1000) / 10, di.zone === 'ngoai' ? 'Ngoại thành' : 'Nội thành', di.over ? 'VƯỢT MỨC' : '', clean(t.priceLabel)] : ['', '', '', '', ''])(discountInfo(t))
+            ...(di => di ? [di.list, Math.round(di.pct * 1000) / 10, di.zone === 'ngoai' ? 'Ngoại thành' : 'Nội thành', di.over ? 'VƯỢT MỨC' : '', clean(di.label) + (di.inferred ? ' [ước tính]' : '')] : ['', '', '', '', ''])(discountInfo(t))
           ]);
           if (p) row.getCell(1).numFmt = 'dd/mm/yyyy';
           row.getCell(14).numFmt = '0';

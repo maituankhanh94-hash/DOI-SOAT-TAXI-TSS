@@ -19,6 +19,7 @@ const num = v => { const x = val(v); return typeof x === 'number' ? x : null; };
   let district = '';
   sb.eachRow({ includeEmpty: false }, (r, i) => {
     if (i < 8) return;
+    // Chỉ đọc 7 cột: Điểm đón, Phường mới, Khu vực, Km, Giá 4 / 7 / 16 chỗ. BỎ QUA các cột sau đó (vd "XUẤT SGN – TAXI / DV" của bảng cũ).
     const c = [1, 2, 3, 4, 5, 6, 7].map(k => r.getCell(k).value);
     const a = c.map(txt);
     if (a[0] && a.slice(1).every(x => x === a[0] || x === '')) { district = a[0].replace(/\s*\(.*\)\s*$/, '').trim(); return; }

@@ -53,6 +53,9 @@
 ## Đếm số đơn theo bill (07/11)
 - Đơn chia tiền nhiều nhân sự (A + B → "123-1/2", "123-2/2") vẫn lưu nhiều dòng nhưng ĐẾM là 1 đơn: `billKey` (phía + phiếu gốc + biển số chuẩn hóa + dateKey), `countBills`, `billCountText` → "3 đơn (4 dòng chia tiền)". Dùng ở tổng ngày/tháng/ảnh báo cáo của nhân viên, doanh thu ngày của quản lý, Excel. Số phiếu hiển thị đúng "123-1/2". Excel không còn ký hiệu ₫.
 
+## Excel cho MISA (09/11)
+- Kế toán báo copy từ file Excel sang MISA nạp hàng loạt không nhận (do ô gộp, dòng tiêu đề ngày/tổng chen giữa, ngày dạng chữ). Đã thêm trang thứ 3 "Dữ Liệu MISA" (`buildFlatSheet`): phẳng, 1 dòng tiêu đề, không gộp ô, ngày kiểu Date (tạo bằng Date.UTC để không lệch ngày), tiền số thuần. Đang chờ người dùng gửi file mẫu MISA để khớp đúng cột.
+
 ## Lỗi/rủi ro đã phát hiện (06/11/2026) — 3–9 ĐÃ SỬA ở nhánh `cai-tien-doi-soat` (08/11)
 1. ĐÃ SỬA 07/11: quy tắc RTDB thật trước đây `.read/.write: true`; nay là quy-tac-buoc-2 + Firebase Auth. Còn tồn: dữ liệu thử `test_env/` và tài khoản Auth `@test.taxi-tss.local`. Số liệu 07/11: lưu 1,61 MB, tải về 121 MB/6 ngày, kết nối đỉnh 33/100 (gói Spark). DB thật còn 2 nhánh cũ không dùng: `deleted_trips`, `drivers`.
 2. ĐÃ SỬA: màn hình & Excel dùng chung `computeAuditGroups`/`getAuditStatus`; Excel ExcelJS có màu/kẻ ô/nhóm ngày/tổng/ký tên + sheet Tổng Hợp; ngày gõ thiếu dấu tự sửa, ngày sai bị chặn.

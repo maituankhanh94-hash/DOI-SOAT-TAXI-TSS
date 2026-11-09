@@ -1893,13 +1893,13 @@
                     <th class="p-3">Nhân Sự</th>
                     <th class="p-3">Số Phiếu</th>
                     <th class="p-3">Biển Số</th>
+                    <th class="p-3 text-center">Trạng Thái</th>
                     <th class="p-3">Loại Xe</th>
                     <th class="p-3">Nguồn Đơn</th>
                     <th class="p-3">Điểm Đến</th>
                     <th class="p-3">Thanh Toán</th>
                     <th class="p-3">Ghi Chú</th>
                     <th class="p-3 text-right">Tổng Tiền</th>
-                    <th class="p-3 text-center">Trạng Thái</th>
                     <th class="p-3 text-center">Xóa</th>
                   </tr>
                 </thead>
@@ -2723,6 +2723,7 @@
               <td class="p-2.5 font-extrabold text-slate-800">${escHtml(t.staff || 'N/A')}</td>
               <td class="p-2.5"><input type="text" value="${escHtml(t.ticketNumber || '')}" class="inline-edit-input w-24 text-blue-600" onblur="updateInlineTripField('${t.id}', 'ticketNumber', this.value)"></td>
               <td class="p-2.5"><input type="text" value="${escHtml(t.plateNumber || '')}" class="inline-edit-input w-28 uppercase" onblur="updateInlineTripField('${t.id}', 'plateNumber', this.value)"></td>
+              ${auditCell}
               <td class="p-2.5">
                 <select class="inline-edit-input w-28" onchange="updateInlineTripField('${t.id}', 'carType', this.value)">
                   ${carTypeOptions.map(ct => `<option value="${escHtml(ct)}" ${escHtml(t.carType === ct ? 'selected' : '')}>${escHtml(ct)}</option>`).join('')}
@@ -2741,7 +2742,6 @@
               </td>
               <td class="p-2.5"><input type="text" value="${escHtml(t.note || '')}" class="inline-edit-input w-32" onblur="updateInlineTripField('${t.id}', 'note', this.value)"></td>
               <td class="p-2.5 text-right"><input type="text" value="${Number(t.totalFare || 0).toLocaleString('vi-VN')}" class="inline-edit-input w-28 text-right font-extrabold text-emerald-700" onblur="updateInlineTripField('${t.id}', 'totalFare', this.value)"></td>
-              ${auditCell}
               <td class="p-2.5 text-center align-middle">${deleteBtn}</td>
             </tr>
           `;

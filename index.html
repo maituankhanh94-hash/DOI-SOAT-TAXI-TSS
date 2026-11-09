@@ -189,6 +189,7 @@
       document.getElementById('btn-change-pass').classList.remove('hidden');
       await loadCloudSettings();
       loadPlaces();
+      loadPriceList();
       if (r.role === 'manager') startManagerSession();
       else startWorkerSession(r.role);
     }
@@ -627,7 +628,13 @@
     }
     function pickSuggest(el) {
       const inp = document.getElementById(el.dataset.target);
-      if (inp) { inp.value = el.dataset.v; inp.dispatchEvent(new Event('change')); }
+      if (inp) {
+        inp.value = el.dataset.v;
+        if (el.dataset.pid !== undefined) attachPriceToInput(inp, el.dataset.pid ? priceById[el.dataset.pid] : null);
+        inp.dispatchEvent(new Event('change'));
+        if (el.dataset.row !== undefined && el.dataset.row !== '') applyRowPrice(Number(el.dataset.row));
+        if (inp.id === 'edit-modal-dest') applyEditModalPrice();
+      }
       const drop = document.getElementById(el.dataset.drop);
       if (drop) drop.innerHTML = '';
     }
@@ -650,6 +657,173 @@
       }
     }
     function hideSuggestLater(dropId) { setTimeout(() => { const d = document.getElementById(dropId); if (d) d.innerHTML = ''; }, 150); }
+
+    // ===== BẢNG GIÁ CÔNG TY: tự nhảy giá khi Bán vé chọn điểm đến + kiểm tra mức giảm =====
+    // Dữ liệu: file bang-gia.json (tạo từ Excel bằng bang-gia/tao-bang-gia.js). Nội thành (trang DON SB) / ngoại thành (trang TOUR đi tỉnh).
+    const DISCOUNT_LIMIT = { noi: 0.10, ngoai: 0.15 };   // giảm tối đa 10% nội thành, 15% ngoại thành
+    const ZONE_LABEL = { noi: 'nội thành', ngoai: 'ngoại thành' };
+    let priceItems = [], priceById = {};
+    function loadPriceList() {
+      return fetch('bang-gia.json', { cache: 'no-cache' }).then(r => r.ok ? r.json() : null).then(d => {
+        if (!d || !Array.isArray(d.items)) return;
+        priceItems = d.items.map(it => {
+          const extra = [];
+          const m = /^Quận\s+(\d+)$/i.exec(it.district || '');
+          if (m) extra.push(`q${m[1]}`, `q ${m[1]}`, `quan ${m[1]}`);
+          if (it.kind === 'tinh') extra.push('tinh', 'di tinh');
+          return Object.assign({}, it, { label: priceLabelOf(it), search: removeAccents([it.district, it.ward, it.area, ...extra].join(' ')).replace(/[.,;()]/g, ' ') });
+        });
+        priceById = {};
+        priceItems.forEach(it => { priceById[it.id] = it; });
+      }).catch(() => {});
+    }
+    function priceLabelOf(it) {
+      if (it.kind === 'citytour') return it.area;
+      if (it.kind === 'tinh') return `${it.ward} (${it.district}) – ${it.area}`;
+      const parts = [];
+      if (it.area && it.area !== it.ward) parts.push(it.area.replace(/\.$/, ''));
+      if (it.ward) parts.push(it.ward);
+      parts.push(it.district);
+      return parts.join(' – ');
+    }
+    function seatsOf(carType) { const m = /(\d+)\s*chỗ/i.exec(carType || ''); return m ? Number(m[1]) : null; }
+    function priceForItem(it, carType) {
+      if (!it) return null;
+      const s = seatsOf(carType);
+      const v = s === 4 ? it.p4 : s === 7 ? it.p7 : s === 16 ? it.p16 : null;
+      return typeof v === 'number' && v > 0 ? v : null;
+    }
+    function fmtMoney(n) { return Number(n || 0).toLocaleString('vi-VN'); }
+    // Tìm mục bảng giá theo chữ gõ: so từng từ (số phải khớp nguyên số: "10" không khớp "100");
+    // "quận 10" / "q10" thì chỉ lấy đúng Quận 10.
+    function findPriceMatches(text, limit) {
+      let q = removeAccents(String(text || '').trim()).replace(/[.,;()\-–]/g, ' ');
+      if (q.replace(/\s/g, '').length < 2) return [];
+      let wantDistrict = null;
+      q = q.replace(/\b(?:quan|q)\s*(\d{1,2})\b/g, (m, n) => { wantDistrict = 'quận ' + Number(n); return ' '; });
+      q = q.replace(/\b(?:phuong|p|f)\s*(\d{1,2})\b/g, (m, n) => ` phuong ${Number(n)} `);
+      const tokens = q.split(/\s+/).filter(Boolean);
+      const hits = priceItems.filter(it => {
+        if (wantDistrict && removeAccents(it.district) !== removeAccents(wantDistrict)) return false;
+        const words = it.search.split(/\s+/);
+        return tokens.every(tk => /^\d+$/.test(tk) ? words.includes(tk) : words.some(w => w.startsWith(tk)));
+      });
+      return hits.slice(0, limit || 6);
+    }
+    // Áp bảng giá cho Bán vé (quầy) và Team Kế hoạch (kể cả đơn đối tác). Không xét: đơn Chủ xe, đơn Free nội bộ, đơn không có giá bảng.
+    const PRICE_ROLES = ['pos', 'plan'];
+    function usesPriceList() { return !!(loggedInUser && PRICE_ROLES.includes(loggedInUser.role)); }
+    function discountInfo(t) {
+      const list = Number(t.listPrice || 0);
+      if (!list || !PRICE_ROLES.includes(t.role)) return null;
+      if (paymentCategory(Object.assign({}, t, { role: 'pos' })) === 'FREE') return null;
+      const fare = Number(t.originalTotalFare != null ? t.originalTotalFare : t.totalFare) || 0;
+      const zone = t.priceZone === 'ngoai' ? 'ngoai' : 'noi';
+      const limit = DISCOUNT_LIMIT[zone];
+      const pct = (list - fare) / list;
+      return { list, fare, zone, limit, pct, over: pct > limit + 1e-9 };
+    }
+    function discountText(d) {
+      if (!d) return '';
+      if (d.pct <= 0) return `Giá bảng ${fmtMoney(d.list)}`;
+      return `Giá bảng ${fmtMoney(d.list)} • giảm ${(d.pct * 100).toFixed(1).replace('.0', '')}%` + (d.over ? ` > ${d.limit * 100}% ${ZONE_LABEL[d.zone]}` : '');
+    }
+
+    // --- Ô nhập hàng loạt: gắn mục bảng giá cho dòng i, tự điền giá theo loại xe ---
+    function rowPriceItem(i) {
+      const d = document.getElementById(`d-${i}`);
+      if (!d) return null;
+      if (d.dataset.priceId && ((d.dataset.priceLabel && !d.value.includes(d.dataset.priceLabel)) || (d.dataset.priceAuto && d.value !== d.dataset.priceAuto))) {
+        delete d.dataset.priceId; delete d.dataset.priceLabel; delete d.dataset.priceAuto;
+      }
+      return d.dataset.priceId ? priceById[d.dataset.priceId] || null : null;
+    }
+    function applyRowPrice(i) {
+      if (!usesPriceList()) return;
+      const it = rowPriceItem(i);
+      const f = document.getElementById(`f-${i}`);
+      const c = document.getElementById(`c-${i}`);
+      if (it && f && c) {
+        const p = priceForItem(it, c.value);
+        if (p && (!f.value.trim() || f.dataset.auto === '1')) { f.value = fmtMoney(p); f.dataset.auto = '1'; }
+      }
+      updateRowPriceHint(i);
+    }
+    function updateRowPriceHint(i) {
+      const h = document.getElementById(`fh-${i}`);
+      if (!h) return;
+      if (!usesPriceList()) { h.innerHTML = ''; return; }
+      const it = rowPriceItem(i);
+      const c = document.getElementById(`c-${i}`), f = document.getElementById(`f-${i}`), m = document.getElementById(`m-${i}`);
+      if (!it) { h.innerHTML = ''; return; }
+      const list = priceForItem(it, c ? c.value : '');
+      if (!list) { h.innerHTML = `<span class="text-amber-700">Bảng giá chưa có giá cho ${escHtml(c ? c.value : '')}</span>`; return; }
+      const fare = parseFloat((f ? f.value : '').replace(/[^0-9]/g, '')) || 0;
+      const d = discountInfo({ role: loggedInUser.role, listPrice: list, totalFare: fare, priceZone: it.zone, paymentMethod: m ? m.value : '' });
+      if (!d) { h.innerHTML = `<span class="text-slate-500">Giá bảng ${fmtMoney(list)}</span>`; return; }
+      h.innerHTML = d.over
+        ? `<span class="text-rose-600 font-extrabold">⚠️ ${escHtml(discountText(d))} — vượt mức, Quản lý sẽ thấy</span>`
+        : `<span class="${d.pct > 0 ? 'text-amber-700' : 'text-emerald-700'} font-bold">${escHtml(discountText(d))}</span>`;
+    }
+    // Gõ tay (không bấm chọn gợi ý) mà chỉ khớp đúng 1 mục bảng giá -> tự gắn
+    function autoMatchRowPrice(i) {
+      if (!usesPriceList()) return;
+      const d = document.getElementById(`d-${i}`);
+      if (!d || !d.value.trim() || rowPriceItem(i)) { updateRowPriceHint(i); return; }
+      const hits = findPriceMatches(d.value, 2);
+      if (hits.length === 1) { attachPriceToInput(d, hits[0]); d.dataset.priceLabel = ''; d.dataset.priceAuto = d.value; }
+      applyRowPrice(i);
+    }
+    // Ô sửa đơn (nhân viên Bán vé): hiện giá bảng và mức giảm
+    function applyEditModalPrice() {
+      const h = document.getElementById('edit-modal-price-hint');
+      const d = document.getElementById('edit-modal-dest');
+      if (!h || !d) return;
+      if (d.dataset.priceId && d.dataset.priceLabel && !d.value.includes(d.dataset.priceLabel)) attachPriceToInput(d, null);
+      const it = d.dataset.priceId ? priceById[d.dataset.priceId] : null;
+      const car = (document.getElementById('edit-modal-cartype') || {}).value || '';
+      const list = it ? priceForItem(it, car) : null;
+      if (!list) { h.innerHTML = it ? `<span class="text-amber-700">Bảng giá chưa có giá cho ${escHtml(car)}</span>` : ''; return; }
+      const fare = editModalFullFare();
+      const di = discountInfo({ role: loggedInUser ? loggedInUser.role : 'pos', listPrice: list, totalFare: fare, priceZone: it.zone, paymentMethod: (document.getElementById('edit-modal-payment') || {}).value });
+      h.innerHTML = !di ? `<span class="text-slate-500">Giá bảng ${fmtMoney(list)}</span>` : (di.over ? `<span class="text-rose-600 font-extrabold">⚠️ ${escHtml(discountText(di))} — vượt mức, Quản lý sẽ thấy</span>` : `<span class="text-emerald-700 font-bold">${escHtml(discountText(di))}</span>`);
+    }
+    // Đơn chia tiền (vd "-1/2"): so giá bảng với tổng tiền cả đơn
+    function splitCountOf(ticket) { const m = /-(\d+)\/(\d+)$/.exec(String(ticket || '')); return m ? Number(m[2]) : 1; }
+    function editModalFullFare() {
+      const f = parseFloat(((document.getElementById('edit-modal-fare') || {}).value || '').replace(/[^0-9]/g, '')) || 0;
+      return f * splitCountOf((document.getElementById('edit-modal-ticket') || {}).value);
+    }
+
+    function onRowFareInput(i) { const f = document.getElementById(`f-${i}`); if (f) f.dataset.auto = '0'; }
+
+    // Gợi ý điểm đến: Bán vé thấy mục BẢNG GIÁ (📋, có giá) trước, sau đó là địa chỉ hay đi (📍)
+    function showDestSuggestions(input, dropId, rowIdx) {
+      const drop = document.getElementById(dropId);
+      if (!drop) return;
+      if (rowIdx != null) { rowPriceItem(rowIdx); updateRowPriceHint(rowIdx); }
+      const priceHits = usesPriceList() ? findPriceMatches(input.value, 6) : [];
+      if (!priceHits.length) { showPlaceSuggestions(input, dropId); return; }
+      const carSel = rowIdx != null ? document.getElementById(`c-${rowIdx}`) : document.getElementById('edit-modal-cartype');
+      const car = carSel ? carSel.value : '';
+      const raw = input.value.trim();
+      const q = removeAccents(raw);
+      const tokens = q.split(/[\s,]+/).filter(Boolean);
+      const places = q.length < 2 ? [] : placeCandidates().filter(p => tokens.every(tk => removeAccents(p.name).includes(tk)))
+        .sort((a, b) => b.n - a.n).slice(0, 4).map(p => p.name).filter(n => n !== raw);
+      const items = [
+        ...priceHits.map(it => ({ v: it.label, pid: it.id, html: `📋 ${escHtml(it.label)} <span class="text-emerald-700 font-extrabold">${priceForItem(it, car) ? fmtMoney(priceForItem(it, car)) : '(chưa có giá xe này)'}</span>` })),
+        ...places.map(n => ({ v: n, pid: '', html: `📍 ${escHtml(n)}` }))
+      ];
+      drop.innerHTML = `<div class="local-dropdown" style="max-height:260px">${items.map((x, k) => `
+        <div class="local-item${k === 0 ? ' bg-blue-50' : ''}" data-target="${escHtml(input.id)}" data-drop="${escHtml(dropId)}" data-v="${escHtml(x.v)}" data-pid="${escHtml(x.pid)}" data-row="${rowIdx == null ? '' : rowIdx}" onmousedown="event.preventDefault(); pickSuggest(this)">${x.html}</div>
+      `).join('')}</div>`;
+    }
+    function attachPriceToInput(inp, it) {
+      if (!inp) return;
+      if (it) { inp.dataset.priceId = it.id; inp.dataset.priceLabel = it.label; }
+      else { delete inp.dataset.priceId; delete inp.dataset.priceLabel; }
+    }
 
     function showStaffSuggestions(input, dropId) {
       const q = removeAccents(input.value.trim());
@@ -937,7 +1111,7 @@
             <td class="p-2.5"><input type="text" id="t-${i}" autocomplete="off" placeholder="Phiếu..." class="w-full p-2 bg-slate-50 border rounded-xl font-mono font-bold text-xs" onfocus="handleSmartTicketFocus(${i})"></td>
             <td class="p-2.5"><input type="text" id="p-${i}" autocomplete="off" placeholder="51H-..." class="w-full p-2 bg-slate-50 border rounded-xl font-mono font-bold uppercase text-xs"></td>
             <td class="p-2.5">
-              <select id="c-${i}" class="w-full p-2 bg-slate-50 border rounded-xl font-bold text-xs">
+              <select id="c-${i}" class="w-full p-2 bg-slate-50 border rounded-xl font-bold text-xs" onchange="applyRowPrice(${i})">
                 ${carTypeOptions.map(ct => `<option value="${escHtml(ct)}" ${ct === defaultCarType ? 'selected' : ''}>${escHtml(ct)}</option>`).join('')}
               </select>
             </td>
@@ -952,12 +1126,12 @@
               </select>
             </td>
             <td class="p-2.5 relative">
-              <input type="text" id="d-${i}" autocomplete="off" placeholder="Gõ điểm đến (vd: đề thám)..." class="w-full p-2 bg-amber-50 border border-amber-300 rounded-xl font-semibold text-xs" oninput="showPlaceSuggestions(this, 'dest-drop-${i}')" onkeydown="suggestKeydown(event, 'dest-drop-${i}')" onblur="hideSuggestLater('dest-drop-${i}')">
+              <input type="text" id="d-${i}" autocomplete="off" placeholder="Gõ điểm đến (vd: đề thám)..." class="w-full p-2 bg-amber-50 border border-amber-300 rounded-xl font-semibold text-xs" oninput="showDestSuggestions(this, 'dest-drop-${i}', ${i})" onkeydown="suggestKeydown(event, 'dest-drop-${i}')" onblur="hideSuggestLater('dest-drop-${i}'); autoMatchRowPrice(${i})">
               <div id="dest-drop-${i}"></div>
             </td>
-            <td class="p-2.5"><input type="text" id="f-${i}" autocomplete="off" placeholder="Số tiền..." onblur="formatCurrSmartInput(this)" class="w-full p-2 bg-emerald-50 border border-emerald-300 rounded-xl font-extrabold text-emerald-800 text-right text-xs"></td>
+            <td class="p-2.5"><input type="text" id="f-${i}" autocomplete="off" placeholder="Số tiền..." oninput="onRowFareInput(${i})" onblur="formatCurrSmartInput(this); updateRowPriceHint(${i})" class="w-full p-2 bg-emerald-50 border border-emerald-300 rounded-xl font-extrabold text-emerald-800 text-right text-xs"><div id="fh-${i}" class="text-[10px] leading-tight mt-0.5 text-right"></div></td>
             <td class="p-2.5">
-              <select id="m-${i}" class="w-full p-2 bg-slate-50 border rounded-xl font-bold text-xs">
+              <select id="m-${i}" class="w-full p-2 bg-slate-50 border rounded-xl font-bold text-xs" onchange="updateRowPriceHint(${i})">
                 ${activePayments.map(opt => `<option value="${escHtml(opt)}">${escHtml(opt)}</option>`).join('')}
               </select>
             </td>
@@ -1406,7 +1580,7 @@
                 </div>
                 <div>
                   <label class="font-bold text-slate-600">Loại Xe:</label>
-                  <select id="edit-modal-cartype" class="w-full mt-1 p-2.5 bg-slate-50 border rounded-xl font-bold">
+                  <select id="edit-modal-cartype" class="w-full mt-1 p-2.5 bg-slate-50 border rounded-xl font-bold" onchange="applyEditModalPrice()">
                     ${carTypeOptions.map(ct => `<option value="${escHtml(ct)}" ${escHtml(trip.carType === ct ? 'selected' : '')}>${escHtml(ct)}</option>`).join('')}
                   </select>
                 </div>
@@ -1428,18 +1602,18 @@
               <div>
                 <label class="font-bold text-slate-600">Điểm Đến:</label>
                 <div class="relative">
-                  <input type="text" id="edit-modal-dest" autocomplete="off" value="${escHtml(trip.destination || '')}" class="w-full mt-1 p-2.5 bg-slate-50 border rounded-xl font-bold" oninput="showPlaceSuggestions(this, 'edit-dest-drop')" onkeydown="suggestKeydown(event, 'edit-dest-drop')" onblur="hideSuggestLater('edit-dest-drop')">
+                  <input type="text" id="edit-modal-dest" autocomplete="off" value="${escHtml(trip.destination || '')}" data-price-id="${escHtml(trip.priceId || '')}" data-price-label="${escHtml(trip.priceId && priceById[trip.priceId] ? priceById[trip.priceId].label : '')}" class="w-full mt-1 p-2.5 bg-slate-50 border rounded-xl font-bold" oninput="showDestSuggestions(this, 'edit-dest-drop', null); applyEditModalPrice()" onkeydown="suggestKeydown(event, 'edit-dest-drop')" onblur="hideSuggestLater('edit-dest-drop')">
                   <div id="edit-dest-drop"></div>
                 </div>
               </div>
               <div class="grid grid-cols-2 gap-2">
                 <div>
                   <label class="font-bold text-slate-600">Tổng Tiền:</label>
-                  <input type="text" id="edit-modal-fare" value="${Number(trip.totalFare || 0).toLocaleString('vi-VN')}" onblur="formatCurrSmartInput(this)" class="w-full mt-1 p-2.5 bg-emerald-50 border border-emerald-300 rounded-xl font-extrabold text-emerald-800 text-right">
+                  <input type="text" id="edit-modal-fare" value="${Number(trip.totalFare || 0).toLocaleString('vi-VN')}" onblur="formatCurrSmartInput(this); applyEditModalPrice()" class="w-full mt-1 p-2.5 bg-emerald-50 border border-emerald-300 rounded-xl font-extrabold text-emerald-800 text-right"><div id="edit-modal-price-hint" class="text-[10px] mt-1 text-right"></div>
                 </div>
                 <div>
                   <label class="font-bold text-slate-600">Thanh Toán:</label>
-                  <select id="edit-modal-payment" class="w-full mt-1 p-2.5 bg-slate-50 border rounded-xl font-bold">
+                  <select id="edit-modal-payment" class="w-full mt-1 p-2.5 bg-slate-50 border rounded-xl font-bold" onchange="applyEditModalPrice()">
                     ${activePayments.map(opt => `<option value="${escHtml(opt)}" ${(trip.paymentMethod || activePayments[0]) === opt ? 'selected' : ''}>${escHtml(opt)}</option>`).join('')}
                   </select>
                 </div>
@@ -1458,6 +1632,7 @@
         </div>
       `;
       document.body.insertAdjacentHTML('beforeend', modalHtml);
+      applyEditModalPrice();
     }
 
     function saveEditedTrip(id, role) {
@@ -1495,6 +1670,16 @@
       trip.totalFare = totalFare;
       trip.paymentMethod = paymentMethod;
       trip.note = note;
+      // Giá bảng theo điểm đến + loại xe hiện tại (Bán vé / Kế hoạch)
+      if (usesPriceList()) {
+        const dEl = document.getElementById('edit-modal-dest');
+        const it = dEl && dEl.dataset.priceId ? priceById[dEl.dataset.priceId] : null;
+        const list = priceForItem(it, carType);
+        if (it && list) Object.assign(trip, { priceId: it.id, priceLabel: it.label, listPrice: list, priceZone: it.zone });
+        else { delete trip.priceId; delete trip.priceLabel; delete trip.listPrice; delete trip.priceZone; }
+        const n = splitCountOf(ticket);
+        if (n > 1 && trip.originalTotalFare != null) trip.originalTotalFare = totalFare * n;
+      }
 
       let updates = {};
       updates[`users_trips/${loggedInUser.user}/${id}`] = trip;
@@ -1649,6 +1834,7 @@
       // Mảng lưu trữ các đơn chuẩn bị đưa lên để check trùng ngay trong nội bộ lô nhập hàng loạt này
       let batchEntriesToCheck = [];
       let invalidDateRows = [];
+      let overDiscountRows = [];
 
       for (let i = 0; i < 20; i++) {
         let rawDate = document.getElementById(`date-${i}`).value.trim();
@@ -1669,6 +1855,18 @@
         if (rawStaff && ticket && plate && dest && !isValidDateStr(formattedDate)) {
           invalidDateRows.push(`Dòng ${i+1} ("${rawDate}")`);
           continue;
+        }
+
+        // Bảng giá (Bán vé + Kế hoạch): lưu giá bảng theo điểm đến + loại xe. Giảm quá mức VẪN CHO LƯU, Quản lý lọc ra xem.
+        let priceFields = {};
+        if (rawStaff && ticket && plate && dest && usesPriceList()) {
+          const it = rowPriceItem(i);
+          const list = priceForItem(it, carType);
+          if (it && list) {
+            priceFields = { priceId: it.id, priceLabel: it.label, listPrice: list, priceZone: it.zone };
+            const di = discountInfo({ role: loggedInUser.role, listPrice: list, totalFare, priceZone: it.zone, paymentMethod: pay, source });
+            if (di && di.over) overDiscountRows.push(`Dòng ${i+1}: ${discountText(di)}`);
+          }
         }
 
         if (rawStaff && ticket && plate && dest) {
@@ -1713,6 +1911,7 @@
               note: note, staff: staffName, role: loggedInUser.role, createdBy: loggedInUser.user, timestamp: baseTimestamp + sIdx,
               dateKey: tripDateKey({ dateStr: formattedDate })
             };
+            Object.assign(tripData, priceFields);
 
             updates[`users_trips/${loggedInUser.user}/${subId}`] = tripData;
             updates[`trips/${subId}`] = tripData;
@@ -1732,7 +1931,7 @@
       if (count > 0) {
         dbRoot().update(updates).then(() => {
           recordPlaces(savedDests);
-          alert(`Đã lưu thành công và phân tách hoa hồng cho ${count} đơn!`);
+          alert(`Đã lưu thành công và phân tách hoa hồng cho ${count} đơn!` + (overDiscountRows.length ? `\n\n⚠️ Có ${overDiscountRows.length} đơn GIẢM GIÁ VƯỢT MỨC cho phép (10% nội thành, 15% ngoại thành) — Quản lý sẽ kiểm tra:\n${overDiscountRows.join('\n')}` : ''));
           renderBatchRows(role);
           const histInput = document.getElementById('filter-history-date');
           if (histInput && lastFormattedDate) {
@@ -1925,6 +2124,7 @@
                   <option value="unmatched">⏳ Đơn Chưa Khớp (Thiếu 1 bên)</option>
                   <option value="match">🟢 Trùng Khớp</option>
                   <option value="mismatch">🔴 Đơn Lệch</option>
+                  <option value="overdiscount">💸 Giảm Giá Quá Mức</option>
                   <option value="overdue">⏰ Quá Hạn Chưa Báo Cáo (cả 2 bên)</option>
                   <option value="overdue_driver">⏰ Tài Xế Chưa Báo Cáo</option>
                   <option value="overdue_pos">⏰ Bán Vé / Kế Hoạch Chưa Báo Cáo</option>
@@ -2494,7 +2694,9 @@
         const dateKey = tripDateKey(trips[0]);
         const det = auditDetail(trips, status, dateKey);
         const sf = f.matchStatusFilter;
-        if (sf.startsWith('overdue')) {
+        if (sf === 'overdiscount') {
+          if (!trips.some(t => { const d = discountInfo(t); return d && d.over; })) return;
+        } else if (sf.startsWith('overdue')) {
           if (!det.overdue) return;
           if (sf === 'overdue_driver' && det.missing !== 'driver') return;
           if (sf === 'overdue_pos' && det.missing !== 'pos') return;
@@ -2506,12 +2708,22 @@
           else if (kw === 'lệch' || kw === 'đơn lệch') pass = status === 'mismatch';
           else if (kw === 'chưa khớp' || kw === 'đơn lẻ' || kw === 'thiếu') pass = status === 'unmatched';
           else if (kw === 'chưa báo' || kw === 'quá hạn') pass = det.overdue;
+          else if (kw === 'giảm giá' || kw === 'vượt mức') pass = trips.some(t => { const d = discountInfo(t); return d && d.over; });
           else pass = trips.some(t => `${t.dateStr} ${t.timeStr} ${t.role} ${t.staff} ${t.ticketNumber} ${t.plateNumber} ${t.carType || ''} ${t.source || ''} ${t.destination} ${t.paymentMethod || defaultPay} ${t.note || ''} ${t.totalFare}`.toLowerCase().includes(kw));
           if (!pass) return;
         }
         groups.push({ trips, status, dateKey, missing: det.missing, overdue: det.overdue, ts: Math.min(...trips.map(t => t.timestamp || 0)) });
       });
       return groups;
+    }
+
+    // Ghi chú dưới ô Tổng Tiền: giá bảng & mức giảm (đỏ nếu vượt mức)
+    function priceNoteHtml(t) {
+      const d = discountInfo(t);
+      if (!d) return '';
+      const title = escHtml(t.priceLabel || '');
+      if (d.over) return `<div class="mt-1 px-1.5 py-0.5 bg-rose-600 text-white rounded text-[10px] font-extrabold leading-tight" title="${title}">💸 ${escHtml(discountText(d))}</div>`;
+      return `<div class="mt-1 text-[10px] ${d.pct > 0 ? 'text-amber-700' : 'text-slate-400'} leading-tight" title="${title}">${escHtml(discountText(d))}</div>`;
     }
 
     function updateManagerAuditTable() {
@@ -2595,7 +2807,7 @@
                 </select>
               </td>
               <td class="p-2.5"><input type="text" value="${escHtml(t.note || '')}" class="inline-edit-input w-32" onblur="updateInlineTripField('${t.id}', 'note', this.value)"></td>
-              <td class="p-2.5 text-right"><input type="text" value="${Number(t.totalFare || 0).toLocaleString('vi-VN')}" class="inline-edit-input w-28 text-right font-extrabold text-emerald-700" onblur="updateInlineTripField('${t.id}', 'totalFare', this.value)"></td>
+              <td class="p-2.5 text-right"><input type="text" value="${Number(t.totalFare || 0).toLocaleString('vi-VN')}" class="inline-edit-input w-28 text-right font-extrabold text-emerald-700" onblur="updateInlineTripField('${t.id}', 'totalFare', this.value)">${priceNoteHtml(t)}</td>
               <td class="p-2.5 text-center align-middle">${deleteBtn}</td>
             </tr>
           `;
@@ -2642,7 +2854,34 @@
           ${ok ? `<div class="font-bold text-emerald-700">✅ Tất cả đơn ngày này đã đủ 2 bên báo cáo.</div>` : `
           <div><div class="font-extrabold text-amber-800 mb-1">🚗 Tài xế chưa báo: ${Object.keys(byPlate).length} xe (${drv.length} phiếu)</div>${plateChips || '<span class="text-emerald-700 font-bold">Không có</span>'}</div>
           <div><div class="font-extrabold text-blue-800 mb-1">🚖 Bán vé / Kế hoạch chưa nhập: ${pos.length} phiếu</div>${posChips || '<span class="text-emerald-700 font-bold">Không có</span>'}</div>`}
+          ${overDiscountHtml(day)}
         </div>`;
+    }
+    // Đơn giảm giá vượt mức trong ngày (theo từng bill, đơn chia tiền tính 1)
+    function overDiscountHtml(day) {
+      const seen = new Set(), list = [];
+      allCompanyTrips.forEach(t => {
+        if (tripDateKey(t) !== day) return;
+        const d = discountInfo(t);
+        if (!d || !d.over) return;
+        const k = billKey(t);
+        if (seen.has(k)) return;
+        seen.add(k);
+        list.push({ t, d });
+      });
+      if (!list.length) return `<div class="text-emerald-700 font-bold">💸 Không có đơn giảm giá vượt mức trong ngày này.</div>`;
+      const chips = list.map(({ t, d }) => `<span class="inline-block bg-white border border-rose-300 rounded-lg px-2 py-1 mr-1 mb-1" title="${escHtml(t.priceLabel || '')}"><b>${escHtml(t.createdBy || '')}</b> – phiếu ${escHtml(t.originalTicket || t.ticketNumber)}: <b class="text-rose-700">giảm ${(d.pct * 100).toFixed(1).replace('.0', '')}%</b> <span class="text-slate-500">(${fmtMoney(d.fare)}/${fmtMoney(d.list)})</span></span>`).join('');
+      return `<div><div class="font-extrabold text-rose-700 mb-1">💸 Giảm giá vượt mức: ${list.length} đơn <button onclick="showOverDiscount()" class="ml-1 px-2 py-0.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg font-bold">Xem ↓</button></div>${chips}</div>`;
+    }
+    function showOverDiscount() {
+      const s = document.getElementById('audit-start-date'), e = document.getElementById('audit-end-date');
+      if (s) s.value = remindDateKey;
+      if (e) e.value = remindDateKey;
+      const st = document.getElementById('audit-match-status-filter');
+      if (st) st.value = 'overdiscount';
+      const kw = document.getElementById('audit-search-input');
+      if (kw) kw.value = '';
+      updateManagerAuditTable();
     }
     function showReminderDetail() {
       const s = document.getElementById('audit-start-date'), e = document.getElementById('audit-end-date');
@@ -2919,7 +3158,8 @@
           g.trips.forEach(t => {
             const role = XL.role[t.role] || { label: t.role || '', color: 'FF334155' };
             const vals = [stt, normalizeDateInput(t.dateStr) || '',t.timeStr || '', role.label, t.staff || '', t.ticketNumber || '', t.plateNumber || '',
-              t.carType || '', t.source || '', t.pickup ? 'Ga ' + t.pickup : '', t.destination || '', t.paymentMethod || '(Chưa ghi)', t.note || '',
+              t.carType || '', t.source || '', t.pickup ? 'Ga ' + t.pickup : '', t.destination || '', t.paymentMethod || '(Chưa ghi)',
+              [t.note || '', (di => di && di.over ? `💸 ${discountText(di)}` : '')(discountInfo(t))].filter(Boolean).join(' | '),
               Number(t.totalFare || 0), auditStatusText(g)];
             const row = ws.getRow(r);
             vals.forEach((v, i) => {
@@ -2984,7 +3224,8 @@
       const cols = [
         ['Ngày', 12], ['Giờ nộp', 9], ['Phân vùng', 15], ['Nhân sự', 22], ['Số phiếu', 13], ['Số phiếu gốc', 13], ['Biển số', 12],
         ['Loại xe', 12], ['Nguồn đơn', 14], ['Điểm đón', 10], ['Điểm đến', 30], ['Hình thức thanh toán', 20], ['Ghi chú', 22],
-        ['Số tiền', 13], ['Trạng thái đối soát', 26], ['Tài khoản nhập', 14]
+        ['Số tiền', 13], ['Trạng thái đối soát', 26], ['Tài khoản nhập', 14],
+        ['Giá bảng giá (cả đơn)', 14], ['Giảm so với bảng giá (%)', 12], ['Vùng', 11], ['Vượt mức giảm', 12], ['Mục bảng giá', 40]
       ];
       ws.columns = cols.map(([header, width]) => ({ header, width }));
       ws.getRow(1).font = { bold: true };
@@ -3001,7 +3242,8 @@
             dateVal, clean(t.timeStr), roleTxt[t.role] || clean(t.role), clean(t.staff), clean(t.ticketNumber),
             clean(t.originalTicket || baseTicketOf(t.ticketNumber)), clean(t.plateNumber), clean(t.carType), clean(t.source),
             t.pickup ? 'Ga ' + clean(t.pickup) : '', clean(t.destination), clean(t.paymentMethod), clean(t.note),
-            Number(t.totalFare || 0), st, clean(t.createdBy)
+            Number(t.totalFare || 0), st, clean(t.createdBy),
+            ...(di => di ? [di.list, Math.round(di.pct * 1000) / 10, di.zone === 'ngoai' ? 'Ngoại thành' : 'Nội thành', di.over ? 'VƯỢT MỨC' : '', clean(t.priceLabel)] : ['', '', '', '', ''])(discountInfo(t))
           ]);
           if (p) row.getCell(1).numFmt = 'dd/mm/yyyy';
           row.getCell(14).numFmt = '0';

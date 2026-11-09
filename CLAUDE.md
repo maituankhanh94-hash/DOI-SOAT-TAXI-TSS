@@ -56,6 +56,14 @@
 ## Excel cho MISA (09/11)
 - Kế toán báo copy từ file Excel sang MISA nạp hàng loạt không nhận (do ô gộp, dòng tiêu đề ngày/tổng chen giữa, ngày dạng chữ). Đã thêm trang thứ 3 "Dữ Liệu MISA" (`buildFlatSheet`): phẳng, 1 dòng tiêu đề, không gộp ô, ngày kiểu Date (tạo bằng Date.UTC để không lệch ngày), tiền số thuần. Đang chờ người dùng gửi file mẫu MISA để khớp đúng cột.
 
+## Bảng giá công ty (nhánh `bang-gia`, 09/11)
+- Nguồn: `bang-gia/BANG_GIA_XE.xlsx` (trang "DON SB" = sân bay đi quận/phường TP.HCM, giá xe 4/7/16; trang "TOUR" = đi tỉnh, xe 7/16, 1 chiều/2 chiều; City tour 4h/8h). Chuyển sang `bang-gia.json` bằng `node bang-gia/tao-bang-gia.js bang-gia/BANG_GIA_XE.xlsx bang-gia.json` (cần exceljs). App tải file tĩnh này (`loadPriceList`), không lưu trong Firebase → đổi giá = gửi file Excel mới, chạy lại script, push.
+- Vùng: quận TP.HCM = nội thành (giảm tối đa 10%); huyện Bình Chánh/Cần Giờ/Hóc Môn/Củ Chi/Nhà Bè + đi tỉnh = ngoại thành (15%). `DISCOUNT_LIMIT`.
+- Áp dụng cho Bán vé (pos) VÀ Team Kế hoạch (plan) kể cả đơn đối tác (người dùng xác nhận); Chủ xe không áp; đơn Free nội bộ không xét.
+- Gõ điểm đến → gợi ý 📋 mục bảng giá kèm giá theo loại xe (`showDestSuggestions`, `findPriceMatches`: so từng từ, số khớp nguyên số, "quận 10"/"q10" lọc đúng quận, "p15"/"f7" → phường). Chọn → tự điền giá (đổi loại xe tự đổi giá nếu chưa sửa tay). Gõ tay khớp đúng 1 mục → tự nhận (`autoMatchRowPrice`).
+- Giảm quá mức VẪN CHO LƯU (người dùng chọn), báo sau khi lưu. Đơn lưu thêm `priceId, priceLabel, listPrice (giá cả đơn), priceZone`. `discountInfo(t)` so `originalTotalFare` (đơn chia tiền) với listPrice.
+- Quản lý: dưới ô Tổng Tiền hiện "Giá bảng … • giảm …%" (đỏ nếu vượt), bộ lọc trạng thái "💸 Giảm Giá Quá Mức" (`overdiscount`), từ khóa "giảm giá"/"vượt mức", khung nhắc ngày có mục 💸. Excel: trang Đối Soát ghi 💸 vào cột Ghi chú; trang Dữ Liệu MISA thêm cột Giá bảng giá, Giảm %, Vùng, Vượt mức, Mục bảng giá.
+
 ## Lỗi/rủi ro đã phát hiện (06/11/2026) — 3–9 ĐÃ SỬA ở nhánh `cai-tien-doi-soat` (08/11)
 1. ĐÃ SỬA 07/11: quy tắc RTDB thật trước đây `.read/.write: true`; nay là quy-tac-buoc-2 + Firebase Auth. Còn tồn: dữ liệu thử `test_env/` và tài khoản Auth `@test.taxi-tss.local`. Số liệu 07/11: lưu 1,61 MB, tải về 121 MB/6 ngày, kết nối đỉnh 33/100 (gói Spark). DB thật còn 2 nhánh cũ không dùng: `deleted_trips`, `drivers`.
 2. ĐÃ SỬA: màn hình & Excel dùng chung `computeAuditGroups`/`getAuditStatus`; Excel ExcelJS có màu/kẻ ô/nhóm ngày/tổng/ký tên + sheet Tổng Hợp; ngày gõ thiếu dấu tự sửa, ngày sai bị chặn.

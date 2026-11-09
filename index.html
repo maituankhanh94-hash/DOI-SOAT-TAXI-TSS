@@ -660,7 +660,10 @@
 
     // ===== BẢNG GIÁ CÔNG TY: tự nhảy giá khi Bán vé chọn điểm đến + kiểm tra mức giảm =====
     // Dữ liệu: file bang-gia.json (tạo từ Excel bằng bang-gia/tao-bang-gia.js). Nội thành (trang DON SB) / ngoại thành (trang TOUR đi tỉnh).
-    const DISCOUNT_LIMIT = { noi: 0.10, ngoai: 0.15 };   // giảm tối đa 10% nội thành, 15% ngoại thành
+    // Mức giảm tối đa: mặc định 10% nội thành, 15% ngoại thành. Quản lý chỉnh ở bảng "Nhắc Báo Cáo & Giảm Giá Vượt Mức" (lưu meta/discountLimit = {noi: 10, ngoai: 15} tính bằng %).
+    const DISCOUNT_LIMIT_DEFAULT = { noi: 0.10, ngoai: 0.15 };
+    const DISCOUNT_LIMIT = Object.assign({}, DISCOUNT_LIMIT_DEFAULT);
+    function pctText(f) { return String(Math.round(f * 1000) / 10).replace('.', ',') + '%'; }
     const ZONE_LABEL = { noi: 'nội thành', ngoai: 'ngoại thành' };
     // THEO DÕI ÂM THẦM (người dùng chọn): nhân viên KHÔNG thấy cảnh báo giảm giá; giá vẫn tự điền; chỉ Quản lý thấy & lọc.
     const SILENT_DISCOUNT_WATCH = true;
@@ -689,6 +692,11 @@
         if (!priceSetWatched) {
           priceSetWatched = true;
           dbRef('meta/priceSet').on('value', s => { activePriceSet = s.val() === 'cu' ? 'cu' : 'moi'; applyPriceSet(); }, () => {});
+          dbRef('meta/discountLimit').on('value', s => {
+            const v = s.val() || {};
+            ['noi', 'ngoai'].forEach(z => { const n = Number(v[z]); DISCOUNT_LIMIT[z] = (isFinite(n) && n >= 0 && n <= 100 && v[z] !== null && v[z] !== undefined && v[z] !== '') ? n / 100 : DISCOUNT_LIMIT_DEFAULT[z]; });
+            applyPriceSet();
+          }, () => {});
         }
       });
     }
@@ -704,7 +712,22 @@
       if (!el) return;
       const b = (k) => `<button onclick="choosePriceSet('${k}')" class="px-3 py-1.5 rounded-lg font-extrabold ${activePriceSet === k ? 'bg-blue-600 text-white shadow' : 'bg-white border border-slate-300 text-slate-600 hover:bg-slate-100'}">${activePriceSet === k ? '✔ ' : ''}${PRICE_SETS[k].label}</button>`;
       el.innerHTML = `<span class="font-extrabold text-slate-700">💲 Bảng giá đang áp dụng:</span> ${b('moi')} ${b('cu')}
-        <span class="text-[11px] text-slate-500">(${(priceSetsData[activePriceSet] || []).length} mục — áp cho cả công ty: tự điền giá & lọc giảm giá vượt mức)</span>`;
+        <span class="text-[11px] text-slate-500">(${(priceSetsData[activePriceSet] || []).length} mục — áp cho cả công ty: tự điền giá & lọc giảm giá vượt mức)</span>
+        <span class="basis-full h-0"></span>
+        <span class="font-extrabold text-slate-700">✂️ Mức giảm tối đa cho phép:</span>
+        <label class="flex items-center gap-1 font-bold text-slate-600">Nội thành <input id="dl-noi" type="number" min="0" max="100" step="0.5" value="${Math.round(DISCOUNT_LIMIT.noi * 1000) / 10}" class="w-16 p-1 border border-slate-300 rounded-lg text-center font-extrabold text-blue-700"> %</label>
+        <label class="flex items-center gap-1 font-bold text-slate-600">Ngoại thành <input id="dl-ngoai" type="number" min="0" max="100" step="0.5" value="${Math.round(DISCOUNT_LIMIT.ngoai * 1000) / 10}" class="w-16 p-1 border border-slate-300 rounded-lg text-center font-extrabold text-blue-700"> %</label>
+        <button onclick="saveDiscountLimit()" class="px-3 py-1.5 rounded-lg font-extrabold bg-emerald-600 text-white hover:bg-emerald-700 shadow">💾 Lưu mức %</button>
+        <span class="text-[11px] text-slate-500">(áp cho cả công ty, tính lại ngay cả đơn cũ khi lọc; không đổi tiền đơn)</span>`;
+    }
+    function saveDiscountLimit() {
+      if (!isManager()) return;
+      const read = id => { const v = String(document.getElementById(id).value).replace(',', '.').trim(); const n = Number(v); return v !== '' && isFinite(n) && n >= 0 && n <= 100 ? Math.round(n * 10) / 10 : null; };
+      const noi = read('dl-noi'), ngoai = read('dl-ngoai');
+      if (noi === null || ngoai === null) { alert('Mức % phải là số từ 0 đến 100 (vd 10 hoặc 12.5).'); return; }
+      if (noi === Math.round(DISCOUNT_LIMIT.noi * 1000) / 10 && ngoai === Math.round(DISCOUNT_LIMIT.ngoai * 1000) / 10) { alert('Mức % không thay đổi.'); return; }
+      if (!confirm(`Đổi mức giảm tối đa cho cả công ty:\n• Nội thành: ${noi}%\n• Ngoại thành: ${ngoai}%\n\nViệc lọc "giảm giá vượt mức" sẽ tính theo mức mới (cả đơn cũ). Tiền các đơn không bị đổi.`)) return;
+      dbRef('meta/discountLimit').set({ noi, ngoai }).catch(e => alert('Không lưu được: ' + authErrorText(e)));
     }
     function choosePriceSet(k) {
       if (!isManager() || k === activePriceSet) return;
@@ -750,6 +773,23 @@
       const inDistrict = hits.filter(it => { const dw = removeAccents(it.district).split(/\s+/); return tokens.length && tokens.every(tk => dw.includes(tk)); });
       return (inDistrict.length ? inDistrict : hits).slice(0, limit || 6);
     }
+    // QUY ƯỚC Ô ĐIỂM ĐẾN (Bán vé + Kế hoạch): địa chỉ NỘI THÀNH bắt buộc ghi Quận (vd "Tân Định, Q1", "Landmark 81, Bình Thạnh").
+    // Đi tỉnh / huyện ngoại thành: ghi tên tỉnh / huyện. Chọn gợi ý 📋 từ bảng giá thì đã có Quận sẵn.
+    const DEST_RULE_TEXT = 'Nội thành BẮT BUỘC ghi Quận — vd: "Tân Định, Q1", "Đề Thám, Quận 1", "Landmark 81, Bình Thạnh". Đi tỉnh ghi tên tỉnh — vd: "Vũng Tàu". Hoặc chọn gợi ý 📋 từ bảng giá.';
+    const HCM_DISTRICT_NAMES = ['thu duc', 'go vap', 'binh thanh', 'binh tan', 'tan binh', 'phu nhuan', 'tan phu',
+      'binh chanh', 'can gio', 'hoc mon', 'cu chi', 'nha be'];
+    const PROVINCE_EXTRA = ['vung tau', 'ba ria', 'da lat', 'phan thiet', 'mui ne', 'phan rang', 'nha trang', 'cam ranh', 'buon ma thuot', 'dak lak', 'daklak',
+      'dak nong', 'bien hoa', 'long thanh', 'nhon trach', 'thu dau mot', 'di an', 'thuan an', 'my tho', 'ha noi', 'da nang', 'quy nhon', 'binh duong',
+      'dong nai', 'long an', 'tay ninh', 'ben tre', 'tien giang', 'vinh long', 'tra vinh', 'can tho', 'hau giang', 'an giang', 'dong thap', 'kien giang',
+      'phu quoc', 'chau doc', 'binh phuoc', 'binh thuan', 'ninh thuan', 'khanh hoa', 'lam dong', 'soc trang', 'bac lieu', 'ca mau', 'tinh', 'city tour', 'san bay', 'nha ga', 'tsn'];
+    function destHasDistrict(dest, priceId) {
+      if (priceId) return true;   // chọn từ bảng giá -> đã có Quận/tỉnh
+      const t = ' ' + removeAccents(String(dest || '')).toLowerCase().replace(/[.,;:()\-–\/]/g, ' ').replace(/\s+/g, ' ').trim() + ' ';
+      if (/ (?:q|quan|district) ?(?:[1-9]|1[0-2]) /.test(t)) return true;                       // Q1, Quận 3, Q 12, District 7
+      const names = HCM_DISTRICT_NAMES.concat(PROVINCE_EXTRA,
+        priceItems.filter(it => it.kind === 'tinh').flatMap(it => removeAccents(it.district).toLowerCase().split(/\s*-\s*/)));
+      return names.some(n => n && t.includes(' ' + n + ' '));
+    }
     // Áp bảng giá cho Bán vé (quầy) và Team Kế hoạch (kể cả đơn đối tác). Không xét: đơn Chủ xe, đơn Free nội bộ, đơn không có giá bảng.
     const PRICE_ROLES = ['pos', 'plan'];
     function usesPriceList() { return !!(loggedInUser && PRICE_ROLES.includes(loggedInUser.role)); }
@@ -790,7 +830,7 @@
       if (!d) return '';
       const est = d.inferred ? ' (ước tính)' : '';
       if (d.pct <= 0) return `Giá bảng${est} ${fmtMoney(d.list)}`;
-      return `Giá bảng${est} ${fmtMoney(d.list)} • giảm ${(d.pct * 100).toFixed(1).replace('.0', '')}%` + (d.over ? ` > ${d.limit * 100}% ${ZONE_LABEL[d.zone]}` : '');
+      return `Giá bảng${est} ${fmtMoney(d.list)} • giảm ${(d.pct * 100).toFixed(1).replace('.0', '')}%` + (d.over ? ` > ${pctText(d.limit)} ${ZONE_LABEL[d.zone]}` : '');
     }
 
     // --- Ô nhập hàng loạt: gắn mục bảng giá cho dòng i, tự điền giá theo loại xe ---
@@ -1108,6 +1148,7 @@
               <h3 class="text-xs sm:text-sm font-extrabold uppercase ${themeColorClass}">📋 Nhập Hàng Loạt 20 Dòng Nhanh</h3>
               <button onclick="submitBatch('${role}')" class="px-5 py-2.5 ${btnThemeClass} text-white font-extrabold text-xs rounded-xl shadow-lg transition-all">🚀 Lưu Đơn Lên Cloud</button>
             </div>
+            ${PRICE_ROLES.includes(role) ? `<div class="text-[11px] sm:text-xs bg-amber-50 border border-amber-300 text-amber-900 rounded-xl p-2.5 font-semibold">📌 <b>QUY ƯỚC Ô ĐIỂM ĐẾN:</b> ${escHtml(DEST_RULE_TEXT)}</div>` : ''}
             <div class="overflow-x-auto custom-scrollbar max-h-[450px]">
               <table class="w-full text-left border-collapse min-w-[1700px]">
                 <thead class="sticky top-0 z-20 shadow-md">
@@ -1191,7 +1232,7 @@
               </select>
             </td>
             <td class="p-2.5 relative">
-              <input type="text" id="d-${i}" autocomplete="off" placeholder="Gõ điểm đến (vd: đề thám)..." class="w-full p-2 bg-amber-50 border border-amber-300 rounded-xl font-semibold text-xs" oninput="showDestSuggestions(this, 'dest-drop-${i}', ${i})" onkeydown="suggestKeydown(event, 'dest-drop-${i}')" onblur="hideSuggestLater('dest-drop-${i}'); autoMatchRowPrice(${i})">
+              <input type="text" id="d-${i}" autocomplete="off" placeholder="${PRICE_ROLES.includes(role) ? 'Vd: Đề Thám, Q1 (bắt buộc ghi Quận)' : 'Gõ điểm đến (vd: đề thám)...'}" class="w-full p-2 bg-amber-50 border border-amber-300 rounded-xl font-semibold text-xs" oninput="showDestSuggestions(this, 'dest-drop-${i}', ${i})" onkeydown="suggestKeydown(event, 'dest-drop-${i}')" onblur="hideSuggestLater('dest-drop-${i}'); autoMatchRowPrice(${i})">
               <div id="dest-drop-${i}"></div>
             </td>
             <td class="p-2.5"><input type="text" id="f-${i}" autocomplete="off" placeholder="Số tiền..." oninput="onRowFareInput(${i})" onblur="formatCurrSmartInput(this); updateRowPriceHint(${i})" class="w-full p-2 bg-emerald-50 border border-emerald-300 rounded-xl font-extrabold text-emerald-800 text-right text-xs"><div id="fh-${i}" class="text-[10px] leading-tight mt-0.5 text-right"></div></td>
@@ -1721,6 +1762,13 @@
         alert("Vui lòng điền đầy đủ Số Phiếu, Biển Số, Nhân Sự và Điểm Đến!");
         return;
       }
+      if (usesPriceList() && destination !== String(trip.destination || '').trim()) {
+        const dEl = document.getElementById('edit-modal-dest');
+        if (!destHasDistrict(destination, dEl && dEl.dataset.priceId && priceById[dEl.dataset.priceId] ? dEl.dataset.priceId : '')) {
+          alert(`⚠️ Điểm đến "${destination}" CHƯA GHI QUẬN.\n\nQuy ước: ${DEST_RULE_TEXT}`);
+          return;
+        }
+      }
 
       trip.dateStr = formattedDate;
       trip.dateKey = tripDateKey({ dateStr: formattedDate });
@@ -1873,6 +1921,23 @@
 
     async function submitBatch(role) {
       if (!loggedInUser) return;
+      // Quy ước: địa chỉ nội thành bắt buộc ghi Quận (Bán vé + Kế hoạch). Có dòng thiếu -> chưa lưu dòng nào, để sửa lại.
+      if (usesPriceList()) {
+        const noDistrict = [];
+        for (let i = 0; i < 20; i++) {
+          const dEl = document.getElementById(`d-${i}`);
+          const dest = dEl ? dEl.value.trim() : '';
+          const filled = document.getElementById(`staff-${i}`).value.trim() && document.getElementById(`t-${i}`).value.trim() && document.getElementById(`p-${i}`).value.trim() && dest;
+          if (!filled) continue;
+          const it = rowPriceItem(i);
+          if (!destHasDistrict(dest, it && it.id)) { noDistrict.push(`• Dòng ${i+1}: "${dest}"`); dEl.classList.add('ring-2', 'ring-red-500'); }
+          else dEl.classList.remove('ring-2', 'ring-red-500');
+        }
+        if (noDistrict.length) {
+          alert(`⚠️ Điểm đến CHƯA GHI QUẬN ở ${noDistrict.length} dòng:\n${noDistrict.join('\n')}\n\nQuy ước: ${DEST_RULE_TEXT}\n\nChưa lưu đơn nào — vui lòng sửa các dòng tô đỏ rồi bấm Lưu lại.`);
+          return;
+        }
+      }
       // Đơn nhập cho ngày cũ hơn khoảng đã tải: tải thêm đơn của đúng ngày đó để kiểm tra trùng
       let dupPool = personalTrips;
       if (staffMode === 'window' && staffWinFrom) {
@@ -1996,7 +2061,7 @@
       if (count > 0) {
         dbRoot().update(updates).then(() => {
           recordPlaces(savedDests);
-          alert(`Đã lưu thành công và phân tách hoa hồng cho ${count} đơn!` + (overDiscountRows.length && !SILENT_DISCOUNT_WATCH ? `\n\n⚠️ Có ${overDiscountRows.length} đơn GIẢM GIÁ VƯỢT MỨC cho phép (10% nội thành, 15% ngoại thành) — Quản lý sẽ kiểm tra:\n${overDiscountRows.join('\n')}` : ''));
+          alert(`Đã lưu thành công và phân tách hoa hồng cho ${count} đơn!` + (overDiscountRows.length && !SILENT_DISCOUNT_WATCH ? `\n\n⚠️ Có ${overDiscountRows.length} đơn GIẢM GIÁ VƯỢT MỨC cho phép (${pctText(DISCOUNT_LIMIT.noi)} nội thành, ${pctText(DISCOUNT_LIMIT.ngoai)} ngoại thành) — Quản lý sẽ kiểm tra:\n${overDiscountRows.join('\n')}` : ''));
           renderBatchRows(role);
           const histInput = document.getElementById('filter-history-date');
           if (histInput && lastFormattedDate) {
@@ -2992,7 +3057,7 @@
           <td class="p-2 text-right">${fmtMoney(d.list)}</td>
           <td class="p-2 text-right font-bold">${fmtMoney(d.fare)}</td>
           <td class="p-2 text-right font-extrabold text-rose-700">${(d.pct * 100).toFixed(1).replace('.0', '')}%</td>
-          <td class="p-2 text-slate-500">${d.limit * 100}% ${ZONE_LABEL[d.zone]}</td>
+          <td class="p-2 text-slate-500">${pctText(d.limit)} ${ZONE_LABEL[d.zone]}</td>
         </tr>`;
       }).join('');
       return `<div class="bg-rose-50 border-2 border-rose-200 rounded-2xl p-3 space-y-2 text-xs">
@@ -3115,14 +3180,14 @@
         // 3. Giảm giá vượt mức
         const od = collectOverDiscount(remindFrom, remindTo);
         ws = xlSheetSetup(wb, 'Giảm Giá Vượt Mức', true);
-        xlTitle(ws, 12, f, 'ĐƠN GIẢM GIÁ VƯỢT MỨC QUY ĐỊNH (10% NỘI THÀNH, 15% NGOẠI THÀNH)');
+        xlTitle(ws, 12, f, `ĐƠN GIẢM GIÁ VƯỢT MỨC QUY ĐỊNH (${pctText(DISCOUNT_LIMIT.noi)} NỘI THÀNH, ${pctText(DISCOUNT_LIMIT.ngoai)} NGOẠI THÀNH)`);
         xlTable(ws, 6, [
           { h: 'STT', w: 6, align: 'center' }, { h: 'Nhân viên', w: 28, wrap: true }, { h: 'Ngày', w: 12, align: 'center' }, { h: 'Số phiếu', w: 12, align: 'center' },
           { h: 'Biển số', w: 11, align: 'center' }, { h: 'Điểm đến', w: 26, wrap: true }, { h: 'Mục bảng giá', w: 34, wrap: true }, { h: 'Giá bảng', w: 13, fmt: '#,##0' },
           { h: 'Đã thu', w: 13, fmt: '#,##0' }, { h: 'Giảm (%)', w: 10, fmt: '0.0' }, { h: 'Mức cho phép', w: 16, align: 'center' }, { h: 'Ghi chú', w: 24, wrap: true }
         ], od.map(({ trips, d, dateKey }, i) => [i + 1, fullStaffName(trips), dmy(dateKey), trips[0].originalTicket || trips[0].ticketNumber, (trips[0].plateNumber || '').toUpperCase(),
           trips[0].destination || '', (d.label || '') + (d.inferred ? ' (ước tính)' : ''), d.list, d.fare, Math.round(d.pct * 1000) / 10,
-          `${d.limit * 100}% ${ZONE_LABEL[d.zone]}`, [...new Set(trips.map(t => t.note).filter(Boolean))].join(' | ')]), () => 'FFFEE2E2');
+          `${pctText(d.limit)} ${ZONE_LABEL[d.zone]}`, [...new Set(trips.map(t => t.note).filter(Boolean))].join(' | ')]), () => 'FFFEE2E2');
         // 4. Tổng hợp theo nhân viên (giảm giá vượt mức)
         const byStaff = {};
         od.forEach(({ trips, d }) => {

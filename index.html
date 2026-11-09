@@ -947,10 +947,12 @@
     ];
     // Phường/xã mới (sau sáp nhập 01/7/2025) cũng được chấp nhận thay cho Quận/Huyện cũ.
     const wordsOf = s => ' ' + removeAccents(String(s || '')).replace(/[^a-z0-9]+/g, ' ').trim() + ' ';
-    const NEW_WARD_KEYS = NEW_WARDS.map(w => ({ key: wordsOf(w[1]), w }));
+    // Chuẩn hóa để so: bỏ dấu, "y" cuối âm tiết sau phụ âm = "i" (Mỹ = Mĩ, Kỳ = Kì, Lý = Lí)
+    const canonWords = s => wordsOf(s).replace(/([b-df-hj-np-tv-xz])y(?= )/g, '$1i');
+    const NEW_WARD_KEYS = NEW_WARDS.map(w => ({ key: canonWords(w[1]), w }));
     // Các phường/xã mới có trong chữ gõ (ưu tiên tên dài: "Tân Sơn Nhất" thắng "Tân Sơn")
     function findNewWards(text) {
-      const t = wordsOf(text);
+      const t = canonWords(text);
       const hits = NEW_WARD_KEYS.filter(x => t.includes(x.key));
       return hits.filter(h => !hits.some(o => o !== h && o.key.length > h.key.length && o.key.includes(h.key))).map(h => h.w);
     }
@@ -967,13 +969,53 @@
       'dak nong', 'bien hoa', 'long thanh', 'nhon trach', 'thu dau mot', 'di an', 'thuan an', 'my tho', 'ha noi', 'da nang', 'quy nhon', 'binh duong',
       'dong nai', 'long an', 'tay ninh', 'ben tre', 'tien giang', 'vinh long', 'tra vinh', 'can tho', 'hau giang', 'an giang', 'dong thap', 'kien giang',
       'phu quoc', 'chau doc', 'binh phuoc', 'binh thuan', 'ninh thuan', 'khanh hoa', 'lam dong', 'soc trang', 'bac lieu', 'ca mau', 'di tinh', 'city tour', 'san bay', 'nha ga', 'tsn'];
-    function destHasDistrict(dest, priceId) {
+    // Tên tỉnh/thành, quận/huyện/thị xã CẢ NƯỚC (cũ + mới, trừ TP.HCM cũ) — để đơn đi tỉnh ghi tên huyện/thị xã vẫn lưu được.
+    // (Bỏ vài tên trùng tên đường lớn ở TP.HCM như Hai Bà Trưng, Ngô Quyền, Hồng Bàng, Thống Nhất.)
+    const VN_PLACES = 'A Lưới|An Biên|An Dương|An Giang|An Khê|An Lão|An Minh|An Nhơn|An Phú|Anh Sơn|Ayun Pa|Ân Thi|Ba Bể|Ba Chẽ|Ba Đồn|Bà Rịa|Bà Rịa - Vũng Tàu|Bá Thước|Ba Tơ|Ba Tri|Ba Vì|Bác Ái|Bạc Liêu|Bạch Thông|Bảo Lạc|Bảo Lâm|Bảo Lộc|Bảo Thắng|Bảo Yên|Bát Xát|Bàu Bàng|Bắc Bình|Bắc Giang|Bắc Hà|Bắc Kạn|Bắc Mê|Bắc Ninh|Bắc Quang|Bắc Sơn|Bắc Tân Uyên|Bắc Trà My|Bắc Yên|Bến Cát|Bến Cầu|Bến Lức|Bến Tre|Biên Hòa|Bỉm Sơn|Bình Dương|Bình Đại|Bình Định|Bình Gia|Bình Giang|Bình Liêu|Bình Long|Bình Lục|Bình Minh|Bình Phước|Bình Sơn|Bình Tân|Bình Thuận|Bình Thuỷ|Bình Xuyên|Bố Trạch|Bù Đăng|Bù Đốp|Bù Gia Mập|Buôn Đôn|Buôn Hồ|Buôn Ma Thuột|Cà Mau|Cái Bè|Cai Lậy|Cái Nước|Cái Răng|Cam Lâm|Cam Lộ|Cam Ranh|Can Lộc|Càng Long|Cao Bằng|Cao Lãnh|Cao Lộc|Cao Phong|Cát Hải|Cẩm Giàng|Cẩm Khê|Cẩm Mỹ|Cẩm Phả|Cẩm Thủy|Cẩm Xuyên|Cần Đước|Cần Giuộc|Cần Thơ|Cầu Kè|Cầu Ngang|Châu Đốc|Châu Đức|Châu Phú|Châu Thành|Châu Thành A|Chi Lăng|Chí Linh|Chiêm Hóa|Chợ Đồn|Chợ Gạo|Chợ Lách|Chợ Mới|Chơn Thành|Chư Păh|Chư Prông|Chư Pưh|Chư Sê|Chương Mỹ|Con Cuông|Cô Tô|Cờ Đỏ|Cù Lao Dung|Cư Jút|Cư Kuin|Cư M\'gar|Dầu Tiếng|Dĩ An|Di Linh|Diễn Châu|Diên Khánh|Duy Tiên|Duy Xuyên|Duyên Hải|Dương Kinh|Dương Minh Châu|Đà Bắc|Đa Krông|Đà Lạt|Đà Nẵng|Đạ Tẻh|Đại Lộc|Đại Từ|Đam Rông|Đan Phượng|Đăk Đoa|Đắk Glei|Đăk Glong|Đắk Hà|Đắk Lắk|Đắk Mil|Đắk Nông|Đăk Pơ|Đắk R\'Lấp|Đắk Song|Đắk Tô|Đầm Dơi|Đầm Hà|Điện Bàn|Điện Biên|Điện Biên Đông|Điện Biên Phủ|Định Hóa|Đình Lập|Định Quán|Đoan Hùng|Đô Lương|Đồ Sơn|Đông Anh|Đông Giang|Đông Hà|Đông Hải|Đông Hòa|Đồng Hới|Đông Hưng|Đồng Hỷ|Đồng Nai|Đồng Phú|Đồng Tháp|Đông Triều|Đồng Văn|Đồng Xoài|Đồng Xuân|Đơn Dương|Đức Cơ|Đức Hòa|Đức Huệ|Đức Linh|Đức Phổ|Đức Thọ|Đức Trọng|Ea H\'leo|Ea Kar|Ea Súp|Gia Bình|Gia Lai|Gia Lâm|Gia Lộc|Gia Nghĩa|Giá Rai|Gia Viễn|Giang Thành|Giao Thủy|Gio Linh|Giồng Riềng|Giồng Trôm|Gò Công|Gò Công Đông|Gò Công Tây|Gò Dầu|Gò Quao|Hà Giang|Hạ Hoà|Hạ Lang|Hạ Long|Hà Nam|Hà Nội|Hà Quảng|Hà Tiên|Hà Tĩnh|Hà Trung|Hải Dương|Hải Hà|Hải Hậu|Hải Lăng|Hải Phòng|Hàm Tân|Hàm Thuận Bắc|Hàm Thuận Nam|Hàm Yên|Hậu Giang|Hậu Lộc|Hiệp Đức|Hiệp Hòa|Hoà An|Hoà Bình|Hoa Lư|Hòa Thành|Hòa Vang|Hoài Ân|Hoài Đức|Hoài Nhơn|Hoàng Su Phì|Hoằng Hóa|Hòn Đất|Hồ Chí Minh|Hội An|Hồng Dân|Hồng Lĩnh|Hồng Ngự|Hớn Quản|Huế|Hưng Hà|Hưng Nguyên|Hưng Yên|Hướng Hóa|Hương Khê|Hương Sơn|Hương Thủy|Hương Trà|Hữu Lũng|Ia Grai|Ia H\' Drai|Ia Pa|Kbang|Kế Sách|Khánh Hòa|Khánh Sơn|Khánh Vĩnh|Khoái Châu|Kiên Giang|Kiên Hải|Kiên Lương|Kiến Thụy|Kiến Tường|Kiến Xương|Kim Bảng|Kim Bôi|Kim Động|Kim Sơn|Kim Thành|Kinh Môn|Kon Plông|Kon Rẫy|Kon Tum|Kông Chro|Krông A Na|Krông Bông|Krông Búk|Krông Năng|Krông Nô|Krông Pa|Krông Pắc|Kỳ Anh|Kỳ Sơn|La Gi|Lạc Dương|Lạc Sơn|Lạc Thủy|Lai Châu|Lai Vung|Lang Chánh|Lạng Giang|Lạng Sơn|Lào Cai|Lâm Bình|Lâm Đồng|Lâm Hà|Lâm Thao|Lập Thạch|Lấp Vò|Lệ Thủy|Long An|Long Đất|Long Hồ|Long Khánh|Long Mỹ|Long Phú|Long Thành|Long Xuyên|Lộc Bình|Lộc Ninh|Lục Nam|Lục Ngạn|Lục Yên|Lương Sơn|Lương Tài|Lý Nhân|M\'Đrắk|Mai Châu|Mai Sơn|Mang Thít|Mang Yang|Mèo Vạc|Mê Linh|Minh Hóa|Minh Long|Mỏ Cày Bắc|Mỏ Cày Nam|Móng Cái|Mộ Đức|Mộc Châu|Mộc Hóa|Mù Căng Chải|Mường Ảng|Mường Chà|Mường Khương|Mường La|Mường Lát|Mường Lay|Mường Nhé|Mường Tè|Mỹ Đức|Mỹ Hào|Mỹ Tho|Mỹ Tú|Mỹ Xuyên|Na Hang|Na Rì|Nam Đàn|Nam Định|Nam Giang|Nam Sách|Nam Trà My|Nam Trực|Năm Căn|Nậm Nhùn|Nậm Pồ|Ngã Bảy|Ngã Năm|Nga Sơn|Ngân Sơn|Nghệ An|Nghi Lộc|Nghi Sơn|Nghi Xuân|Nghĩa Đàn|Nghĩa Hành|Nghĩa Hưng|Nghĩa Lộ|Ngọc Hiển|Ngọc Hồi|Ngọc Lặc|Nguyên Bình|Nha Trang|Nho Quan|Nhơn Trạch|Như Thanh|Như Xuân|Ninh Bình|Ninh Giang|Ninh Hải|Ninh Hòa|Ninh Kiều|Ninh Phước|Ninh Sơn|Ninh Thuận|Nông Cống|Núi Thành|Ô Môn|Pác Nặm|Phan Rang-Tháp Chàm|Phan Thiết|Phong Điền|Phong Thổ|Phổ Yên|Phú Bình|Phù Cát|Phù Cừ|Phú Giáo|Phú Hoà|Phú Lộc|Phú Lương|Phủ Lý|Phù Mỹ|Phú Ninh|Phú Quí|Phú Quốc|Phú Riềng|Phú Tân|Phú Thiện|Phú Thọ|Phú Vang|Phú Xuân|Phú Xuyên|Phù Yên|Phúc Thọ|Phúc Yên|Phụng Hiệp|Phước Long|Phước Sơn|Pleiku|Quản Bạ|Quan Hóa|Quan Sơn|Quảng Bình|Quảng Điền|Quảng Hòa|Quảng Nam|Quảng Ngãi|Quảng Ninh|Quảng Trạch|Quảng Trị|Quảng Xương|Quảng Yên|Quế Phong|Quế Sơn|Quế Võ|Quốc Oai|Quỳ Châu|Quỳ Hợp|Quy Nhơn|Quỳnh Lưu|Quỳnh Nhai|Quỳnh Phụ|Rạch Giá|Sa Đéc|Sa Pa|Sa Thầy|Sầm Sơn|Si Ma Cai|Sìn Hồ|Sóc Sơn|Sóc Trăng|Sông Cầu|Sông Công|Sông Hinh|Sông Lô|Sông Mã|Sốp Cộp|Sơn Dương|Sơn Động|Sơn Hà|Sơn Hòa|Sơn La|Sơn Tây|Sơn Tịnh|Tam Bình|Tam Dương|Tam Đảo|Tam Điệp|Tam Kỳ|Tam Nông|Tánh Linh|Tân An|Tân Biên|Tân Châu|Tân Hiệp|Tân Hồng|Tân Hưng|Tân Kỳ|Tân Lạc|Tân Phú|Tân Phú Đông|Tân Phước|Tân Sơn|Tân Thạnh|Tân Trụ|Tân Uyên|Tân Yên|Tây Giang|Tây Hoà|Tây Ninh|Tây Sơn|Thạch An|Thạch Hà|Thạch Thành|Thạch Thất|Thái Bình|Thái Hoà|Thái Nguyên|Thái Thụy|Than Uyên|Thanh Ba|Thanh Bình|Thanh Chương|Thanh Hà|Thanh Hóa|Thanh Liêm|Thanh Miện|Thanh Oai|Thạnh Phú|Thanh Sơn|Thanh Thuỷ|Thanh Trì|Tháp Mười|Thăng Bình|Thiệu Hóa|Thọ Xuân|Thoại Sơn|Thốt Nốt|Thới Bình|Thới Lai|Thủ Dầu Một|Thủ Thừa|Thuận An|Thuận Bắc|Thuận Châu|Thuận Hóa|Thuận Nam|Thuận Thành|Thủy Nguyên|Thường Tín|Thường Xuân|Tiên Du|Tiền Giang|Tiền Hải|Tiên Lãng|Tiên Lữ|Tiên Phước|Tiên Yên|Tiểu Cần|Tịnh Biên|Trà Bồng|Trà Cú|Trà Ôn|Trà Vinh|Trạm Tấu|Trảng Bàng|Trảng Bom|Tràng Định|Trần Đề|Trần Văn Thời|Trấn Yên|Tri Tôn|Triệu Phong|Triệu Sơn|Trùng Khánh|Trực Ninh|Trường Sa|Tu Mơ Rông|Tủa Chùa|Tuần Giáo|Tuy An|Tuy Đức|Tuy Hòa|Tuy Phong|Tuy Phước|Tuyên Hóa|Tuyên Quang|Tứ Kỳ|Tư Nghĩa|Từ Sơn|Tương Dương|U Minh|U Minh Thượng|Uông Bí|Ứng Hòa|Vạn Ninh|Văn Bàn|Văn Chấn|Văn Giang|Văn Lãng|Văn Lâm|Văn Quan|Văn Yên|Vân Canh|Vân Đồn|Vân Hồ|Vị Thanh|Vị Thuỷ|Vị Xuyên|Việt Trì|Việt Yên|Vinh|Vĩnh Bảo|Vĩnh Châu|Vĩnh Cửu|Vĩnh Hưng|Vĩnh Linh|Vĩnh Long|Vĩnh Lộc|Vĩnh Lợi|Vĩnh Phúc|Vĩnh Thạnh|Vĩnh Thuận|Vĩnh Tường|Vĩnh Yên|Võ Nhai|Vụ Bản|Vũ Quang|Vũ Thư|Vũng Liêm|Vũng Tàu|Xín Mần|Xuân Lộc|Xuân Trường|Xuyên Mộc|Ý Yên|Yên Bái|Yên Bình|Yên Châu|Yên Định|Yên Khánh|Yên Lạc|Yên Lập|Yên Minh|Yên Mô|Yên Mỹ|Yên Phong|Yên Sơn|Yên Thành|Yên Thế|Yên Thủy';
+    // Địa danh hay đi ở TP.HCM (không cần ghi phường)
+    const LANDMARKS = ['ben xe mien tay', 'ben xe mien dong', 'ben xe an suong', 'ben xe cho lon', 'ben xe quan 8', 'ben xe nga tu ga',
+      'benh vien cho ray', 'cho ray', 'benh vien thong nhat', 'benh vien 115', 'benh vien nhan dan gia dinh', 'benh vien nhi dong 1', 'benh vien nhi dong 2',
+      'benh vien nhi dong thanh pho', 'benh vien tu du', 'benh vien hung vuong', 'benh vien dai hoc y duoc', 'benh vien fv', 'benh vien vinmec',
+      'benh vien tam anh', 'benh vien hoan mi', 'benh vien ung buou', 'benh vien binh dan', 'benh vien 175', 'benh vien quan dan mien dong',
+      'benh vien phu san', 'benh vien mat', 'benh vien da lieu', 'benh vien nguyen tri phuong', 'benh vien trung vuong', 'benh vien an binh',
+      'benh vien pham ngoc thach', 'benh vien nhiet doi', 'benh vien cho ray', 'benh vien vien tim', 'benh vien quoc te city', 'benh vien columbia',
+      'landmark 81', 'landmark', 'vinhomes central park', 'vinhomes grand park', 'vinhomes golden river', 'bitexco', 'saigon centre', 'takashimaya',
+      'vincom dong khoi', 'vincom center', 'vincom landmark', 'diamond plaza', 'crescent mall', 'sc vivocity', 'vivo city', 'aeon tan phu', 'aeon celadon',
+      'aeon binh tan', 'giga mall', 'van hanh mall', 'estella', 'thiso mall', 'emart', 'lotte mart', 'saigon square',
+      'cho ben thanh', 'cho binh tay', 'cho an dong', 'cho tan dinh', 'cho ba chieu', 'cho hanh thong tay', 'cho thu duc',
+      'pho di bo nguyen hue', 'pho di bo', 'pho tay bui vien', 'nha tho duc ba', 'nha tho tan dinh', 'buu dien thanh pho', 'dinh doc lap', 'hoi truong thong nhat',
+      'nha hat thanh pho', 'thao cam vien', 'cong vien tao dan', 'cong vien le van tam', 'cong vien gia dinh', 'cong vien 23 9', 'ben bach dang', 'ben nha rong',
+      'dam sen', 'suoi tien', 'ho con rua', 'cau anh sao', 'phu mi hung', 'thu thiem', 'khu do thi sala', 'secc', 'sec c', 'trung tam hoi cho trien lam',
+      'dia dao cu chi', 'rung sac', 'can gio', 'lang dai hoc', 'dai hoc quoc gia', 'khu cong nghe cao', 'khu che xuat tan thuan', 'cang cat lai', 'cang sai gon',
+      'ga sai gon', 'nha ga t1', 'nha ga t2', 'nha ga t3', 'quoc te', 'quoc noi', 'khach san rex', 'rex', 'caravelle', 'sheraton', 'park hiatt', 'new world',
+      'majestic', 'hotel nikko', 'lotte legend', 'intercontinental', 'pullman', 'liberty central', 'novotel', 'continental', 'hotel des arts', 'the reverie',
+      'renaissance riverside', 'le meridien', 'mia saigon', 'fusion', 'equatorial', 'windsor plaza', 'eastin grand'];
+    // Viết tắt quận quen thuộc (đứng riêng 1 chữ): BT Bình Thạnh, TB Tân Bình, PN Phú Nhuận, GV Gò Vấp, TĐ Thủ Đức, BC Bình Chánh, HM Hóc Môn, CC Củ Chi, NB Nhà Bè, CG Cần Giờ, BTân
+    const DISTRICT_ABBR = ['bt', 'tb', 'pn', 'gv', 'td', 'bc', 'hm', 'cc', 'nb', 'cg', 'btan'];
+    // Đơn đặc biệt (không có địa chỉ cụ thể) -> không bắt ghi phường
+    const DEST_EXEMPT = ['huy', 'huy chuyen', 'huy don', 'noi bo', 've bai', 'khach khong di', 'khong di', 'dua don nhan vien', 'nhan vien', 'tour', 'cho khach', 'free', 'mien phi'];
+    // Tên huyện/tỉnh trùng tên đường ở TP.HCM -> không dùng (vd đường Tam Đảo, Ba Vì Q10; Yên Thế, Đồ Sơn Tân Bình; Lê Đức Thọ, Bến Vân Đồn...)
+    const PLACE_EXCLUDE = ['tam dao', 'ba vi', 'yen the', 'do son', 'hong linh', 'thap muoi', 'duc tho', 'van don', 'binh long', 'dong van',
+      'dien bien', 'dien bien phu', 'dien bien dong', 'nguyen binh', 'an duong', 'hoang hoa', 'tan ki', 'truong sa', 'hue', 'vinh'].map(canonWords);
+    let destKeyCache = null, destKeySrc = null;
+    function destKeys() {
+      if (destKeyCache && destKeySrc === priceItems) return destKeyCache;
+      const list = HCM_DISTRICT_NAMES.concat(PROVINCE_EXTRA, LANDMARKS, VN_PLACES.split('|'),
+        priceItems.filter(it => it.kind === 'tinh').flatMap(it => String(it.district).split(/\s*-\s*/)));
+      destKeyCache = [...new Set(list.map(canonWords).filter(k => k.trim().length >= 2 && !PLACE_EXCLUDE.includes(k)))];
+      destKeySrc = priceItems;
+      return destKeyCache;
+    }
+    function destHasDistrict(dest, priceId, payMethod) {
       if (priceId) return true;   // chọn từ bảng giá -> đã có Quận/tỉnh
-      const t = ' ' + removeAccents(String(dest || '')).toLowerCase().replace(/[.,;:()\-–\/]/g, ' ').replace(/\s+/g, ' ').trim() + ' ';
-      if (/ (?:q|quan|district) ?(?:[1-9]|1[0-2]) /.test(t)) return true;                       // Q1, Quận 3, Q 12, District 7
-      const names = HCM_DISTRICT_NAMES.concat(PROVINCE_EXTRA,
-        priceItems.filter(it => it.kind === 'tinh').flatMap(it => removeAccents(it.district).toLowerCase().split(/\s*-\s*/)));
-      return names.some(n => n && t.includes(' ' + n + ' ')) || findNewWards(dest).length > 0;
+      if (payMethod && paymentCategory({ paymentMethod: payMethod, role: 'pos' }) === 'FREE') return true;   // Free nội bộ: không bắt
+      const t = canonWords(dest).replace(/ xa lo ha noi /g, ' ');   // đường Xa lộ Hà Nội không phải đi Hà Nội
+      if (/ (?:q|quan|district) ?(?:0?[1-9]|1[0-2]) /.test(t)) return true;   // Q1, Q.01, Quận 3, District 7
+      if (/(^|[\s,.;(-])huế($|[\s,.;)-])/i.test(String(dest || '').normalize('NFC'))) return true;   // Huế (phải có dấu, tránh "Nguyễn Huệ")
+      const words = t.trim().split(' ');
+      if (words.some(w => DISTRICT_ABBR.includes(w))) return true;
+      if (DEST_EXEMPT.some(k => t.startsWith(' ' + k + ' '))) return true;   // chỉ khi đứng đầu (vd: Hủy chuyến, Về bãi) — tránh tên đường như Hà Huy Giáp
+      return destKeys().some(k => t.includes(k)) || findNewWards(dest).length > 0;
     }
 
     // Khung nhắc LỚN khi thiếu Quận (mẫu 3 người dùng chọn). CHỈ NHẮC, KHÔNG gợi ý (người dùng yêu cầu 09/11).
@@ -1971,7 +2013,7 @@
       }
       if (usesPriceList() && destination !== String(trip.destination || '').trim()) {
         const dEl = document.getElementById('edit-modal-dest');
-        if (!destHasDistrict(destination, dEl && dEl.dataset.priceId && priceById[dEl.dataset.priceId] ? dEl.dataset.priceId : '')) {
+        if (!destHasDistrict(destination, dEl && dEl.dataset.priceId && priceById[dEl.dataset.priceId] ? dEl.dataset.priceId : '', paymentMethod)) {
           showDestFixModal([{ label: 'đơn đang sửa', dest: destination }]);
           return;
         }
@@ -2137,7 +2179,7 @@
           const filled = document.getElementById(`staff-${i}`).value.trim() && document.getElementById(`t-${i}`).value.trim() && document.getElementById(`p-${i}`).value.trim() && dest;
           if (!filled) continue;
           const it = rowPriceItem(i);
-          if (!destHasDistrict(dest, it && it.id)) { noDistrict.push(i); dEl.classList.add('ring-2', 'ring-red-500'); }
+          if (!destHasDistrict(dest, it && it.id, (document.getElementById(`m-${i}`) || {}).value)) { noDistrict.push(i); dEl.classList.add('ring-2', 'ring-red-500'); }
           else dEl.classList.remove('ring-2', 'ring-red-500');
         }
         if (noDistrict.length) {

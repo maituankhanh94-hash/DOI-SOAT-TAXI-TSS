@@ -705,7 +705,7 @@
       q = q.replace(/\b(?:quan|q)\s*(\d{1,2})\b/g, (m, n) => { wantDistrict = 'quận ' + Number(n); return ' '; });
       q = q.replace(/\b(?:phuong|p|f)\s*(\d{1,2})\b/g, (m, n) => ` phuong ${Number(n)} `);
       // Bỏ chữ chung ("phường", "xã", "quận", "đường"...) nếu không kèm số -> "phường hiệp bình" khớp "P. Hiệp Bình"
-      const STOP = ['phuong', 'p', 'xa', 'quan', 'q', 'huyen', 'tp', 'duong', 'thi', 'tran', 'tt'];
+      const STOP = ['phuong', 'p', 'xa', 'quan', 'q', 'huyen', 'tp', 'tt'];
       const tokens = q.replace(/\bphuong (\d+)\b/g, 'phuong_$1').split(/\s+/).filter(Boolean)
         .filter(tk => !STOP.includes(tk)).map(tk => tk.startsWith('phuong_') ? tk.slice(7) : tk);
       if (!tokens.length && !wantDistrict) return [];
@@ -714,7 +714,9 @@
         const words = it.search.split(/\s+/);
         return tokens.every(tk => /^\d+$/.test(tk) ? words.includes(tk) : words.some(w => w.startsWith(tk)));
       });
-      return hits.slice(0, limit || 6);
+      // Chữ gõ trùng đúng tên quận/huyện/tỉnh (vd "Bình Thạnh", "Bình Dương") -> chỉ lấy khu vực đó
+      const inDistrict = hits.filter(it => { const dw = removeAccents(it.district).split(/\s+/); return tokens.length && tokens.every(tk => dw.includes(tk)); });
+      return (inDistrict.length ? inDistrict : hits).slice(0, limit || 6);
     }
     // Áp bảng giá cho Bán vé (quầy) và Team Kế hoạch (kể cả đơn đối tác). Không xét: đơn Chủ xe, đơn Free nội bộ, đơn không có giá bảng.
     const PRICE_ROLES = ['pos', 'plan'];

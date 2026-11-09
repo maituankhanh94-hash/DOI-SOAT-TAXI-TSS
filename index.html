@@ -2845,6 +2845,7 @@
         wb.created = new Date();
         buildAuditSheet(wb, groups, f);
         buildSummarySheet(wb, groups, f);
+        buildFlatSheet(wb, groups);
         const buf = await wb.xlsx.writeBuffer();
         const now = new Date();
         const pad = n => String(n).padStart(2, '0');
@@ -3120,6 +3121,39 @@
 
       ws.autoFilter = { from: { row: 8, column: 1 }, to: { row: 8, column: N } };
       xlSignature(ws, r + 2, N);
+    }
+
+    // Trang "Dữ Liệu MISA": dữ liệu PHẲNG để copy/nạp vào phần mềm kế toán.
+    // 1 dòng tiêu đề, mỗi dòng 1 đơn, KHÔNG gộp ô, KHÔNG dòng tổng/tiêu đề ngày, ngày là kiểu Ngày thật, tiền là số thuần.
+    function buildFlatSheet(wb, groups) {
+      const ws = wb.addWorksheet('Dữ Liệu MISA', { views: [{ state: 'frozen', ySplit: 1 }] });
+      const cols = [
+        ['Ngày', 12], ['Giờ nộp', 9], ['Phân vùng', 15], ['Nhân sự', 22], ['Số phiếu', 13], ['Số phiếu gốc', 13], ['Biển số', 12],
+        ['Loại xe', 12], ['Nguồn đơn', 14], ['Điểm đón', 10], ['Điểm đến', 30], ['Hình thức thanh toán', 20], ['Ghi chú', 22],
+        ['Số tiền', 13], ['Trạng thái đối soát', 26], ['Tài khoản nhập', 14]
+      ];
+      ws.columns = cols.map(([header, width]) => ({ header, width }));
+      ws.getRow(1).font = { bold: true };
+      const roleTxt = { pos: 'Bán vé (Quầy)', plan: 'Team Kế hoạch', driver: 'Cổng Chủ xe' };
+      const clean = v => String(v == null ? '' : v).replace(/[\r\n\t]+/g, ' ').replace(/\s{2,}/g, ' ').trim();
+      groups.forEach(g => {
+        const st = clean(auditStatusText(g));
+        g.trips.forEach(t => {
+          const dk = tripDateKey(t);
+          const p = dk ? dk.split('-').map(Number) : null;
+          // Dùng giờ UTC để Excel không lệch sang ngày hôm trước
+          const dateVal = p ? new Date(Date.UTC(p[0], p[1] - 1, p[2])) : clean(t.dateStr);
+          const row = ws.addRow([
+            dateVal, clean(t.timeStr), roleTxt[t.role] || clean(t.role), clean(t.staff), clean(t.ticketNumber),
+            clean(t.originalTicket || baseTicketOf(t.ticketNumber)), clean(t.plateNumber), clean(t.carType), clean(t.source),
+            t.pickup ? 'Ga ' + clean(t.pickup) : '', clean(t.destination), clean(t.paymentMethod), clean(t.note),
+            Number(t.totalFare || 0), st, clean(t.createdBy)
+          ]);
+          if (p) row.getCell(1).numFmt = 'dd/mm/yyyy';
+          row.getCell(14).numFmt = '0';
+        });
+      });
+      ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: cols.length } };
     }
 
     function buildSummarySheet(wb, groups, f) {

@@ -68,6 +68,7 @@
 - Giảm quá mức VẪN CHO LƯU. THEO DÕI ÂM THẦM (`SILENT_DISCOUNT_WATCH = true`, người dùng chọn 09/11): nhân viên KHÔNG thấy cảnh báo/ghi chú giảm giá (giá vẫn tự điền), chỉ Quản lý thấy và lọc. Đơn lưu thêm `priceId, priceLabel, listPrice (giá cả đơn), priceZone`. `discountInfo(t)` so `originalTotalFare` (đơn chia tiền) với listPrice.
 - Quản lý: dưới ô Tổng Tiền hiện "Giá bảng … • giảm …%" (đỏ nếu vượt), bộ lọc trạng thái "💸 Giảm Giá Quá Mức" (`overdiscount`), từ khóa "giảm giá"/"vượt mức", khung nhắc có mục 💸 (bảng: họ tên đầy đủ nhân viên + TK, ngày, phiếu, điểm đến, giá bảng, đã thu, % giảm).
 - Nút "📥 Xuất Excel Mục Này" (`exportReminderExcel`, theo remindFrom–remindTo): 4 trang Tài Xế Chưa Báo / Bán Vé Chưa Nhập (đỏ = quá hạn, vàng = chờ) / Giảm Giá Vượt Mức / Theo Nhân Viên (tổng + ký tên). Helper `xlTable`, `collectOverDiscount`.
+- (09/11) Nút riêng "📥 Xuất Excel Giảm Giá Vượt Mức" trong khung 💸 → `exportReminderExcel('discount')`: chỉ 2 trang Giảm Giá Vượt Mức (có ký tên) + Theo Nhân Viên, file `Giam_Gia_Vuot_Muc_TSS_….xlsx`.
 - Khung Nhắc Báo Cáo là BẢNG RIÊNG ("📋 Nhắc Báo Cáo & Giảm Giá Vượt Mức", ngay trên Bảng Đối Soát), chọn Từ–Đến ngày (`remindFrom/remindTo`, nút Hôm nay/Hôm qua/7 ngày/Tháng này). Excel: trang Đối Soát ghi 💸 vào cột Ghi chú; trang Dữ Liệu MISA thêm cột Giá bảng giá, Giảm %, Vùng, Vượt mức, Mục bảng giá.
 
 ## Lỗi/rủi ro đã phát hiện (06/11/2026) — 3–9 ĐÃ SỬA ở nhánh `cai-tien-doi-soat` (08/11)

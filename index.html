@@ -3062,7 +3062,8 @@
       }).join('');
       return `<div class="bg-rose-50 border-2 border-rose-200 rounded-2xl p-3 space-y-2 text-xs">
         <div class="flex flex-wrap items-center gap-2 font-extrabold text-rose-700">💸 Giảm giá vượt mức: ${list.length} đơn
-          <button onclick="showOverDiscount()" class="px-2 py-0.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg font-bold">Xem ở Bảng Đối Soát ↓</button></div>
+          <button onclick="showOverDiscount()" class="px-2 py-0.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg font-bold">Xem ở Bảng Đối Soát ↓</button>
+          <button id="btn-discount-excel" onclick="exportReminderExcel('discount')" class="ml-auto px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold shadow-sm">📥 Xuất Excel Giảm Giá Vượt Mức</button></div>
         <div class="overflow-auto custom-scrollbar max-h-[320px] bg-white rounded-xl border border-rose-200">
           <table class="w-full text-left border-collapse min-w-[760px]">
             <thead class="sticky top-0 bg-rose-100 text-rose-900"><tr>
@@ -3143,8 +3144,10 @@
     function xlSheetSetup(wb, name, landscape) {
       return wb.addWorksheet(name, { pageSetup: { paperSize: 9, orientation: landscape ? 'landscape' : 'portrait', fitToPage: true, fitToWidth: 1, fitToHeight: 0, printTitlesRow: '6:6' } });
     }
-    async function exportReminderExcel() {
-      const btn = document.getElementById('btn-remind-excel');
+    // mode 'discount' = chỉ xuất 2 trang Giảm Giá Vượt Mức + Theo Nhân Viên (nút riêng trong khung 💸)
+    async function exportReminderExcel(mode) {
+      const onlyDiscount = mode === 'discount';
+      const btn = document.getElementById(onlyDiscount ? 'btn-discount-excel' : 'btn-remind-excel');
       const old = btn ? btn.innerText : '';
       if (btn) { btn.disabled = true; btn.innerText = '⏳ Đang tạo file...'; }
       try {
@@ -3159,9 +3162,11 @@
         const lateFill = g => g.overdue ? 'FFFEE2E2' : 'FFFEF3C7';
         const sumFare = trips => trips.reduce((a, t) => a + (Number(t.totalFare) || 0), 0);
 
+        let ws;
+        if (!onlyDiscount) {
         // 1. Tài xế chưa báo
         const drv = gs.filter(g => g.missing === 'driver');
-        let ws = xlSheetSetup(wb, 'Tài Xế Chưa Báo', true);
+        ws = xlSheetSetup(wb, 'Tài Xế Chưa Báo', true);
         xlTitle(ws, 8, f, 'TÀI XẾ / CHỦ XE CHƯA BÁO CÁO');
         xlTable(ws, 6, [
           { h: 'STT', w: 6, align: 'center' }, { h: 'Ngày', w: 12, align: 'center' }, { h: 'Biển số xe', w: 14, align: 'center' }, { h: 'Số phiếu', w: 14, align: 'center' },
@@ -3177,17 +3182,19 @@
           { h: 'Tài xế / Chủ xe đã báo', w: 30, wrap: true }, { h: 'Điểm đến', w: 34, wrap: true }, { h: 'Số tiền', w: 14, fmt: '#,##0' }, { h: 'Trạng thái', w: 12, align: 'center' }
         ], pos.map((g, i) => [i + 1, dmy(g.dateKey), g.trips[0].originalTicket || g.trips[0].ticketNumber, (g.trips[0].plateNumber || '').toUpperCase(),
           fullStaffName(g.trips), g.trips[0].destination || '', sumFare(g.trips), stTxt(g)]), i => lateFill(pos[i]));
+        }
         // 3. Giảm giá vượt mức
         const od = collectOverDiscount(remindFrom, remindTo);
         ws = xlSheetSetup(wb, 'Giảm Giá Vượt Mức', true);
         xlTitle(ws, 12, f, `ĐƠN GIẢM GIÁ VƯỢT MỨC QUY ĐỊNH (${pctText(DISCOUNT_LIMIT.noi)} NỘI THÀNH, ${pctText(DISCOUNT_LIMIT.ngoai)} NGOẠI THÀNH)`);
-        xlTable(ws, 6, [
+        const odEnd = xlTable(ws, 6, [
           { h: 'STT', w: 6, align: 'center' }, { h: 'Nhân viên', w: 28, wrap: true }, { h: 'Ngày', w: 12, align: 'center' }, { h: 'Số phiếu', w: 12, align: 'center' },
           { h: 'Biển số', w: 11, align: 'center' }, { h: 'Điểm đến', w: 26, wrap: true }, { h: 'Mục bảng giá', w: 34, wrap: true }, { h: 'Giá bảng', w: 13, fmt: '#,##0' },
           { h: 'Đã thu', w: 13, fmt: '#,##0' }, { h: 'Giảm (%)', w: 10, fmt: '0.0' }, { h: 'Mức cho phép', w: 16, align: 'center' }, { h: 'Ghi chú', w: 24, wrap: true }
         ], od.map(({ trips, d, dateKey }, i) => [i + 1, fullStaffName(trips), dmy(dateKey), trips[0].originalTicket || trips[0].ticketNumber, (trips[0].plateNumber || '').toUpperCase(),
           trips[0].destination || '', (d.label || '') + (d.inferred ? ' (ước tính)' : ''), d.list, d.fare, Math.round(d.pct * 1000) / 10,
           `${pctText(d.limit)} ${ZONE_LABEL[d.zone]}`, [...new Set(trips.map(t => t.note).filter(Boolean))].join(' | ')]), () => 'FFFEE2E2');
+        if (onlyDiscount && od.length) xlSignature(ws, odEnd + 3, 12);
         // 4. Tổng hợp theo nhân viên (giảm giá vượt mức)
         const byStaff = {};
         od.forEach(({ trips, d }) => {
@@ -3218,7 +3225,7 @@
         const range = remindFrom === remindTo ? remindFrom.replace(/-/g, '') : `${remindFrom.replace(/-/g, '')}-${remindTo.replace(/-/g, '')}`;
         const a = document.createElement('a');
         a.href = URL.createObjectURL(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
-        a.download = `Nhac_Bao_Cao_TSS_${range}_${String(now.getHours()).padStart(2, '0')}h${String(now.getMinutes()).padStart(2, '0')}.xlsx`;
+        a.download = `${onlyDiscount ? 'Giam_Gia_Vuot_Muc_TSS' : 'Nhac_Bao_Cao_TSS'}_${range}_${String(now.getHours()).padStart(2, '0')}h${String(now.getMinutes()).padStart(2, '0')}.xlsx`;
         document.body.appendChild(a);
         a.click();
         setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000);

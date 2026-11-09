@@ -662,6 +662,8 @@
     // Dữ liệu: file bang-gia.json (tạo từ Excel bằng bang-gia/tao-bang-gia.js). Nội thành (trang DON SB) / ngoại thành (trang TOUR đi tỉnh).
     const DISCOUNT_LIMIT = { noi: 0.10, ngoai: 0.15 };   // giảm tối đa 10% nội thành, 15% ngoại thành
     const ZONE_LABEL = { noi: 'nội thành', ngoai: 'ngoại thành' };
+    // THEO DÕI ÂM THẦM (người dùng chọn): nhân viên KHÔNG thấy cảnh báo giảm giá; giá vẫn tự điền; chỉ Quản lý thấy & lọc.
+    const SILENT_DISCOUNT_WATCH = true;
     let priceItems = [], priceById = {};
     function loadPriceList() {
       return fetch('bang-gia.json', { cache: 'no-cache' }).then(r => r.ok ? r.json() : null).then(d => {
@@ -784,7 +786,7 @@
     function updateRowPriceHint(i) {
       const h = document.getElementById(`fh-${i}`);
       if (!h) return;
-      if (!usesPriceList()) { h.innerHTML = ''; return; }
+      if (!usesPriceList() || SILENT_DISCOUNT_WATCH) { h.innerHTML = ''; return; }
       const it = rowPriceItem(i);
       const c = document.getElementById(`c-${i}`), f = document.getElementById(`f-${i}`), m = document.getElementById(`m-${i}`);
       if (!it) { h.innerHTML = ''; return; }
@@ -811,6 +813,7 @@
       const h = document.getElementById('edit-modal-price-hint');
       const d = document.getElementById('edit-modal-dest');
       if (!h || !d) return;
+      if (SILENT_DISCOUNT_WATCH) { h.innerHTML = ''; if (d.dataset.priceId && d.dataset.priceLabel && !d.value.includes(d.dataset.priceLabel)) attachPriceToInput(d, null); return; }
       if (d.dataset.priceId && d.dataset.priceLabel && !d.value.includes(d.dataset.priceLabel)) attachPriceToInput(d, null);
       const it = d.dataset.priceId ? priceById[d.dataset.priceId] : null;
       const car = (document.getElementById('edit-modal-cartype') || {}).value || '';
@@ -1963,7 +1966,7 @@
       if (count > 0) {
         dbRoot().update(updates).then(() => {
           recordPlaces(savedDests);
-          alert(`Đã lưu thành công và phân tách hoa hồng cho ${count} đơn!` + (overDiscountRows.length ? `\n\n⚠️ Có ${overDiscountRows.length} đơn GIẢM GIÁ VƯỢT MỨC cho phép (10% nội thành, 15% ngoại thành) — Quản lý sẽ kiểm tra:\n${overDiscountRows.join('\n')}` : ''));
+          alert(`Đã lưu thành công và phân tách hoa hồng cho ${count} đơn!` + (overDiscountRows.length && !SILENT_DISCOUNT_WATCH ? `\n\n⚠️ Có ${overDiscountRows.length} đơn GIẢM GIÁ VƯỢT MỨC cho phép (10% nội thành, 15% ngoại thành) — Quản lý sẽ kiểm tra:\n${overDiscountRows.join('\n')}` : ''));
           renderBatchRows(role);
           const histInput = document.getElementById('filter-history-date');
           if (histInput && lastFormattedDate) {

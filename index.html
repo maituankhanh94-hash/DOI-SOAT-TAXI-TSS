@@ -664,22 +664,52 @@
     const ZONE_LABEL = { noi: 'nội thành', ngoai: 'ngoại thành' };
     // THEO DÕI ÂM THẦM (người dùng chọn): nhân viên KHÔNG thấy cảnh báo giảm giá; giá vẫn tự điền; chỉ Quản lý thấy & lọc.
     const SILENT_DISCOUNT_WATCH = true;
+    // 2 bảng giá: MỚI (bang-gia.json) và CŨ (bang-gia-cu.json). Quản lý chọn bảng đang áp dụng (lưu ở meta/priceSet, áp cho cả công ty).
+    const PRICE_SETS = { moi: { file: 'bang-gia.json', label: 'Giá MỚI' }, cu: { file: 'bang-gia-cu.json', label: 'Giá CŨ' } };
+    let activePriceSet = 'moi', priceSetsData = {};
     let priceItems = [], priceById = {};
+    function preparePriceItems(d) {
+      if (!d || !Array.isArray(d.items)) return [];
+      return d.items.map(it => {
+        const extra = [];
+        const m = /^Quận\s+(\d+)$/i.exec(it.district || '');
+        if (m) extra.push(`q${m[1]}`, `q ${m[1]}`, `quan ${m[1]}`);
+        if (it.kind === 'tinh') extra.push('tinh', 'di tinh');
+        return Object.assign({}, it, { label: priceLabelOf(it), search: removeAccents([it.district, it.ward, it.area, ...extra].join(' ')).replace(/[.,;()]/g, ' ') });
+      });
+    }
+    let priceSetWatched = false;
     function loadPriceList() {
-      return fetch('bang-gia.json', { cache: 'no-cache' }).then(r => r.ok ? r.json() : null).then(d => {
-        if (!d || !Array.isArray(d.items)) return;
-        priceItems = d.items.map(it => {
-          const extra = [];
-          const m = /^Quận\s+(\d+)$/i.exec(it.district || '');
-          if (m) extra.push(`q${m[1]}`, `q ${m[1]}`, `quan ${m[1]}`);
-          if (it.kind === 'tinh') extra.push('tinh', 'di tinh');
-          return Object.assign({}, it, { label: priceLabelOf(it), search: removeAccents([it.district, it.ward, it.area, ...extra].join(' ')).replace(/[.,;()]/g, ' ') });
-        });
+      return Promise.all(Object.entries(PRICE_SETS).map(([k, v]) =>
+        fetch(v.file, { cache: 'no-cache' }).then(r => r.ok ? r.json() : null).catch(() => null).then(d => { priceSetsData[k] = preparePriceItems(d); })
+      )).then(() => {
         priceById = {};
-        priceItems.forEach(it => { priceById[it.id] = it; });
-        inferCache.clear();
-        if (isManager()) { updateManagerAuditTable(); renderReminderBox(); }
-      }).catch(() => {});
+        Object.values(priceSetsData).forEach(list => list.forEach(it => { priceById[it.id] = it; }));
+        applyPriceSet();
+        if (!priceSetWatched) {
+          priceSetWatched = true;
+          dbRef('meta/priceSet').on('value', s => { activePriceSet = s.val() === 'cu' ? 'cu' : 'moi'; applyPriceSet(); }, () => {});
+        }
+      });
+    }
+    function applyPriceSet() {
+      priceItems = (priceSetsData[activePriceSet] && priceSetsData[activePriceSet].length) ? priceSetsData[activePriceSet] : (priceSetsData.moi || []);
+      inferCache.clear();
+      renderPriceSetSwitch();
+      if (isManager()) { updateManagerAuditTable(); renderReminderBox(); }
+    }
+    // Nút chọn bảng giá (Trang Quản Lý)
+    function renderPriceSetSwitch() {
+      const el = document.getElementById('price-set-switch');
+      if (!el) return;
+      const b = (k) => `<button onclick="choosePriceSet('${k}')" class="px-3 py-1.5 rounded-lg font-extrabold ${activePriceSet === k ? 'bg-blue-600 text-white shadow' : 'bg-white border border-slate-300 text-slate-600 hover:bg-slate-100'}">${activePriceSet === k ? '✔ ' : ''}${PRICE_SETS[k].label}</button>`;
+      el.innerHTML = `<span class="font-extrabold text-slate-700">💲 Bảng giá đang áp dụng:</span> ${b('moi')} ${b('cu')}
+        <span class="text-[11px] text-slate-500">(${(priceSetsData[activePriceSet] || []).length} mục — áp cho cả công ty: tự điền giá & lọc giảm giá vượt mức)</span>`;
+    }
+    function choosePriceSet(k) {
+      if (!isManager() || k === activePriceSet) return;
+      if (!confirm(`Chuyển sang áp dụng ${PRICE_SETS[k].label} cho cả công ty?\n(Giá tự điền khi nhập đơn và việc lọc giảm giá vượt mức sẽ tính theo bảng này. Đơn đã lưu không bị đổi tiền.)`)) return;
+      dbRef('meta/priceSet').set(k).catch(e => alert('Không đổi được: ' + authErrorText(e)));
     }
     function priceLabelOf(it) {
       if (it.kind === 'citytour') return it.area;
@@ -1710,8 +1740,8 @@
         const dEl = document.getElementById('edit-modal-dest');
         const it = dEl && dEl.dataset.priceId ? priceById[dEl.dataset.priceId] : null;
         const list = priceForItem(it, carType);
-        if (it && list) Object.assign(trip, { priceId: it.id, priceLabel: it.label, listPrice: list, priceZone: it.zone });
-        else { delete trip.priceId; delete trip.priceLabel; delete trip.listPrice; delete trip.priceZone; }
+        if (it && list) Object.assign(trip, { priceId: it.id, priceLabel: it.label, listPrice: list, priceZone: it.zone, priceSet: it.id.startsWith('BGC') ? 'cu' : 'moi' });
+        else { delete trip.priceId; delete trip.priceLabel; delete trip.listPrice; delete trip.priceZone; delete trip.priceSet; }
         const n = splitCountOf(ticket);
         if (n > 1 && trip.originalTotalFare != null) trip.originalTotalFare = totalFare * n;
       }
@@ -1898,7 +1928,7 @@
           const it = rowPriceItem(i);
           const list = priceForItem(it, carType);
           if (it && list) {
-            priceFields = { priceId: it.id, priceLabel: it.label, listPrice: list, priceZone: it.zone };
+            priceFields = { priceId: it.id, priceLabel: it.label, listPrice: list, priceZone: it.zone, priceSet: activePriceSet };
             const di = discountInfo({ role: loggedInUser.role, listPrice: list, totalFare, priceZone: it.zone, paymentMethod: pay, source });
             if (di && di.over) overDiscountRows.push(`Dòng ${i+1}: ${discountText(di)}`);
           }
@@ -2133,6 +2163,7 @@
           <!-- MỤC 5.9: NHẮC BÁO CÁO (bảng riêng) -->
           <div class="bg-white rounded-3xl shadow-md border border-slate-200 p-4 sm:p-5 space-y-3">
             <h4 class="text-xs sm:text-sm font-extrabold text-slate-800 uppercase">📋 Nhắc Báo Cáo & Giảm Giá Vượt Mức</h4>
+            <div id="price-set-switch" class="flex flex-wrap items-center gap-2 text-xs bg-blue-50 border border-blue-200 rounded-2xl p-2.5"></div>
             <div id="overdue-box" class="space-y-3"></div>
           </div>
 
@@ -2224,6 +2255,7 @@
       renderPlanPaymentsTable();
       updateManagerAuditTable();
       updateManagerRevenueSummary();
+      renderPriceSetSwitch();
     }
 
     function renderPlanPaymentsTable() {

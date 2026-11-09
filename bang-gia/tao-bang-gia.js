@@ -1,10 +1,12 @@
 // Chuyển file Excel bảng giá (BANG_GIA_XE.xlsx) thành bang-gia.json cho app đọc.
-// Chạy: node bang-gia/tao-bang-gia.js bang-gia/BANG_GIA_XE.xlsx bang-gia.json   (cần: npm i exceljs)
+// Chạy: node bang-gia/tao-bang-gia.js bang-gia/BANG_GIA_XE.xlsx bang-gia.json            (bảng giá MỚI)
+//       node bang-gia/tao-bang-gia.js bang-gia/BANG_GIA_XE_CU.xlsx bang-gia-cu.json BGC  (bảng giá CŨ)
+// (cần: npm i exceljs). Tham số thứ 3 = tiền tố mã mục (mặc định BG) để 2 bảng không trùng mã.
 // Quy ước vùng (để tính mức giảm tối đa): các quận TP.HCM = nội thành; các huyện (Bình Chánh, Cần Giờ, Hóc Môn, Củ Chi, Nhà Bè)
 // và trang "TOUR" (đi tỉnh) = ngoại thành. City tour = nội thành.
 const ExcelJS = require('exceljs');
 const fs = require('fs');
-const [,, src, out] = process.argv;
+const [,, src, out, prefix = 'BG'] = process.argv;
 const val = v => v && v.richText ? v.richText.map(x => x.text).join('') : (v && v.result !== undefined ? v.result : (v && v.error ? null : v));
 const txt = v => { const x = val(v); return x == null ? '' : String(x).replace(/\s*\n\s*/g, ' ').replace(/\s{2,}/g, ' ').trim(); };
 const num = v => { const x = val(v); return typeof x === 'number' ? x : null; };
@@ -38,7 +40,7 @@ const num = v => { const x = val(v); return typeof x === 'number' ? x : null; };
     items.push({ kind: 'tinh', zone: 'ngoai', district: province, ward: route, area: '1 chiều', km: num(c[2]), p4: null, p7: p7a, p16: p16a });
     items.push({ kind: 'tinh', zone: 'ngoai', district: province, ward: route, area: '2 chiều', km: num(c[3]), p4: null, p7: p7b, p16: p16b });
   });
-  items.forEach((it, k) => { it.id = 'BG' + String(k + 1).padStart(3, '0'); });
-  fs.writeFileSync(out, JSON.stringify({ updated: new Date().toISOString().slice(0, 10), source: 'BANG_GIA_XE.xlsx', items }, null, 1) + '\n');
+  items.forEach((it, k) => { it.id = prefix + String(k + 1).padStart(3, '0'); });
+  fs.writeFileSync(out, JSON.stringify({ updated: new Date().toISOString().slice(0, 10), source: require('path').basename(src), items }, null, 1) + '\n');
   console.log('Đã tạo', out, ':', items.length, 'mục (', items.filter(x => x.kind === 'sb').length, 'nội thành,', items.filter(x => x.kind === 'tinh').length, 'đi tỉnh,', items.filter(x => x.kind === 'citytour').length, 'city tour)');
 })();

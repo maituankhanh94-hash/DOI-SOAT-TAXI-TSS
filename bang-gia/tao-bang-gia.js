@@ -9,6 +9,9 @@ const fs = require('fs');
 const [,, src, out, prefix = 'BG'] = process.argv;
 const val = v => v && v.richText ? v.richText.map(x => x.text).join('') : (v && v.result !== undefined ? v.result : (v && v.error ? null : v));
 const txt = v => { const x = val(v); return x == null ? '' : String(x).replace(/\s*\n\s*/g, ' ').replace(/\s{2,}/g, ' ').trim(); };
+// Sửa lỗi gõ tên phường mới trong file Excel (đúng theo danh sách 168 phường/xã TP.HCM từ 01/7/2025). Giá giữ nguyên.
+const WARD_FIX = [[/(^|[^T])Hạnh Mỹ Tây/g, '$1Thạnh Mỹ Tây'], [/Đông Lợi Trung/g, 'Bình Lợi Trung'], [/Thủ Đúc/g, 'Thủ Đức'], [/Xã Hạnh An/g, 'Xã Thạnh An']];
+const fixWard = s => WARD_FIX.reduce((x, [re, to]) => x.replace(re, to), s);
 const num = v => { const x = val(v); return typeof x === 'number' ? x : null; };
 (async () => {
   const wb = new ExcelJS.Workbook();
@@ -28,7 +31,7 @@ const num = v => { const x = val(v); return typeof x === 'number' ? x : null; };
     if (p4 == null && p7 == null) return;
     const isTour = /^city tour/i.test(district);
     const ngoai = /^(huyện|thị trấn)\b|bình chánh|cần giờ|hóc môn|củ chi|nhà bè/i.test(district);
-    items.push({ kind: isTour ? 'citytour' : 'sb', zone: (!isTour && ngoai) ? 'ngoai' : 'noi', district: isTour ? 'City tour' : district, ward: a[1], area: a[2], km: num(c[3]), p4, p7, p16 });
+    items.push({ kind: isTour ? 'citytour' : 'sb', zone: (!isTour && ngoai) ? 'ngoai' : 'noi', district: isTour ? 'City tour' : district, ward: fixWard(a[1]), area: a[2], km: num(c[3]), p4, p7, p16 });
   });
   // --- Trang TOUR (đi tỉnh) ---
   const tour = wb.worksheets.find(w => /TOUR/i.test(w.name));

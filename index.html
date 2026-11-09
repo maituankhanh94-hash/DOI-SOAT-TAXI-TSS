@@ -775,7 +775,192 @@
     }
     // QUY ƯỚC Ô ĐIỂM ĐẾN (Bán vé + Kế hoạch): địa chỉ NỘI THÀNH bắt buộc ghi Quận (vd "Tân Định, Q1", "Landmark 81, Bình Thạnh").
     // Đi tỉnh / huyện ngoại thành: ghi tên tỉnh / huyện. Chọn gợi ý 📋 từ bảng giá thì đã có Quận sẵn.
-    const DEST_RULE_TEXT = 'BẮT BUỘC ghi Quận / Huyện — vd: "Tân Định, Q1", "Đề Thám, Quận 1", "Landmark 81, Bình Thạnh", "Tỉnh lộ 8, Củ Chi". Đi tỉnh ghi tên tỉnh — vd: "Vũng Tàu". Hoặc chọn gợi ý 📋 từ bảng giá.';
+    const NEW_WARDS = [ // [P=phường/X=xã/ĐK=đặc khu, tên mới, quận/huyện cũ, vùng] — 168 phường/xã TP.HCM từ 01/7/2025
+      ["P","Thủ Dầu Một","Thủ Dầu Một (Bình Dương)","ngoai"],
+      ["P","Phú Lợi","Thủ Dầu Một (Bình Dương)","ngoai"],
+      ["P","Bình Dương","Thủ Dầu Một/Tân Uyên (Bình Dương)","ngoai"],
+      ["P","Phú An","Bến Cát/Thủ Dầu Một (Bình Dương)","ngoai"],
+      ["P","Chánh Hiệp","Thủ Dầu Một (Bình Dương)","ngoai"],
+      ["X","Dầu Tiếng","Dầu Tiếng (Bình Dương)","ngoai"],
+      ["X","Minh Thạnh","Dầu Tiếng (Bình Dương)","ngoai"],
+      ["X","Long Hòa","Dầu Tiếng (Bình Dương)","ngoai"],
+      ["X","Thanh An","Dầu Tiếng (Bình Dương)","ngoai"],
+      ["P","Bến Cát","Bàu Bàng/Bến Cát (Bình Dương)","ngoai"],
+      ["X","Trừ Văn Thố","Bàu Bàng (Bình Dương)","ngoai"],
+      ["X","Bàu Bàng","Bàu Bàng (Bình Dương)","ngoai"],
+      ["P","Chánh Phú Hòa","Bến Cát/Bàu Bàng (Bình Dương)","ngoai"],
+      ["P","Long Nguyên","Bến Cát/Bàu Bàng (Bình Dương)","ngoai"],
+      ["P","Tây Nam","Bến Cát/Dầu Tiếng (Bình Dương)","ngoai"],
+      ["P","Thới Hòa","Bến Cát (Bình Dương)","ngoai"],
+      ["P","Hòa Lợi","Bến Cát (Bình Dương)","ngoai"],
+      ["X","Phú Giáo","Phú Giáo (Bình Dương)","ngoai"],
+      ["X","Phước Thành","Phú Giáo (Bình Dương)","ngoai"],
+      ["X","An Long","Phú Giáo (Bình Dương)","ngoai"],
+      ["X","Phước Hòa","Phú Giáo (Bình Dương)","ngoai"],
+      ["P","Tân Uyên","Tân Uyên/Bắc Tân Uyên (Bình Dương)","ngoai"],
+      ["P","Tân Khánh","Tân Uyên (Bình Dương)","ngoai"],
+      ["X","Bắc Tân Uyên","Bắc Tân Uyên (Bình Dương)","ngoai"],
+      ["X","Thường Tân","Bắc Tân Uyên (Bình Dương)","ngoai"],
+      ["P","Vĩnh Tân","Bắc Tân Uyên/Tân Uyên (Bình Dương)","ngoai"],
+      ["P","Bình Cơ","Bắc Tân Uyên/Tân Uyên (Bình Dương)","ngoai"],
+      ["P","Tân Hiệp","Tân Uyên (Bình Dương)","ngoai"],
+      ["P","Dĩ An","Dĩ An (Bình Dương)","ngoai"],
+      ["P","Tân Đông Hiệp","Dĩ An (Bình Dương)","ngoai"],
+      ["P","Đông Hòa","Dĩ An (Bình Dương)","ngoai"],
+      ["P","Lái Thiêu","Thuận An (Bình Dương)","ngoai"],
+      ["P","Thuận Giao","Thuận An (Bình Dương)","ngoai"],
+      ["P","An Phú","Thuận An (Bình Dương)","ngoai"],
+      ["P","Thuận An","Thuận An (Bình Dương)","ngoai"],
+      ["P","Bình Hòa","Thuận An (Bình Dương)","ngoai"],
+      ["P","Vũng Tàu","Vũng Tàu (BR-VT)","ngoai"],
+      ["P","Tam Thắng","Vũng Tàu (BR-VT)","ngoai"],
+      ["P","Rạch Dừa","Vũng Tàu (BR-VT)","ngoai"],
+      ["P","Phước Thắng","Vũng Tàu (BR-VT)","ngoai"],
+      ["X","Long Sơn","Vũng Tàu (BR-VT)","ngoai"],
+      ["P","Bà Rịa","Bà Rịa (BR-VT)","ngoai"],
+      ["P","Long Hương","Bà Rịa (BR-VT)","ngoai"],
+      ["P","Tam Long","Bà Rịa (BR-VT)","ngoai"],
+      ["X","Ngãi Giao","Châu Đức (BR-VT)","ngoai"],
+      ["X","Xuân Sơn","Châu Đức (BR-VT)","ngoai"],
+      ["X","Bình Giã","Châu Đức (BR-VT)","ngoai"],
+      ["X","Châu Đức","Châu Đức (BR-VT)","ngoai"],
+      ["X","Kim Long","Châu Đức (BR-VT)","ngoai"],
+      ["X","Nghĩa Thành","Châu Đức (BR-VT)","ngoai"],
+      ["X","Hồ Tràm","Xuyên Mộc (BR-VT)","ngoai"],
+      ["X","Xuyên Mộc","Xuyên Mộc (BR-VT)","ngoai"],
+      ["X","Bàu Lâm","Xuyên Mộc (BR-VT)","ngoai"],
+      ["X","Hòa Hội","Xuyên Mộc (BR-VT)","ngoai"],
+      ["X","Hòa Hiệp","Xuyên Mộc (BR-VT)","ngoai"],
+      ["X","Bình Châu","Xuyên Mộc (BR-VT)","ngoai"],
+      ["X","Long Điền","Long Đất (BR-VT)","ngoai"],
+      ["X","Long Hải","Long Đất (BR-VT)","ngoai"],
+      ["X","Đất Đỏ","Long Đất (BR-VT)","ngoai"],
+      ["X","Phước Hải","Long Đất (BR-VT)","ngoai"],
+      ["P","Phú Mỹ","Phú Mỹ (BR-VT)","ngoai"],
+      ["P","Tân Hải","Phú Mỹ (BR-VT)","ngoai"],
+      ["P","Tân Phước","Phú Mỹ (BR-VT)","ngoai"],
+      ["P","Tân Thành","Phú Mỹ (BR-VT)","ngoai"],
+      ["X","Châu Pha","Phú Mỹ (BR-VT)","ngoai"],
+      ["ĐK","Côn Đảo","Côn Đảo","ngoai"],
+      ["P","Tân Định","Q1","noi"],
+      ["P","Sài Gòn","Q1","noi"],
+      ["P","Bến Thành","Q1","noi"],
+      ["P","Cầu Ông Lãnh","Q1","noi"],
+      ["P","An Phú Đông","Q12","noi"],
+      ["P","Thới An","Q12","noi"],
+      ["P","Tân Thới Hiệp","Q12","noi"],
+      ["P","Trung Mỹ Tây","Q12","noi"],
+      ["P","Đông Hưng Thuận","Q12","noi"],
+      ["P","Linh Xuân","Thủ Đức","noi"],
+      ["P","Tam Bình","Thủ Đức","noi"],
+      ["P","Hiệp Bình","Thủ Đức","noi"],
+      ["P","Thủ Đức","Thủ Đức","noi"],
+      ["P","Long Bình","Thủ Đức","noi"],
+      ["P","Tăng Nhơn Phú","Thủ Đức","noi"],
+      ["P","Phước Long","Thủ Đức","noi"],
+      ["P","Long Phước","Thủ Đức","noi"],
+      ["P","Long Trường","Thủ Đức","noi"],
+      ["P","An Nhơn","Gò Vấp","noi"],
+      ["P","An Hội Đông","Gò Vấp","noi"],
+      ["P","An Hội Tây","Gò Vấp","noi"],
+      ["P","Gò Vấp","Gò Vấp","noi"],
+      ["P","Hạnh Thông","Gò Vấp","noi"],
+      ["P","Thông Tây Hội","Gò Vấp","noi"],
+      ["P","Bình Lợi Trung","Bình Thạnh","noi"],
+      ["P","Bình Quới","Bình Thạnh","noi"],
+      ["P","Bình Thạnh","Bình Thạnh","noi"],
+      ["P","Gia Định","Bình Thạnh","noi"],
+      ["P","Thạnh Mỹ Tây","Bình Thạnh","noi"],
+      ["P","Tân Sơn Nhất","Tân Bình","noi"],
+      ["P","Tân Sơn Hòa","Tân Bình","noi"],
+      ["P","Bảy Hiền","Tân Bình","noi"],
+      ["P","Tân Hòa","Tân Bình","noi"],
+      ["P","Tân Bình","Tân Bình","noi"],
+      ["P","Tân Sơn","Tân Bình","noi"],
+      ["P","Tây Thạnh","Tân Phú","noi"],
+      ["P","Tân Sơn Nhì","Tân Phú","noi"],
+      ["P","Phú Thọ Hòa","Tân Phú","noi"],
+      ["P","Phú Thạnh","Tân Phú","noi"],
+      ["P","Tân Phú","Tân Phú","noi"],
+      ["P","Đức Nhuận","Phú Nhuận","noi"],
+      ["P","Cầu Kiệu","Phú Nhuận","noi"],
+      ["P","Phú Nhuận","Phú Nhuận","noi"],
+      ["P","An Khánh","Thủ Đức","noi"],
+      ["P","Bình Trưng","Thủ Đức","noi"],
+      ["P","Cát Lái","Thủ Đức","noi"],
+      ["P","Xuân Hòa","Q3","noi"],
+      ["P","Nhiêu Lộc","Q3","noi"],
+      ["P","Bàn Cờ","Q3","noi"],
+      ["P","Hòa Hưng","Q10","noi"],
+      ["P","Diên Hồng","Q10","noi"],
+      ["P","Vườn Lài","Q10","noi"],
+      ["P","Hòa Bình","Q11","noi"],
+      ["P","Phú Thọ","Q11","noi"],
+      ["P","Bình Thới","Q11","noi"],
+      ["P","Minh Phụng","Q11","noi"],
+      ["P","Xóm Chiếu","Q4","noi"],
+      ["P","Khánh Hội","Q4","noi"],
+      ["P","Vĩnh Hội","Q4","noi"],
+      ["P","Chợ Quán","Q5","noi"],
+      ["P","An Đông","Q5","noi"],
+      ["P","Chợ Lớn","Q5","noi"],
+      ["P","Phú Lâm","Q6","noi"],
+      ["P","Bình Phú","Q6","noi"],
+      ["P","Bình Tây","Q6","noi"],
+      ["P","Bình Tiên","Q6","noi"],
+      ["P","Chánh Hưng","Q8","noi"],
+      ["P","Bình Đông","Q8","noi"],
+      ["P","Phú Định","Q8","noi"],
+      ["P","Bình Hưng Hòa","Bình Tân","noi"],
+      ["P","Bình Tân","Bình Tân","noi"],
+      ["P","Bình Trị Đông","Bình Tân","noi"],
+      ["P","Tân Tạo","Bình Tân","noi"],
+      ["P","An Lạc","Bình Tân","noi"],
+      ["P","Tân Hưng","Q7","noi"],
+      ["P","Tân Thuận","Q7","noi"],
+      ["P","Phú Thuận","Q7","noi"],
+      ["P","Tân Mỹ","Q7","noi"],
+      ["X","Tân An Hội","Củ Chi","ngoai"],
+      ["X","An Nhơn Tây","Củ Chi","ngoai"],
+      ["X","Nhuận Đức","Củ Chi","ngoai"],
+      ["X","Thái Mỹ","Củ Chi","ngoai"],
+      ["X","Phú Hòa Đông","Củ Chi","ngoai"],
+      ["X","Bình Mỹ","Củ Chi","ngoai"],
+      ["X","Củ Chi","Củ Chi","ngoai"],
+      ["X","Hóc Môn","Hóc Môn","ngoai"],
+      ["X","Đông Thạnh","Hóc Môn","ngoai"],
+      ["X","Xuân Thới Sơn","Hóc Môn","ngoai"],
+      ["X","Bà Điểm","Hóc Môn","ngoai"],
+      ["X","Tân Nhựt","Bình Chánh","ngoai"],
+      ["X","Vĩnh Lộc","Bình Chánh","ngoai"],
+      ["X","Tân Vĩnh Lộc","Bình Chánh","ngoai"],
+      ["X","Bình Lợi","Bình Chánh","ngoai"],
+      ["X","Bình Hưng","Bình Chánh","ngoai"],
+      ["X","Hưng Long","Bình Chánh","ngoai"],
+      ["X","Bình Chánh","Bình Chánh","ngoai"],
+      ["X","Nhà Bè","Nhà Bè","ngoai"],
+      ["X","Hiệp Phước","Nhà Bè","ngoai"],
+      ["X","Cần Giờ","Cần Giờ","ngoai"],
+      ["X","Bình Khánh","Cần Giờ","ngoai"],
+      ["X","An Thới Đông","Cần Giờ","ngoai"],
+      ["X","Thạnh An","Cần Giờ","ngoai"]
+    ];
+    // Phường/xã mới (sau sáp nhập 01/7/2025) cũng được chấp nhận thay cho Quận/Huyện cũ.
+    const wordsOf = s => ' ' + removeAccents(String(s || '')).replace(/[^a-z0-9]+/g, ' ').trim() + ' ';
+    const NEW_WARD_KEYS = NEW_WARDS.map(w => ({ key: wordsOf(w[1]), w }));
+    // Các phường/xã mới có trong chữ gõ (ưu tiên tên dài: "Tân Sơn Nhất" thắng "Tân Sơn")
+    function findNewWards(text) {
+      const t = wordsOf(text);
+      const hits = NEW_WARD_KEYS.filter(x => t.includes(x.key));
+      return hits.filter(h => !hits.some(o => o !== h && o.key.length > h.key.length && o.key.includes(h.key))).map(h => h.w);
+    }
+    // Mục bảng giá theo phường mới (cột "Phường mới" trong bảng giá)
+    function wardPriceMatches(text) {
+      const ws = findNewWards(text).filter(w => w[0] !== 'ĐK');
+      if (!ws.length) return [];
+      return priceItems.filter(it => it.kind === 'sb' && ws.some(w => wordsOf(it.ward).includes(wordsOf(w[1]))));
+    }
+    const DEST_RULE_TEXT = 'BẮT BUỘC ghi Phường/Xã mới (hoặc Quận/Huyện cũ) — vd: "140/20 Võ Duy Ninh, Thạnh Mỹ Tây", "Đề Thám, Q1", "Tỉnh lộ 8, Củ Chi". Đi tỉnh ghi tên tỉnh — vd: "Vũng Tàu". Hoặc chọn gợi ý 📋 từ bảng giá.';
     const HCM_DISTRICT_NAMES = ['thu duc', 'go vap', 'binh thanh', 'binh tan', 'tan binh', 'phu nhuan', 'tan phu',
       'binh chanh', 'can gio', 'hoc mon', 'cu chi', 'nha be'];
     const PROVINCE_EXTRA = ['vung tau', 'ba ria', 'da lat', 'phan thiet', 'mui ne', 'phan rang', 'nha trang', 'cam ranh', 'buon ma thuot', 'dak lak', 'daklak',
@@ -788,7 +973,7 @@
       if (/ (?:q|quan|district) ?(?:[1-9]|1[0-2]) /.test(t)) return true;                       // Q1, Quận 3, Q 12, District 7
       const names = HCM_DISTRICT_NAMES.concat(PROVINCE_EXTRA,
         priceItems.filter(it => it.kind === 'tinh').flatMap(it => removeAccents(it.district).toLowerCase().split(/\s*-\s*/)));
-      return names.some(n => n && t.includes(' ' + n + ' '));
+      return names.some(n => n && t.includes(' ' + n + ' ')) || findNewWards(dest).length > 0;
     }
 
     // Khung nhắc LỚN khi thiếu Quận (mẫu 3 người dùng chọn). CHỈ NHẮC, KHÔNG gợi ý (người dùng yêu cầu 09/11).
@@ -797,7 +982,7 @@
       if (!el) { el = document.createElement('div'); el.id = 'dest-fix-modal'; document.body.appendChild(el); }
       const blocks = items.map(it => `
         <div class="rounded-2xl p-4 border-2 bg-amber-50 border-amber-400">
-          <p class="text-lg sm:text-xl font-extrabold text-slate-900 leading-snug">Vui lòng nhập thêm <span class="text-red-600 underline">QUẬN / HUYỆN</span> cho điểm đến <span class="text-blue-700">"${escHtml(it.dest)}"</span> mới thực hiện lưu đơn được.</p>
+          <p class="text-lg sm:text-xl font-extrabold text-slate-900 leading-snug">Vui lòng nhập thêm <span class="text-red-600 underline">PHƯỜNG / XÃ</span> (hoặc Quận cũ) cho điểm đến <span class="text-blue-700">"${escHtml(it.dest)}"</span> mới thực hiện lưu đơn được.</p>
         </div>`).join('');
       el.innerHTML = `<div class="fixed inset-0 bg-slate-900/80 z-[70] flex items-center justify-center p-3 backdrop-blur-sm">
         <div class="bg-white rounded-3xl w-full max-w-lg max-h-[92vh] flex flex-col overflow-hidden border-4 border-red-500 shadow-2xl">
@@ -819,7 +1004,9 @@
       if (!priceItems.length || !t.destination) return null;
       const key = `${t.destination}|${t.carType}`;
       if (inferCache.has(key)) return inferCache.get(key);
-      const hits = findPriceMatches(t.destination, 60);
+      let hits = findPriceMatches(t.destination, 60);
+      if (!hits.length) hits = wardPriceMatches(t.destination);   // địa chỉ kiểu mới: "số nhà, đường, Phường mới"
+
       let res = null;
       const priced = hits.map(it => ({ it, p: priceForItem(it, t.carType) })).filter(x => x.p);
       if (priced.length) {
@@ -893,7 +1080,8 @@
       if (!usesPriceList()) return;
       const d = document.getElementById(`d-${i}`);
       if (!d || !d.value.trim() || rowPriceItem(i)) { updateRowPriceHint(i); return; }
-      const hits = findPriceMatches(d.value, 2);
+      let hits = findPriceMatches(d.value, 2);
+      if (!hits.length) hits = wardPriceMatches(d.value);   // địa chỉ kiểu mới -> nhận theo phường (chỉ khi đúng 1 mục)
       if (hits.length === 1) { attachPriceToInput(d, hits[0]); d.dataset.priceLabel = ''; d.dataset.priceAuto = d.value; }
       applyRowPrice(i);
     }
@@ -1251,7 +1439,7 @@
               </select>
             </td>
             <td class="p-2.5 relative">
-              <input type="text" id="d-${i}" autocomplete="off" placeholder="${PRICE_ROLES.includes(role) ? 'Vd: Đề Thám, Q1 (bắt buộc ghi Quận/Huyện)' : 'Gõ điểm đến (vd: đề thám)...'}" class="w-full p-2 bg-amber-50 border border-amber-300 rounded-xl font-semibold text-xs" oninput="showDestSuggestions(this, 'dest-drop-${i}', ${i})" onkeydown="suggestKeydown(event, 'dest-drop-${i}')" onblur="hideSuggestLater('dest-drop-${i}'); autoMatchRowPrice(${i})">
+              <input type="text" id="d-${i}" autocomplete="off" placeholder="${PRICE_ROLES.includes(role) ? 'Vd: Võ Duy Ninh, Thạnh Mỹ Tây (bắt buộc ghi Phường/Xã)' : 'Gõ điểm đến (vd: đề thám)...'}" class="w-full p-2 bg-amber-50 border border-amber-300 rounded-xl font-semibold text-xs" oninput="showDestSuggestions(this, 'dest-drop-${i}', ${i})" onkeydown="suggestKeydown(event, 'dest-drop-${i}')" onblur="hideSuggestLater('dest-drop-${i}'); autoMatchRowPrice(${i})">
               <div id="dest-drop-${i}"></div>
             </td>
             <td class="p-2.5"><input type="text" id="f-${i}" autocomplete="off" placeholder="Số tiền..." oninput="onRowFareInput(${i})" onblur="formatCurrSmartInput(this); updateRowPriceHint(${i})" class="w-full p-2 bg-emerald-50 border border-emerald-300 rounded-xl font-extrabold text-emerald-800 text-right text-xs"><div id="fh-${i}" class="text-[10px] leading-tight mt-0.5 text-right"></div></td>

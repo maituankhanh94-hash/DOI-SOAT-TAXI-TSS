@@ -1828,9 +1828,9 @@
             </div>
             <p class="text-[11px] text-slate-500">🔒 Mật khẩu được Firebase mã hóa, không ai xem được. Nhân viên quên mật khẩu: bấm <b>Đặt Lại MK</b>.</p>
             <input type="text" id="acc-search" autocomplete="off" placeholder="🔍 Tìm tài khoản (gõ tên tài khoản hoặc phân vùng)..." class="w-full sm:w-80 p-2.5 bg-white border-2 border-indigo-200 focus:border-indigo-500 rounded-xl font-bold text-xs outline-none" oninput="renderAccountsTable()">
-            <div class="overflow-x-auto pt-1">
+            <div class="overflow-auto custom-scrollbar max-h-[360px] border border-slate-200 rounded-2xl">
               <table class="w-full text-left border-collapse text-xs min-w-[640px]">
-                <thead>
+                <thead class="sticky top-0 z-10">
                   <tr class="bg-slate-900 text-white font-bold uppercase tracking-wider">
                     <th class="p-3">Tài Khoản</th>
                     <th class="p-3">Mật Khẩu</th>

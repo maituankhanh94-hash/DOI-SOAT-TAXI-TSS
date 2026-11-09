@@ -2908,6 +2908,7 @@
           <input type="date" value="${remindTo}" class="px-2 py-1 bg-slate-50 border rounded-lg font-mono font-bold" onchange="setRemindRange(remindFrom, this.value)">
           ${btn('today', 'Hôm nay')} ${btn('yesterday', 'Hôm qua')} ${btn('7', '7 ngày')} ${btn('month', 'Tháng này')}
           ${head}
+          <button id="btn-remind-excel" onclick="exportReminderExcel()" class="ml-auto px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold shadow-sm">📥 Xuất Excel Mục Này</button>
         </div>
         <div class="${ok ? 'bg-emerald-50 border-emerald-300' : 'bg-orange-50 border-orange-300'} border-2 rounded-2xl p-3 space-y-2 text-xs">
           ${ok ? `<div class="font-bold text-emerald-700">✅ Tất cả đơn ${one ? 'ngày này' : 'trong khoảng này'} đã đủ 2 bên báo cáo.</div>` : `
@@ -2986,6 +2987,149 @@
       if (kw) kw.value = '';
       updateManagerAuditTable();
       const tb = document.getElementById('tbody-mgr'); if (tb) tb.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    // ===== XUẤT EXCEL RIÊNG CHO BẢNG NHẮC BÁO CÁO & GIẢM GIÁ VƯỢT MỨC (theo khoảng ngày đang chọn) =====
+    function collectOverDiscount(from, to) {
+      const bills = {};
+      allCompanyTrips.forEach(t => {
+        const k0 = tripDateKey(t);
+        if (!k0 || k0 < from || k0 > to) return;
+        const d = discountInfo(t);
+        if (!d || !d.over) return;
+        const k = billKey(t);
+        if (!bills[k]) bills[k] = { trips: [], d, dateKey: k0 };
+        bills[k].trips.push(t);
+      });
+      return Object.values(bills).sort((a, b) => (a.dateKey || '').localeCompare(b.dateKey || '') || b.d.pct - a.d.pct);
+    }
+    // Ghi 1 bảng có định dạng: dòng tiêu đề tối màu, kẻ ô, tô màu theo hàm rowFill
+    function xlTable(ws, startRow, cols, rows, rowFill) {
+      ws.columns = cols.map(c => ({ width: c.w }));
+      const hr = ws.getRow(startRow);
+      cols.forEach((c, i) => {
+        const cell = hr.getCell(i + 1);
+        cell.value = c.h;
+        xlFill(cell, 'FF0F172A');
+        xlFont(cell, { bold: true, color: { argb: 'FFFFFFFF' } });
+        cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+        cell.border = XL.border;
+      });
+      hr.height = 30;
+      let r = startRow + 1;
+      if (!rows.length) {
+        ws.mergeCells(r, 1, r, cols.length);
+        const c = ws.getCell(r, 1);
+        c.value = '✅ Không có dữ liệu trong khoảng ngày này';
+        xlFont(c, { italic: true, color: { argb: 'FF15803D' } });
+        c.alignment = { horizontal: 'center' };
+        return r + 1;
+      }
+      rows.forEach((vals, idx) => {
+        const row = ws.getRow(r);
+        const fill = rowFill ? rowFill(idx) : null;
+        vals.forEach((v, i) => {
+          const c = row.getCell(i + 1);
+          c.value = v;
+          c.border = XL.border;
+          xlFont(c, {});
+          c.alignment = { vertical: 'middle', wrapText: !!cols[i].wrap, horizontal: cols[i].align || (typeof v === 'number' ? 'right' : 'left') };
+          if (cols[i].fmt) c.numFmt = cols[i].fmt;
+          if (fill) xlFill(c, fill);
+        });
+        r++;
+      });
+      ws.autoFilter = { from: { row: startRow, column: 1 }, to: { row: startRow, column: cols.length } };
+      ws.views = [{ state: 'frozen', ySplit: startRow, showGridLines: false }];
+      return r;
+    }
+    function xlSheetSetup(wb, name, landscape) {
+      return wb.addWorksheet(name, { pageSetup: { paperSize: 9, orientation: landscape ? 'landscape' : 'portrait', fitToPage: true, fitToWidth: 1, fitToHeight: 0, printTitlesRow: '6:6' } });
+    }
+    async function exportReminderExcel() {
+      const btn = document.getElementById('btn-remind-excel');
+      const old = btn ? btn.innerText : '';
+      if (btn) { btn.disabled = true; btn.innerText = '⏳ Đang tạo file...'; }
+      try {
+        const ExcelJS = await loadExcelJS();
+        const wb = new ExcelJS.Workbook();
+        wb.creator = 'TSS POS';
+        const f = { startDateVal: remindFrom, endDateVal: remindTo, roleFilter: 'all', matchStatusFilter: 'all', keyword: '' };
+        const gs = computeAuditGroups({ startDateVal: remindFrom, endDateVal: remindTo, roleFilter: 'all', matchStatusFilter: 'unmatched', keyword: '' })
+          .sort((a, b) => (a.dateKey || '').localeCompare(b.dateKey || '') || a.ts - b.ts);
+        const dmy = k => k ? `${k.slice(8, 10)}/${k.slice(5, 7)}/${k.slice(0, 4)}` : '';
+        const stTxt = g => g.overdue ? 'QUÁ HẠN' : 'Chờ báo';
+        const lateFill = g => g.overdue ? 'FFFEE2E2' : 'FFFEF3C7';
+        const sumFare = trips => trips.reduce((a, t) => a + (Number(t.totalFare) || 0), 0);
+
+        // 1. Tài xế chưa báo
+        const drv = gs.filter(g => g.missing === 'driver');
+        let ws = xlSheetSetup(wb, 'Tài Xế Chưa Báo', true);
+        xlTitle(ws, 8, f, 'TÀI XẾ / CHỦ XE CHƯA BÁO CÁO');
+        xlTable(ws, 6, [
+          { h: 'STT', w: 6, align: 'center' }, { h: 'Ngày', w: 12, align: 'center' }, { h: 'Biển số xe', w: 14, align: 'center' }, { h: 'Số phiếu', w: 14, align: 'center' },
+          { h: 'Bán vé / KH đã nhập', w: 30, wrap: true }, { h: 'Điểm đến', w: 34, wrap: true }, { h: 'Số tiền', w: 14, fmt: '#,##0' }, { h: 'Trạng thái', w: 12, align: 'center' }
+        ], drv.map((g, i) => [i + 1, dmy(g.dateKey), (g.trips[0].plateNumber || '').toUpperCase(), g.trips[0].originalTicket || g.trips[0].ticketNumber,
+          fullStaffName(g.trips), g.trips[0].destination || '', sumFare(g.trips), stTxt(g)]), i => lateFill(drv[i]));
+        // 2. Bán vé chưa nhập
+        const pos = gs.filter(g => g.missing === 'pos');
+        ws = xlSheetSetup(wb, 'Bán Vé Chưa Nhập', true);
+        xlTitle(ws, 8, f, 'BÁN VÉ / KẾ HOẠCH CHƯA NHẬP ĐƠN');
+        xlTable(ws, 6, [
+          { h: 'STT', w: 6, align: 'center' }, { h: 'Ngày', w: 12, align: 'center' }, { h: 'Số phiếu', w: 14, align: 'center' }, { h: 'Biển số xe', w: 14, align: 'center' },
+          { h: 'Tài xế / Chủ xe đã báo', w: 30, wrap: true }, { h: 'Điểm đến', w: 34, wrap: true }, { h: 'Số tiền', w: 14, fmt: '#,##0' }, { h: 'Trạng thái', w: 12, align: 'center' }
+        ], pos.map((g, i) => [i + 1, dmy(g.dateKey), g.trips[0].originalTicket || g.trips[0].ticketNumber, (g.trips[0].plateNumber || '').toUpperCase(),
+          fullStaffName(g.trips), g.trips[0].destination || '', sumFare(g.trips), stTxt(g)]), i => lateFill(pos[i]));
+        // 3. Giảm giá vượt mức
+        const od = collectOverDiscount(remindFrom, remindTo);
+        ws = xlSheetSetup(wb, 'Giảm Giá Vượt Mức', true);
+        xlTitle(ws, 12, f, 'ĐƠN GIẢM GIÁ VƯỢT MỨC QUY ĐỊNH (10% NỘI THÀNH, 15% NGOẠI THÀNH)');
+        xlTable(ws, 6, [
+          { h: 'STT', w: 6, align: 'center' }, { h: 'Nhân viên', w: 28, wrap: true }, { h: 'Ngày', w: 12, align: 'center' }, { h: 'Số phiếu', w: 12, align: 'center' },
+          { h: 'Biển số', w: 11, align: 'center' }, { h: 'Điểm đến', w: 26, wrap: true }, { h: 'Mục bảng giá', w: 34, wrap: true }, { h: 'Giá bảng', w: 13, fmt: '#,##0' },
+          { h: 'Đã thu', w: 13, fmt: '#,##0' }, { h: 'Giảm (%)', w: 10, fmt: '0.0' }, { h: 'Mức cho phép', w: 16, align: 'center' }, { h: 'Ghi chú', w: 24, wrap: true }
+        ], od.map(({ trips, d, dateKey }, i) => [i + 1, fullStaffName(trips), dmy(dateKey), trips[0].originalTicket || trips[0].ticketNumber, (trips[0].plateNumber || '').toUpperCase(),
+          trips[0].destination || '', (d.label || '') + (d.inferred ? ' (ước tính)' : ''), d.list, d.fare, Math.round(d.pct * 1000) / 10,
+          `${d.limit * 100}% ${ZONE_LABEL[d.zone]}`, [...new Set(trips.map(t => t.note).filter(Boolean))].join(' | ')]), () => 'FFFEE2E2');
+        // 4. Tổng hợp theo nhân viên (giảm giá vượt mức)
+        const byStaff = {};
+        od.forEach(({ trips, d }) => {
+          const k = fullStaffName(trips);
+          if (!byStaff[k]) byStaff[k] = { n: 0, list: 0, fare: 0, max: 0 };
+          const s = byStaff[k];
+          s.n++; s.list += d.list; s.fare += d.fare; s.max = Math.max(s.max, d.pct);
+        });
+        ws = xlSheetSetup(wb, 'Theo Nhân Viên', false);
+        xlTitle(ws, 6, f, 'TỔNG HỢP GIẢM GIÁ VƯỢT MỨC THEO NHÂN VIÊN');
+        const staffRows = Object.entries(byStaff).sort((a, b) => b[1].n - a[1].n || (b[1].list - b[1].fare) - (a[1].list - a[1].fare));
+        const endRow = xlTable(ws, 6, [
+          { h: 'STT', w: 6, align: 'center' }, { h: 'Nhân viên', w: 34, wrap: true }, { h: 'Số đơn vượt mức', w: 14, align: 'center' },
+          { h: 'Tổng giá bảng', w: 16, fmt: '#,##0' }, { h: 'Tổng đã thu', w: 16, fmt: '#,##0' }, { h: 'Tiền giảm', w: 16, fmt: '#,##0' }
+        ], staffRows.map(([k, s], i) => [i + 1, k, s.n, s.list, s.fare, s.list - s.fare]), () => 'FFFFF1F2');
+        if (staffRows.length) {
+          const tot = staffRows.reduce((a, [, s]) => ({ n: a.n + s.n, list: a.list + s.list, fare: a.fare + s.fare }), { n: 0, list: 0, fare: 0 });
+          const row = ws.getRow(endRow);
+          ['', 'TỔNG CỘNG', tot.n, tot.list, tot.fare, tot.list - tot.fare].forEach((v, i) => {
+            const c = row.getCell(i + 1); c.value = v; c.border = XL.border; xlFill(c, 'FFFDE68A'); xlFont(c, { bold: true });
+            if (i >= 3) c.numFmt = '#,##0';
+            if (i === 2) c.alignment = { horizontal: 'center' };
+          });
+          xlSignature(ws, endRow + 3, 6);
+        }
+        const buf = await wb.xlsx.writeBuffer();
+        const now = new Date();
+        const range = remindFrom === remindTo ? remindFrom.replace(/-/g, '') : `${remindFrom.replace(/-/g, '')}-${remindTo.replace(/-/g, '')}`;
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+        a.download = `Nhac_Bao_Cao_TSS_${range}_${String(now.getHours()).padStart(2, '0')}h${String(now.getMinutes()).padStart(2, '0')}.xlsx`;
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000);
+      } catch (e) {
+        alert('Lỗi xuất Excel: ' + (e && e.message ? e.message : e));
+      } finally {
+        if (btn) { btn.disabled = false; btn.innerText = old; }
+      }
     }
 
     // ===== XUẤT EXCEL CÓ ĐỊNH DẠNG (ExcelJS, tải khi cần) =====

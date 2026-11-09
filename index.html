@@ -686,7 +686,6 @@
       return Promise.all(Object.entries(PRICE_SETS).map(([k, v]) =>
         fetch(v.file, { cache: 'no-cache' }).then(r => r.ok ? r.json() : null).catch(() => null).then(d => { priceSetsData[k] = preparePriceItems(d); })
       )).then(() => {
-        loadDistrictHints();
         priceById = {};
         Object.values(priceSetsData).forEach(list => list.forEach(it => { priceById[it.id] = it; }));
         applyPriceSet();
@@ -792,90 +791,24 @@
       return names.some(n => n && t.includes(' ' + n + ' '));
     }
 
-    // ===== GỢI Ý QUẬN khi nhân viên quên ghi Quận (3 nguồn: lịch sử đơn công ty, danh sách đường hay đi goi-y-quan.json, tên phường trong bảng giá) =====
-    let districtHints = [];
-    function normDest(s) { return ' ' + removeAccents(s).replace(/[^a-z0-9]+/g, ' ').trim() + ' '; }
-    function loadDistrictHints() {
-      return fetch('goi-y-quan.json', { cache: 'no-cache' }).then(r => r.ok ? r.json() : null).catch(() => null).then(d => {
-        districtHints = (d && Array.isArray(d.items) ? d.items : []).filter(x => Array.isArray(x) && x[0] && x[1])
-          .map(([name, ds]) => ({ n: normDest(name), d: String(ds).split('|').map(x => x.trim()).filter(Boolean) }));
-      });
-    }
-    function shortDistrict(name) {
-      const t = String(name || '').trim();
-      let m = /^Quận\s+(\d+)$/i.exec(t); if (m) return 'Q' + m[1];
-      m = /^(?:Quận|Huyện|Thị Trấn)\s+(.+)$/i.exec(t); return m ? m[1] : t;
-    }
-    let pricePieceCache = null, pricePieceSrc = null;
-    function pricePieces() {   // tên phường/khu vực trong bảng giá -> quận
-      if (pricePieceSrc === priceItems && pricePieceCache) return pricePieceCache;
-      const out = [];
-      priceItems.filter(it => it.kind === 'sb').forEach(it => {
-        String((it.ward || '') + ',' + (it.area || '')).split(/,|\(|\)|\.(?=\s|$)|\bP\.|\bXã\b|\bPhường\b/i).forEach(raw => {
-          const n = normDest(raw.replace(/^\s*(?:P\.?|Phường|Xã)\s*/i, ''));
-          if (n.trim().split(' ').length >= 2) out.push({ n, d: shortDistrict(it.district) });
-        });
-      });
-      pricePieceSrc = priceItems; pricePieceCache = out;
-      return out;
-    }
-    function suggestDistrictFixes(dest, limit) {
-      const raw = String(dest || '').trim().replace(/[,\s]+$/, '');
-      const nd = normDest(raw);
-      if (nd.trim().length < 2) return [];
-      const out = [], seen = new Set();
-      const add = (txt) => { const k = normDest(txt); if (!seen.has(k) && destHasDistrict(txt, '')) { seen.add(k); out.push(txt); } };
-      // 1. Lịch sử: địa chỉ công ty đã nhập trước đây, bắt đầu bằng đúng chữ này và đã có Quận
-      placeCandidates().filter(p => normDest(p.name).startsWith(nd) && normDest(p.name) !== nd)
-        .sort((a, b) => b.n - a.n).slice(0, 3).forEach(p => add(p.name));
-      // 2. Danh sách đường / địa điểm hay đi (lấy tên dài nhất khớp: "Bệnh viện Thống Nhất" thắng "Thống Nhất")
-      let hits = districtHints.filter(h => nd.includes(h.n));
-      hits = hits.filter(h => !hits.some(o => o !== h && o.n.length > h.n.length && o.n.includes(h.n)));
-      hits.forEach(h => h.d.forEach(d => add(`${raw}, ${d}`)));
-      // 3. Tên phường trong bảng giá
-      pricePieces().filter(p => nd.includes(p.n)).forEach(p => add(`${raw}, ${p.d}`));
-      return out.slice(0, limit || 4);
-    }
-    // Khung nhắc lớn (mẫu 3): mỗi dòng thiếu Quận + nút gợi ý bấm 1 lần để điền
-    let destFixState = null;
-    function showDestFixModal(items, onSave) {
-      destFixState = { items: items.map(it => Object.assign({}, it, { sugg: suggestDistrictFixes(it.dest), done: '' })), onSave };
-      renderDestFixModal();
-    }
-    function renderDestFixModal() {
-      const st = destFixState;
+    // Khung nhắc LỚN khi thiếu Quận (mẫu 3 người dùng chọn). CHỈ NHẮC, KHÔNG gợi ý (người dùng yêu cầu 09/11).
+    function showDestFixModal(items) {
       let el = document.getElementById('dest-fix-modal');
-      if (!st) { if (el) el.remove(); return; }
       if (!el) { el = document.createElement('div'); el.id = 'dest-fix-modal'; document.body.appendChild(el); }
-      const allDone = st.items.every(it => it.done);
-      const blocks = st.items.map((it, i) => `
-        <div class="rounded-2xl p-4 border-2 ${it.done ? 'bg-emerald-50 border-emerald-400' : 'bg-amber-50 border-amber-400'}">
-          ${it.done ? `<p class="text-lg sm:text-xl font-extrabold text-emerald-700 leading-snug">✅ ${escHtml(it.label)}: đã sửa thành<br><span class="text-slate-900">"${escHtml(it.done)}"</span></p>` : `
+      const blocks = items.map(it => `
+        <div class="rounded-2xl p-4 border-2 bg-amber-50 border-amber-400">
           <p class="text-lg sm:text-xl font-extrabold text-slate-900 leading-snug">Vui lòng nhập thêm <span class="text-red-600 underline">QUẬN</span> cho điểm đến <span class="text-blue-700">"${escHtml(it.dest)}"</span> (${escHtml(it.label)}) mới thực hiện lưu đơn được.</p>
-          ${it.sugg.length ? `<p class="mt-3 text-base sm:text-lg font-bold text-slate-600">👉 Có phải:</p>
-            ${it.sugg.map((sg, k) => `<button onclick="pickDestFix(${i}, ${k})" class="block w-full mt-2 p-3 text-lg sm:text-xl font-black bg-white border-2 border-blue-500 text-blue-700 rounded-xl hover:bg-blue-50 active:bg-blue-100 text-left">${escHtml(sg)}</button>`).join('')}
-            <p class="mt-2 text-sm font-semibold text-slate-500">Không đúng thì đóng khung này và tự gõ thêm Quận.</p>`
-          : `<p class="mt-3 text-lg font-bold text-slate-700">Ví dụ: <b class="text-blue-700">${escHtml(it.dest)}, Q1</b></p>`}`}
         </div>`).join('');
       el.innerHTML = `<div class="fixed inset-0 bg-slate-900/80 z-[70] flex items-center justify-center p-3 backdrop-blur-sm">
-        <div class="bg-white rounded-3xl w-full max-w-lg max-h-[92vh] flex flex-col overflow-hidden border-4 ${allDone ? 'border-emerald-500' : 'border-red-500'} shadow-2xl">
-          ${allDone ? '<div class="bg-emerald-600 text-white text-center p-4 text-xl sm:text-2xl font-black tracking-wide">✅ ĐÃ ĐỦ QUẬN — BẤM LƯU</div>' : '<div class="bg-red-600 text-white text-center p-4 text-xl sm:text-2xl font-black tracking-wide">⚠️ CHƯA LƯU ĐƯỢC ĐƠN</div>'}
+        <div class="bg-white rounded-3xl w-full max-w-lg max-h-[92vh] flex flex-col overflow-hidden border-4 border-red-500 shadow-2xl">
+          <div class="bg-red-600 text-white text-center p-4 text-xl sm:text-2xl font-black tracking-wide">⚠️ CHƯA LƯU ĐƯỢC ĐƠN</div>
           <div class="p-4 space-y-3 overflow-y-auto">${blocks}</div>
-          <div class="p-4 border-t bg-slate-50 grid gap-2">
-            ${allDone ? `<button onclick="saveDestFix()" class="w-full p-3.5 text-lg sm:text-xl font-black bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl shadow-lg">💾 LƯU ĐƠN NGAY</button>` : ''}
-            <button onclick="closeDestFix()" class="w-full p-3 text-base sm:text-lg font-extrabold bg-white border-2 border-slate-300 text-slate-700 rounded-xl">✏️ Đóng để tự sửa</button>
+          <div class="p-4 border-t bg-slate-50">
+            <button onclick="closeDestFix()" class="w-full p-3.5 text-lg sm:text-xl font-black bg-blue-600 hover:bg-blue-700 text-white rounded-xl shadow-lg">✏️ ĐÃ HIỂU, TÔI SẼ SỬA</button>
           </div>
         </div></div>`;
     }
-    function pickDestFix(i, k) {
-      const st = destFixState; if (!st || !st.items[i]) return;
-      const txt = st.items[i].sugg[k];
-      st.items[i].apply(txt);
-      st.items[i].done = txt;
-      renderDestFixModal();
-    }
-    function closeDestFix() { destFixState = null; renderDestFixModal(); }
-    function saveDestFix() { const st = destFixState; closeDestFix(); if (st && st.onSave) st.onSave(); }
+    function closeDestFix() { const el = document.getElementById('dest-fix-modal'); if (el) el.remove(); }
     // Áp bảng giá cho Bán vé (quầy) và Team Kế hoạch (kể cả đơn đối tác). Không xét: đơn Chủ xe, đơn Free nội bộ, đơn không có giá bảng.
     const PRICE_ROLES = ['pos', 'plan'];
     function usesPriceList() { return !!(loggedInUser && PRICE_ROLES.includes(loggedInUser.role)); }
@@ -1851,7 +1784,7 @@
       if (usesPriceList() && destination !== String(trip.destination || '').trim()) {
         const dEl = document.getElementById('edit-modal-dest');
         if (!destHasDistrict(destination, dEl && dEl.dataset.priceId && priceById[dEl.dataset.priceId] ? dEl.dataset.priceId : '')) {
-          showDestFixModal([{ label: 'đơn đang sửa', dest: destination, apply: txt => { dEl.value = txt; applyEditModalPrice(); } }], () => saveEditedTrip(id, role));
+          showDestFixModal([{ label: 'đơn đang sửa', dest: destination }]);
           return;
         }
       }
@@ -2020,10 +1953,7 @@
           else dEl.classList.remove('ring-2', 'ring-red-500');
         }
         if (noDistrict.length) {
-          showDestFixModal(noDistrict.map(i => {
-            const dEl = document.getElementById(`d-${i}`);
-            return { label: `dòng ${i+1}`, dest: dEl.value.trim(), apply: txt => { dEl.value = txt; dEl.classList.remove('ring-2', 'ring-red-500'); autoMatchRowPrice(i); } };
-          }), () => submitBatch(role));
+          showDestFixModal(noDistrict.map(i => ({ label: `dòng ${i+1}`, dest: document.getElementById(`d-${i}`).value.trim() })));
           return;
         }
       }

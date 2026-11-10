@@ -3695,6 +3695,9 @@
       hr.height = 22;
 
       let r = 9, stt = 0;
+      // Xuất riêng phía Tài xế/Chủ xe (lọc Phân vùng = Tài xế, hoặc chỉ có đơn chủ xe): cột Tổng Tiền cộng tiền CHỦ XE,
+      // tiền Quầy+KH ghi phụ bên cạnh. Trước đây cột Tổng Tiền luôn cộng Quầy+KH nên ra 0.
+      const driverView = f.roleFilter === 'driver' || (totPos === 0 && totDrv > 0);
       const writeTotalRow = (label, sums, fillArgb, bold) => {
         ws.mergeCells(r, 1, r, 11);
         const l = ws.getCell(r, 1);
@@ -3707,12 +3710,12 @@
         xlFont(info, { size: 9, color: { argb: 'FF334155' } });
         info.alignment = { horizontal: 'center', vertical: 'middle' };
         const m = ws.getCell(r, 14);
-        m.value = sums.pos;
+        m.value = driverView ? sums.drv : sums.pos;
         m.numFmt = XL.money;
         xlFont(m, { bold: true, color: { argb: 'FF065F46' } });
         const d = ws.getCell(r, 15);
-        d.value = sums.drv;
-        d.numFmt = '"Chủ xe: "#,##0';
+        d.value = driverView ? sums.pos : sums.drv;
+        d.numFmt = driverView ? '"Quầy+KH: "#,##0' : '"Chủ xe: "#,##0';
         xlFont(d, { bold: bold, size: 9, color: { argb: 'FF92400E' } });
         for (let c = 1; c <= N; c++) { const cell = ws.getCell(r, c); xlFill(cell, fillArgb); cell.border = XL.border; }
         ws.getRow(r).height = 20;

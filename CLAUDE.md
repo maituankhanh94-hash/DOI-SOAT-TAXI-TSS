@@ -78,6 +78,7 @@
 
 ## Lỗi/rủi ro đã phát hiện (06/11/2026) — 3–9 ĐÃ SỬA ở nhánh `cai-tien-doi-soat` (08/11)
 1. ĐÃ SỬA 07/11: quy tắc RTDB thật trước đây `.read/.write: true`; nay là quy-tac-buoc-2 + Firebase Auth. Còn tồn: dữ liệu thử `test_env/` và tài khoản Auth `@test.taxi-tss.local`. Số liệu 07/11: lưu 1,61 MB, tải về 121 MB/6 ngày, kết nối đỉnh 33/100 (gói Spark). DB thật còn 2 nhánh cũ không dùng: `deleted_trips`, `drivers`.
+- (10/11) Excel Đối Soát lọc Phân vùng = Tài xế (hoặc chỉ có đơn chủ xe): cột Tổng Tiền ở dòng CỘNG NGÀY/TỔNG CỘNG cộng tiền CHỦ XE (`driverView` trong buildAuditSheet), cột cạnh ghi "Quầy+KH: …". Trước đó luôn cộng Quầy+KH → ra 0.
 2. ĐÃ SỬA: màn hình & Excel dùng chung `computeAuditGroups`/`getAuditStatus`; Excel ExcelJS có màu/kẻ ô/nhóm ngày/tổng/ký tên + sheet Tổng Hợp; ngày gõ thiếu dấu tự sửa, ngày sai bị chặn.
 3. ĐÃ SỬA: "Tổng doanh thu ngày" chỉ cộng Bán vé + Kế hoạch; Chủ xe hiện riêng để đối chiếu.
 4. ĐÃ SỬA: sửa số phiếu (modal / sửa nhanh) cập nhật `originalTicket = baseTicketOf(...)`.

@@ -3420,7 +3420,7 @@
         xlTable(ws, 6, [
           { h: 'STT', w: 6, align: 'center' }, { h: 'Ngày', w: 12, align: 'center' }, { h: 'Biển số xe', w: 14, align: 'center' }, { h: 'Số phiếu', w: 14, align: 'center' },
           { h: 'Bán vé / KH đã nhập', w: 30, wrap: true }, { h: 'Điểm đến', w: 34, wrap: true }, { h: 'Số tiền', w: 14, fmt: '#,##0' }, { h: 'Trạng thái', w: 12, align: 'center' }
-        ], drv.map((g, i) => [i + 1, dmy(g.dateKey), (g.trips[0].plateNumber || '').toUpperCase(), g.trips[0].originalTicket || g.trips[0].ticketNumber,
+        ], drv.map((g, i) => [i + 1, dmy(g.dateKey), plateCell(g.trips[0].plateNumber), g.trips[0].originalTicket || g.trips[0].ticketNumber,
           fullStaffName(g.trips), g.trips[0].destination || '', sumFare(g.trips), stTxt(g)]), i => lateFill(drv[i]));
         // 2. Bán vé chưa nhập
         const pos = gs.filter(g => g.missing === 'pos');
@@ -3429,7 +3429,7 @@
         xlTable(ws, 6, [
           { h: 'STT', w: 6, align: 'center' }, { h: 'Ngày', w: 12, align: 'center' }, { h: 'Số phiếu', w: 14, align: 'center' }, { h: 'Biển số xe', w: 14, align: 'center' },
           { h: 'Tài xế / Chủ xe đã báo', w: 30, wrap: true }, { h: 'Điểm đến', w: 34, wrap: true }, { h: 'Số tiền', w: 14, fmt: '#,##0' }, { h: 'Trạng thái', w: 12, align: 'center' }
-        ], pos.map((g, i) => [i + 1, dmy(g.dateKey), g.trips[0].originalTicket || g.trips[0].ticketNumber, (g.trips[0].plateNumber || '').toUpperCase(),
+        ], pos.map((g, i) => [i + 1, dmy(g.dateKey), g.trips[0].originalTicket || g.trips[0].ticketNumber, plateCell(g.trips[0].plateNumber),
           fullStaffName(g.trips), g.trips[0].destination || '', sumFare(g.trips), stTxt(g)]), i => lateFill(pos[i]));
         }
         // 3. Giảm giá vượt mức
@@ -3440,7 +3440,7 @@
           { h: 'STT', w: 6, align: 'center' }, { h: 'Nhân viên', w: 28, wrap: true }, { h: 'Ngày', w: 12, align: 'center' }, { h: 'Số phiếu', w: 12, align: 'center' },
           { h: 'Biển số', w: 11, align: 'center' }, { h: 'Điểm đến', w: 26, wrap: true }, { h: 'Mục bảng giá', w: 34, wrap: true }, { h: 'Giá bảng', w: 13, fmt: '#,##0' },
           { h: 'Đã thu', w: 13, fmt: '#,##0' }, { h: 'Giảm (%)', w: 10, fmt: '0.0' }, { h: 'Mức cho phép', w: 16, align: 'center' }, { h: 'Ghi chú', w: 24, wrap: true }
-        ], od.map(({ trips, d, dateKey }, i) => [i + 1, fullStaffName(trips), dmy(dateKey), trips[0].originalTicket || trips[0].ticketNumber, (trips[0].plateNumber || '').toUpperCase(),
+        ], od.map(({ trips, d, dateKey }, i) => [i + 1, fullStaffName(trips), dmy(dateKey), trips[0].originalTicket || trips[0].ticketNumber, plateCell(trips[0].plateNumber),
           trips[0].destination || '', (d.label || '') + (d.inferred ? ' (ước tính)' : ''), d.list, d.fare, Math.round(d.pct * 1000) / 10,
           `${pctText(d.limit)} ${ZONE_LABEL[d.zone]}`, [...new Set(trips.map(t => t.note).filter(Boolean))].join(' | ')]), () => 'FFFEE2E2');
         if (onlyDiscount && od.length) xlSignature(ws, odEnd + 3, 12);
@@ -3748,7 +3748,7 @@
           const first = r;
           g.trips.forEach(t => {
             const role = XL.role[t.role] || { label: t.role || '', color: 'FF334155' };
-            const vals = [stt, normalizeDateInput(t.dateStr) || '',t.timeStr || '', role.label, t.staff || '', t.ticketNumber || '', t.plateNumber || '',
+            const vals = [stt, normalizeDateInput(t.dateStr) || '',t.timeStr || '', role.label, t.staff || '', t.ticketNumber || '', plateCell(t.plateNumber),
               t.carType || '', t.source || '', t.pickup ? 'Ga ' + t.pickup : '', t.destination || '', t.paymentMethod || '(Chưa ghi)',
               [t.note || '', (di => di && di.over ? `💸 ${discountText(di)}` : '')(discountInfo(t))].filter(Boolean).join(' | '),
               Number(t.totalFare || 0), auditStatusText(g)];
@@ -3809,11 +3809,22 @@
     }
 
     // Trang "Dữ Liệu MISA": dữ liệu PHẲNG để copy/nạp vào phần mềm kế toán.
+    // Biển số cho Excel: chỉ có chữ số (vd "170") -> ghi kiểu SỐ, để file đẩy MISA (VLOOKUP theo số) nhận được.
+    // Trước đây ghi kiểu chữ -> Excel báo "số lưu dạng văn bản" (tam giác xanh) và VLOOKUP ra #N/A.
+    function plateCell(v) {
+      const s = String(v == null ? '' : v).replace(/[\r\n\t]+/g, ' ').trim().toUpperCase();
+      return /^\d{1,9}$/.test(s) ? Number(s) : s;
+    }
+    // 3 số cuối biển số dạng SỐ (giống công thức file đẩy: NUMBERVALUE(RIGHT(...,3))): "51H-880.93" -> 93, "170" -> 170
+    function plate3Num(v) {
+      const d = String(v == null ? '' : v).replace(/\D/g, '');
+      return d ? Number(d.slice(-3)) : '';
+    }
     // 1 dòng tiêu đề, mỗi dòng 1 đơn, KHÔNG gộp ô, KHÔNG dòng tổng/tiêu đề ngày, ngày là kiểu Ngày thật, tiền là số thuần.
     function buildFlatSheet(wb, groups) {
       const ws = wb.addWorksheet('Dữ Liệu MISA', { views: [{ state: 'frozen', ySplit: 1 }] });
       const cols = [
-        ['Ngày', 12], ['Giờ nộp', 9], ['Phân vùng', 15], ['Nhân sự', 22], ['Số phiếu', 13], ['Số phiếu gốc', 13], ['Biển số', 12],
+        ['Ngày', 12], ['Giờ nộp', 9], ['Phân vùng', 15], ['Nhân sự', 22], ['Số phiếu', 13], ['Số phiếu gốc', 13], ['Biển số', 12], ['BSX 3 số (MISA)', 10],
         ['Loại xe', 12], ['Nguồn đơn', 14], ['Điểm đón', 10], ['Điểm đến', 30], ['Hình thức thanh toán', 20], ['Ghi chú', 22],
         ['Số tiền', 13], ['Trạng thái đối soát', 26], ['Tài khoản nhập', 14],
         ['Giá bảng giá (cả đơn)', 14], ['Giảm so với bảng giá (%)', 12], ['Vùng', 11], ['Vượt mức giảm', 12], ['Mục bảng giá', 40]
@@ -3831,13 +3842,14 @@
           const dateVal = p ? new Date(Date.UTC(p[0], p[1] - 1, p[2])) : clean(t.dateStr);
           const row = ws.addRow([
             dateVal, clean(t.timeStr), roleTxt[t.role] || clean(t.role), clean(t.staff), clean(t.ticketNumber),
-            clean(t.originalTicket || baseTicketOf(t.ticketNumber)), clean(t.plateNumber), clean(t.carType), clean(t.source),
+            clean(t.originalTicket || baseTicketOf(t.ticketNumber)), plateCell(t.plateNumber), plate3Num(t.plateNumber), clean(t.carType), clean(t.source),
             t.pickup ? 'Ga ' + clean(t.pickup) : '', clean(t.destination), clean(t.paymentMethod), clean(t.note),
             Number(t.totalFare || 0), st, clean(t.createdBy),
             ...(di => di ? [di.list, Math.round(di.pct * 1000) / 10, di.zone === 'ngoai' ? 'Ngoại thành' : 'Nội thành', di.over ? 'VƯỢT MỨC' : '', clean(di.label) + (di.inferred ? ' [ước tính]' : '')] : ['', '', '', '', ''])(discountInfo(t))
           ]);
           if (p) row.getCell(1).numFmt = 'dd/mm/yyyy';
-          row.getCell(14).numFmt = '0';
+          row.getCell(7).numFmt = '0'; row.getCell(8).numFmt = '0';
+          row.getCell(15).numFmt = '0';
         });
       });
       ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: cols.length } };

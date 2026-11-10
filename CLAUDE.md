@@ -56,6 +56,7 @@
 
 ## Excel cho MISA (09/11)
 - Kế toán báo copy từ file Excel sang MISA nạp hàng loạt không nhận (do ô gộp, dòng tiêu đề ngày/tổng chen giữa, ngày dạng chữ). Đã thêm trang thứ 3 "Dữ Liệu MISA" (`buildFlatSheet`): phẳng, 1 dòng tiêu đề, không gộp ô, ngày kiểu Date (tạo bằng Date.UTC để không lệch ngày), tiền số thuần. Đang chờ người dùng gửi file mẫu MISA để khớp đúng cột.
+- (10/11) Kế toán (chị Ngọc) gửi "FILE ĐẨY NGÀY 07.xlsx": trang 'Tổng hợp' cột C = BSX 3 số, trang MISA cột F = VLOOKUP(C, 'LỊCH XE'!H:I) với H = NUMBERVALUE(RIGHT(biển số bỏ dấu chấm,3)) → khóa là SỐ. App ghi biển số dạng CHỮ → #N/A. ĐÃ SỬA (lên main): `plateCell` ghi biển số toàn chữ số thành SỐ ở mọi trang Excel; trang Dữ Liệu MISA thêm cột "BSX 3 số (MISA)" (`plate3Num`, sau cột Biển số).
 
 ## Bảng giá công ty (nhánh `bang-gia`, 09/11 — ĐÃ LÊN MAIN 09/11 (commit 9ac73e8 + ghi chú); nhánh `sao-luu-thung-rac` vẫn CHƯA lên main)
 - Nguồn: `bang-gia/BANG_GIA_XE.xlsx` (trang "DON SB" = sân bay đi quận/phường TP.HCM, giá xe 4/7/16; trang "TOUR" = đi tỉnh, xe 7/16, 1 chiều/2 chiều; City tour 4h/8h). Chuyển sang `bang-gia.json` bằng `node bang-gia/tao-bang-gia.js bang-gia/BANG_GIA_XE.xlsx bang-gia.json` (cần exceljs). App tải file tĩnh này (`loadPriceList`), không lưu trong Firebase → đổi giá = gửi file Excel mới, chạy lại script, push.

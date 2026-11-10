@@ -3836,11 +3836,7 @@
         ['Mã khách hàng', 16], ['Mã dịch vụ (*)', 10], ['TK Tiền/Chi phí/Nợ (*)', 12], ['TK Doanh thu/Có (*)', 12], ['ĐVT', 8], ['Số lượng', 8],
         ['Đơn giá', 13], ['Thành tiền', 13], ['Mã công trình', 16], ['Mã nhân viên bán hàng', 24], ['Mã thống kê', 12], ['Mã thống kê', 12], ['Mã thống kê', 30]
       ];
-      const EXTRA_COLS = [
-        ['', 3], ['BSX 3 số', 9], ['Biển số', 12], ['Phân vùng', 15], ['Tài khoản nhập', 14], ['Trạng thái đối soát', 26], ['Loại xe', 11], ['Ghi chú', 22],
-        ['Giá bảng giá (cả đơn)', 14], ['Giảm so với bảng giá (%)', 12], ['Vùng', 11], ['Vượt mức giảm', 12], ['Mục bảng giá', 40]
-      ];
-      const cols = MISA_COLS.concat(EXTRA_COLS);
+      const cols = MISA_COLS;   // người dùng yêu cầu bỏ các cột tham khảo phía sau (10/11)
       ws.columns = cols.map(([header, width]) => ({ header, width }));
       const hr = ws.getRow(1);
       hr.height = 30;
@@ -3852,11 +3848,9 @@
         cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: i < MISA_COLS.length ? 'FF92D050' : 'FFE2E8F0' } };
         cell.border = XL.border;
       });
-      const roleTxt = { pos: 'Bán vé (Quầy)', plan: 'Team Kế hoạch', driver: 'Cổng Chủ xe' };
       const clean = v => String(v == null ? '' : v).replace(/[\r\n\t]+/g, ' ').replace(/\s{2,}/g, ' ').trim();
       const MONEY = '#,##0';
       groups.forEach(g => {
-        const st = clean(auditStatusText(g));
         // Mỗi cuốc chỉ ghi 1 lần: có bên Bán vé/Kế hoạch thì lấy bên đó; chỉ có bên Chủ xe thì mới lấy bên Chủ xe (tránh trùng doanh thu)
         const sale = g.trips.filter(t => t.role !== 'driver');
         (sale.length ? sale : g.trips).forEach(t => {
@@ -3866,21 +3860,16 @@
           const dateVal = p ? new Date(Date.UTC(p[0], p[1] - 1, p[2])) : clean(t.dateStr);
           const ticket = formatDisplayTicket(clean(t.ticketNumber));
           const fare = Number(t.totalFare || 0);
-          const di = discountInfo(t);
           const row = ws.addRow([
             'Chưa thu tiền', dateVal, dateVal, ticket, ticket,
             '', 'VC', '131', '5113', 'Chuyến', 1,
             fare, fare, clean(t.source), clean(t.staff),
-            clean(t.paymentMethod), t.pickup ? 'Ga ' + clean(t.pickup) : '', clean(t.destination),
-            '', plate3Num(t.plateNumber), plateCell(t.plateNumber), roleTxt[t.role] || clean(t.role), clean(t.createdBy), st, clean(t.carType), clean(t.note),
-            ...(di ? [di.list, Math.round(di.pct * 1000) / 10, di.zone === 'ngoai' ? 'Ngoại thành' : 'Nội thành', di.over ? 'VƯỢT MỨC' : '', clean(di.label) + (di.inferred ? ' [ước tính]' : '')] : ['', '', '', '', ''])
+            clean(t.paymentMethod), t.pickup ? 'Ga ' + clean(t.pickup) : '', clean(t.destination)
           ]);
           if (p) { row.getCell(2).numFmt = 'dd/mm/yyyy'; row.getCell(3).numFmt = 'dd/mm/yyyy'; }
           [4, 5, 6, 8, 9, 10, 14, 15, 16, 17, 18].forEach(i => { row.getCell(i).numFmt = '@'; });
           row.getCell(11).numFmt = '0';
           row.getCell(12).numFmt = MONEY; row.getCell(13).numFmt = MONEY;
-          row.getCell(20).numFmt = '0'; row.getCell(21).numFmt = '0';
-          row.getCell(27).numFmt = MONEY;
         });
       });
       ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: MISA_COLS.length } };

@@ -518,8 +518,8 @@
         const aS = v('audit-start-date'), aE = v('audit-end-date');
         if (aS) {
           const rev = v('revenue-date-picker') || today;
-          const starts = [aS, rev, remindFrom].filter(Boolean).sort();
-          const ends = [aE || '9999-12-31', rev, remindTo].filter(Boolean).sort();
+          const starts = [aS, rev, remindFrom, bizFrom].filter(Boolean).sort();
+          const ends = [aE || '9999-12-31', rev, remindTo, bizTo].filter(Boolean).sort();
           from = starts[0];
           to = ends[ends.length - 1];
         }
@@ -536,6 +536,7 @@
         allCompanyTrips = dataVal ? Object.values(dataVal) : [];
         updateManagerAuditTable();
         updateManagerRevenueSummary();
+        renderBizBox();
       };
       q.on('value', mgrWinCb, err => console.warn('trips', err));
     }
@@ -2481,6 +2482,12 @@
             <div id="overdue-box" class="space-y-3"></div>
           </div>
 
+          <!-- MỤC 5.95: HIỆU QUẢ KINH DOANH -->
+          <div class="bg-white rounded-3xl shadow-md border border-slate-200 p-4 sm:p-5 space-y-3">
+            <h4 class="text-xs sm:text-sm font-extrabold text-slate-800 uppercase">📈 Hiệu Quả Kinh Doanh (Lời / Lỗ, Hòa Vốn)</h4>
+            <div id="biz-box" class="space-y-3"></div>
+          </div>
+
           <!-- MỤC 6: BẢNG ĐỐI SOÁT ĐƠN HÀNG -->
           <div class="bg-white rounded-3xl shadow-md border border-slate-200 overflow-hidden p-4 sm:p-5 space-y-3">
             <div class="flex flex-col lg:flex-row items-center justify-between border-b pb-3 gap-3">
@@ -3219,6 +3226,264 @@
       if (kind === 'yesterday') { d.setDate(d.getDate() - 1); const y = localDateKey(d); return setRemindRange(y, y); }
       if (kind === '7') { d.setDate(d.getDate() - 6); return setRemindRange(localDateKey(d), t); }
       if (kind === 'month') { return setRemindRange(t.slice(0, 8) + '01', t); }
+    }
+
+    // ===== HIỆU QUẢ KINH DOANH (10/11) =====
+    // Mỗi cuốc Bán vé / Kế hoạch: tài xế hưởng DRIVER_PCT (64%), nhân viên hưởng hoa hồng theo NHÓM, công ty trả lương ngày theo nhóm.
+    // Lợi nhuận NV = Doanh thu × (1 − 64% − %HH) − Lương/ngày × Số ngày có bán. Điểm hòa vốn/ngày = Lương/ngày ÷ (1 − 64% − %HH).
+    // Cài đặt lưu ở meta/biz (chỉ Quản lý ghi): {driverPct, groups:{QT:{c,w},...}, staffGroup:{slug: nhóm}}.
+    const BIZ_DEFAULT = {
+      driverPct: 64,
+      groups: {
+        C10: { c: 7, w: 320000, note: 'Lương ngày 320k' },
+        T1: { c: 7, w: 320000, note: 'Lương bằng C10 (%HH: cần xác nhận)' },
+        T3: { c: 7, w: 320000, note: 'Lương bằng C10 (%HH: cần xác nhận)' },
+        KH: { c: 7, w: 320000, note: 'Giống C10' },
+        QT: { c: 3, w: 160000, note: 'Làm thêm TĐNT, lương 160k' },
+        QN: { c: 3, w: 160000, note: 'Làm thêm TĐNT, lương 160k' },
+        KIOT: { c: 3, w: 160000, note: 'Lương 160k (%HH: cần xác nhận)' },
+        CTV: { c: 15, w: 0, note: 'Không lương, chỉ hoa hồng' }
+      },
+      staffGroup: {}
+    };
+    let bizCfg = JSON.parse(JSON.stringify(BIZ_DEFAULT));
+    var bizFrom = localDateKey(new Date()).slice(0, 8) + '01', bizTo = localDateKey(new Date());
+    let bizOtherCost = 0, bizCfgOpen = false, bizWatched = false, bizSort = 'profit';
+    function watchBizConfig() {
+      if (bizWatched) return;
+      bizWatched = true;
+      dbRef('meta/biz').on('value', s => {
+        const v = s.val() || {};
+        const g = JSON.parse(JSON.stringify(BIZ_DEFAULT.groups));
+        Object.entries(v.groups || {}).forEach(([k, x]) => { g[k] = Object.assign({}, g[k] || {}, { c: Number(x.c) || 0, w: Number(x.w) || 0 }); });
+        bizCfg = { driverPct: v.driverPct != null ? Number(v.driverPct) : BIZ_DEFAULT.driverPct, groups: g, staffGroup: v.staffGroup || {} };
+        renderBizBox();
+      }, () => {});
+    }
+    function bizStaffKey(name) { return placeSlug(name) || '_'; }
+    // Nhóm của nhân viên: Quản lý chọn tay; nếu chưa chọn thì tự nhận nếu tên có mã nhóm (vd "C10 Huy", "Lan - QT")
+    function bizGroupOf(name) {
+      const set = bizCfg.staffGroup[bizStaffKey(name)];
+      if (set) return { g: set, auto: false };
+      const up = ' ' + removeAccents(name).toUpperCase().replace(/[^A-Z0-9]+/g, ' ') + ' ';
+      const hit = Object.keys(bizCfg.groups).find(k => up.includes(' ' + k + ' '));
+      return { g: hit || '', auto: !!hit };
+    }
+    function bizCompute(from, to) {
+      const dp = (Number(bizCfg.driverPct) || 0) / 100;
+      const staff = {};
+      allCompanyTrips.forEach(t => {
+        if (!PRICE_ROLES.includes(t.role)) return;   // chỉ đơn Bán vé + Kế hoạch (doanh thu công ty)
+        const k = tripDateKey(t);
+        if (!k || k < from || k > to) return;
+        const name = String(t.staff || t.createdBy || '?').trim();
+        const key = bizStaffKey(name);
+        const s = staff[key] || (staff[key] = { key, names: {}, accs: new Set(), days: new Set(), bills: new Set(), rev: 0 });
+        s.names[name] = (s.names[name] || 0) + 1;
+        if (t.createdBy) s.accs.add(t.createdBy);
+        s.days.add(k);
+        s.bills.add(billKey(t));
+        s.rev += Number(t.totalFare) || 0;
+      });
+      const rows = Object.values(staff).map(s => {
+        const name = Object.entries(s.names).sort((a, b) => b[1] - a[1])[0][0];
+        const { g, auto } = bizGroupOf(name);
+        const cfg = bizCfg.groups[g] || { c: 0, w: 0 };
+        const c = (Number(cfg.c) || 0) / 100, w = Number(cfg.w) || 0;
+        const days = s.days.size, margin = 1 - dp - c;
+        const driver = s.rev * dp, comm = s.rev * c, wage = w * days;
+        const profit = s.rev - driver - comm - wage;
+        const beDay = margin > 0 ? w / margin : null;           // doanh thu/ngày cần đạt để hòa vốn
+        const avgDay = days ? s.rev / days : 0;
+        const ratio = beDay ? avgDay / beDay : (w ? 0 : null);
+        let rate;
+        if (!g) rate = { t: '⚪ Chưa xếp nhóm', cls: 'text-slate-500', fill: 'FFF1F5F9', o: 3 };
+        else if (profit < 0) rate = { t: '🔴 Đang âm – cần tăng doanh số', cls: 'text-red-600', fill: 'FFFEE2E2', o: 0 };
+        else if (ratio != null && ratio < 1.3) rate = { t: '🟡 Đạt hòa vốn – nên tăng thêm', cls: 'text-amber-600', fill: 'FFFEF3C7', o: 1 };
+        else rate = { t: '🟢 Doanh số tốt', cls: 'text-emerald-600', fill: 'FFDCFCE7', o: 2 };
+        return { name, accs: [...s.accs].join(', '), g, auto, c, w, days, bills: s.bills.size, rev: s.rev, driver, comm, wage, profit, beDay, avgDay, ratio,
+          need: beDay && avgDay < beDay ? beDay - avgDay : 0, rate };
+      });
+      const sum = k => rows.reduce((a, r) => a + r[k], 0);
+      const tot = { rev: sum('rev'), driver: sum('driver'), comm: sum('comm'), wage: sum('wage'), bills: sum('bills') };
+      tot.other = Number(bizOtherCost) || 0;
+      tot.profit = tot.rev - tot.driver - tot.comm - tot.wage - tot.other;
+      const mRate = tot.rev ? (tot.rev - tot.driver - tot.comm) / tot.rev : (1 - dp);
+      tot.beRev = mRate > 0 ? (tot.wage + tot.other) / mRate : null;   // doanh thu cần đạt trong kỳ để hòa vốn
+      const days = new Set();
+      allCompanyTrips.forEach(t => { const k = tripDateKey(t); if (PRICE_ROLES.includes(t.role) && k && k >= from && k <= to) days.add(k); });
+      tot.days = days.size;
+      const groups = {};
+      rows.forEach(r => { const k = r.g || '(Chưa xếp)'; const x = groups[k] || (groups[k] = { n: 0, rev: 0, comm: 0, wage: 0, profit: 0, driver: 0 }); x.n++; x.rev += r.rev; x.comm += r.comm; x.wage += r.wage; x.profit += r.profit; x.driver += r.driver; });
+      return { rows, tot, groups, dp };
+    }
+    function setBizRange(from, to) {
+      bizFrom = from || localDateKey(new Date()); bizTo = to || bizFrom;
+      if (bizTo < bizFrom) { const x = bizFrom; bizFrom = bizTo; bizTo = x; }
+      refreshManagerWindow();
+      renderBizBox();
+    }
+    function bizQuick(kind) {
+      const d = new Date(), t = localDateKey(d);
+      if (kind === 'today') return setBizRange(t, t);
+      if (kind === 'yesterday') { d.setDate(d.getDate() - 1); const y = localDateKey(d); return setBizRange(y, y); }
+      if (kind === '7') { d.setDate(d.getDate() - 6); return setBizRange(localDateKey(d), t); }
+      if (kind === 'month') return setBizRange(t.slice(0, 8) + '01', t);
+      if (kind === 'lastmonth') { const a = new Date(d.getFullYear(), d.getMonth() - 1, 1), b = new Date(d.getFullYear(), d.getMonth(), 0); return setBizRange(localDateKey(a), localDateKey(b)); }
+    }
+    const money = n => (n < 0 ? '-' : '') + fmtMoney(Math.round(Math.abs(n)));
+    function renderBizBox() {
+      const box = document.getElementById('biz-box');
+      if (!box || !isManager()) return;
+      watchBizConfig();
+      const { rows, tot, groups } = bizCompute(bizFrom, bizTo);
+      const sorters = { profit: (a, b) => a.rate.o - b.rate.o || a.profit - b.profit, rev: (a, b) => b.rev - a.rev, name: (a, b) => a.name.localeCompare(b.name, 'vi') };
+      rows.sort(sorters[bizSort] || sorters.profit);
+      const pct = r => r == null ? '–' : Math.round(r * 100) + '%';
+      const kpi = (label, val, cls, sub) => `<div class="rounded-2xl border p-3 ${cls}"><div class="text-[11px] font-bold uppercase opacity-80">${label}</div><div class="text-lg sm:text-xl font-black">${val}</div>${sub ? `<div class="text-[11px] font-semibold opacity-80">${sub}</div>` : ''}</div>`;
+      const beTxt = tot.beRev == null ? '–' : money(tot.beRev);
+      const reach = tot.beRev ? tot.rev / tot.beRev : null;
+      const unassigned = rows.filter(r => !r.g).length;
+      const groupOpts = cur => `<option value="">— Chọn nhóm —</option>` + Object.keys(bizCfg.groups).map(k => `<option value="${k}" ${k === cur ? 'selected' : ''}>${k}</option>`).join('');
+      const cfgRows = Object.entries(bizCfg.groups).map(([k, x]) => `<tr class="border-b">
+          <td class="p-2 font-black">${escHtml(k)}</td>
+          <td class="p-2"><input id="bizc-${k}" type="number" step="0.5" min="0" max="100" value="${x.c}" class="w-20 p-1 border rounded-lg text-center font-bold"> %</td>
+          <td class="p-2"><input id="bizw-${k}" type="number" step="10000" min="0" value="${x.w}" class="w-28 p-1 border rounded-lg text-right font-bold"> đ</td>
+          <td class="p-2 text-[11px] text-slate-500">${escHtml(x.note || '')}</td></tr>`).join('');
+      const staffRows = rows.map(r => `<tr class="border-b hover:bg-slate-50">
+          <td class="p-2"><div class="font-bold text-slate-800">${escHtml(r.name)}</div><div class="text-[10px] text-slate-400">TK ${escHtml(r.accs)}</div></td>
+          <td class="p-2"><select onchange="setBizStaffGroup('${escHtml(bizStaffKey(r.name))}', this.value)" class="p-1 border rounded-lg font-bold text-xs ${r.g ? '' : 'bg-amber-50 border-amber-400'}">${groupOpts(r.g)}</select>${r.auto ? '<div class="text-[10px] text-slate-400">tự nhận theo tên</div>' : ''}</td>
+          <td class="p-2 text-center">${r.days}</td>
+          <td class="p-2 text-center">${r.bills}</td>
+          <td class="p-2 text-right font-bold">${money(r.rev)}</td>
+          <td class="p-2 text-right">${money(r.driver)}</td>
+          <td class="p-2 text-right">${money(r.comm)}</td>
+          <td class="p-2 text-right">${money(r.wage)}</td>
+          <td class="p-2 text-right font-black ${r.profit < 0 ? 'text-red-600' : 'text-emerald-700'}">${money(r.profit)}</td>
+          <td class="p-2 text-right">${money(r.avgDay)}</td>
+          <td class="p-2 text-right">${r.beDay == null || !r.w ? '–' : money(r.beDay)}</td>
+          <td class="p-2 text-center font-bold">${pct(r.ratio)}</td>
+          <td class="p-2 font-bold ${r.rate.cls}">${r.rate.t}${r.need ? `<div class="text-[10px] font-semibold">Cần thêm ~${money(r.need)}/ngày</div>` : ''}</td>
+        </tr>`).join('');
+      const grpRows = Object.entries(groups).sort((a, b) => b[1].rev - a[1].rev).map(([k, x]) => `<tr class="border-b">
+          <td class="p-2 font-black">${escHtml(k)}</td><td class="p-2 text-center">${x.n}</td><td class="p-2 text-right">${money(x.rev)}</td>
+          <td class="p-2 text-right">${money(x.comm)}</td><td class="p-2 text-right">${money(x.wage)}</td>
+          <td class="p-2 text-right font-black ${x.profit < 0 ? 'text-red-600' : 'text-emerald-700'}">${money(x.profit)}</td></tr>`).join('');
+      box.innerHTML = `
+        <div class="flex flex-wrap items-center gap-2 text-xs font-bold text-slate-600">
+          <span>Từ:</span><input type="date" value="${bizFrom}" onchange="setBizRange(this.value, bizTo)" class="p-1.5 border rounded-lg">
+          <span>Đến:</span><input type="date" value="${bizTo}" onchange="setBizRange(bizFrom, this.value)" class="p-1.5 border rounded-lg">
+          ${[['today', 'Hôm nay'], ['yesterday', 'Hôm qua'], ['7', '7 ngày'], ['month', 'Tháng này'], ['lastmonth', 'Tháng trước']].map(([k, l]) => `<button onclick="bizQuick('${k}')" class="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 rounded-lg">${l}</button>`).join('')}
+          <span class="ml-2">Chi phí khác trong kỳ (mặt bằng, điện...):</span>
+          <input type="text" inputmode="numeric" value="${bizOtherCost ? fmtMoney(bizOtherCost) : ''}" placeholder="0" onchange="bizOtherCost = parseFloat(this.value.replace(/[^0-9]/g, '')) || 0; renderBizBox()" class="w-32 p-1.5 border rounded-lg text-right">
+          <button onclick="bizCfgOpen = !bizCfgOpen; renderBizBox()" class="px-3 py-1.5 bg-blue-50 border border-blue-300 text-blue-800 rounded-lg">⚙️ Cài đặt tỷ lệ & lương</button>
+          <button id="btn-biz-excel" onclick="exportBizExcel()" class="ml-auto px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg shadow-sm">📥 Xuất Excel</button>
+        </div>
+        ${bizCfgOpen ? `<div class="bg-blue-50 border border-blue-200 rounded-2xl p-3 space-y-2 text-xs">
+          <div class="font-bold text-slate-700">Tài xế hưởng: <input id="biz-driver" type="number" step="0.5" min="0" max="100" value="${bizCfg.driverPct}" class="w-20 p-1 border rounded-lg text-center font-bold"> % mỗi cuốc</div>
+          <div class="overflow-x-auto"><table class="w-full text-left bg-white rounded-xl"><thead class="bg-slate-100"><tr><th class="p-2">Nhóm NV</th><th class="p-2">% Hoa hồng</th><th class="p-2">Lương / ngày</th><th class="p-2">Ghi chú</th></tr></thead><tbody>${cfgRows}</tbody></table></div>
+          <button onclick="saveBizConfig()" class="px-4 py-2 bg-emerald-600 text-white rounded-lg font-extrabold">💾 Lưu cài đặt</button>
+          <span class="text-[11px] text-slate-500">Lương tính theo SỐ NGÀY CÓ BÁN ĐƠN của từng người trong kỳ.</span>
+        </div>` : ''}
+        <div class="grid grid-cols-2 lg:grid-cols-4 gap-2">
+          ${kpi('Doanh thu (Bán vé + KH)', money(tot.rev), 'bg-slate-50 border-slate-200 text-slate-800', `${tot.bills} đơn • ${tot.days} ngày`)}
+          ${kpi('Trả tài xế (' + bizCfg.driverPct + '%)', money(tot.driver), 'bg-slate-50 border-slate-200 text-slate-800')}
+          ${kpi('Hoa hồng + Lương NV', money(tot.comm + tot.wage), 'bg-slate-50 border-slate-200 text-slate-800', `HH ${money(tot.comm)} • Lương ${money(tot.wage)}${tot.other ? ' • Khác ' + money(tot.other) : ''}`)}
+          ${kpi(tot.profit < 0 ? 'CÔNG TY ĐANG LỖ' : 'CÔNG TY ĐANG LỜI', money(tot.profit), tot.profit < 0 ? 'bg-red-50 border-red-300 text-red-700' : 'bg-emerald-50 border-emerald-300 text-emerald-700', tot.rev ? 'Biên lợi nhuận ' + Math.round(tot.profit / tot.rev * 100) + '%' : '')}
+        </div>
+        <div class="rounded-2xl border-2 ${reach != null && reach < 1 ? 'border-red-300 bg-red-50' : 'border-emerald-300 bg-emerald-50'} p-3 text-sm font-bold text-slate-800">
+          🎯 Doanh thu cần đạt để HÒA VỐN trong kỳ: <span class="text-blue-700">${beTxt}</span>
+          ${tot.days && tot.beRev ? ` (~${money(tot.beRev / tot.days)}/ngày)` : ''} — đang đạt <span class="${reach != null && reach < 1 ? 'text-red-600' : 'text-emerald-700'}">${reach == null ? '–' : Math.round(reach * 100) + '%'}</span>
+          ${reach != null && reach < 1 ? ` • còn thiếu ${money(tot.beRev - tot.rev)}` : ''}
+        </div>
+        ${unassigned ? `<div class="text-xs font-bold bg-amber-50 border border-amber-300 text-amber-800 rounded-xl p-2">⚠️ Có ${unassigned} nhân viên CHƯA XẾP NHÓM (chưa tính lương & hoa hồng). Chọn nhóm ở cột "Nhóm" bên dưới.</div>` : ''}
+        <div class="flex items-center gap-2 text-xs font-bold text-slate-600">Sắp xếp:
+          ${[['profit', 'Cần chú ý trước'], ['rev', 'Doanh thu cao'], ['name', 'Tên A-Z']].map(([k, l]) => `<button onclick="bizSort='${k}'; renderBizBox()" class="px-2.5 py-1 rounded-lg ${bizSort === k ? 'bg-slate-800 text-white' : 'bg-slate-100'}">${l}</button>`).join('')}</div>
+        <div class="overflow-auto custom-scrollbar max-h-[480px] border rounded-xl">
+          <table class="w-full text-left border-collapse text-xs min-w-[1150px]">
+            <thead class="sticky top-0 bg-slate-900 text-white z-10"><tr>
+              <th class="p-2">Nhân viên</th><th class="p-2">Nhóm</th><th class="p-2 text-center">Ngày bán</th><th class="p-2 text-center">Số đơn</th>
+              <th class="p-2 text-right">Doanh thu</th><th class="p-2 text-right">Tài xế</th><th class="p-2 text-right">Hoa hồng</th><th class="p-2 text-right">Lương</th>
+              <th class="p-2 text-right">Lợi nhuận cho Cty</th><th class="p-2 text-right">DT TB/ngày</th><th class="p-2 text-right">Hòa vốn/ngày</th><th class="p-2 text-center">% đạt</th><th class="p-2">Đánh giá</th>
+            </tr></thead>
+            <tbody>${staffRows || '<tr><td colspan="13" class="p-4 text-center text-slate-400">Không có đơn Bán vé / Kế hoạch trong khoảng này</td></tr>'}</tbody>
+          </table>
+        </div>
+        ${grpRows ? `<div class="overflow-x-auto"><table class="w-full text-left text-xs border rounded-xl"><thead class="bg-slate-100"><tr><th class="p-2">Theo nhóm</th><th class="p-2 text-center">Số NV</th><th class="p-2 text-right">Doanh thu</th><th class="p-2 text-right">Hoa hồng</th><th class="p-2 text-right">Lương</th><th class="p-2 text-right">Lợi nhuận</th></tr></thead><tbody>${grpRows}</tbody></table></div>` : ''}
+        <div class="text-[11px] text-slate-500">Cách tính: Lợi nhuận = Doanh thu − ${bizCfg.driverPct}% tài xế − hoa hồng − lương ngày × số ngày có bán. Hòa vốn/ngày = Lương/ngày ÷ (100% − ${bizCfg.driverPct}% − %HH). Đánh giá: 🔴 âm tiền • 🟡 đạt hòa vốn nhưng dưới 130% • 🟢 từ 130% trở lên. Đơn chia tiền nhiều người tính theo phần của từng người.</div>`;
+    }
+    function saveBizConfig() {
+      if (!isManager()) return;
+      const num = id => { const v = Number(String((document.getElementById(id) || {}).value || '').replace(',', '.')); return isFinite(v) && v >= 0 ? v : null; };
+      const driverPct = num('biz-driver');
+      if (driverPct == null || driverPct > 100) { alert('% tài xế phải từ 0 đến 100'); return; }
+      const groups = {};
+      for (const k of Object.keys(bizCfg.groups)) {
+        const c = num('bizc-' + k), w = num('bizw-' + k);
+        if (c == null || c > 100 || w == null) { alert('Nhóm ' + k + ': số không hợp lệ'); return; }
+        groups[k] = { c, w };
+      }
+      dbRef('meta/biz').update({ driverPct, groups }).then(() => alert('Đã lưu cài đặt.')).catch(e => alert('Không lưu được: ' + authErrorText(e)));
+    }
+    function setBizStaffGroup(key, g) {
+      if (!isManager()) return;
+      dbRef('meta/biz/staffGroup/' + key).set(g || null).catch(e => alert('Không lưu được: ' + authErrorText(e)));
+    }
+    async function exportBizExcel() {
+      const btn = document.getElementById('btn-biz-excel');
+      const old = btn ? btn.innerText : '';
+      if (btn) { btn.disabled = true; btn.innerText = '⏳ Đang tạo file...'; }
+      try {
+        const ExcelJS = await loadExcelJS();
+        const wb = new ExcelJS.Workbook(); wb.creator = 'TSS POS';
+        const f = { startDateVal: bizFrom, endDateVal: bizTo, roleFilter: 'all', matchStatusFilter: 'all', keyword: '' };
+        const { rows, tot, groups } = bizCompute(bizFrom, bizTo);
+        rows.sort((a, b) => a.rate.o - b.rate.o || a.profit - b.profit);
+        // Trang 1: Tổng hợp
+        let ws = xlSheetSetup(wb, 'Tổng Hợp', false);
+        xlTitle(ws, 3, f, 'BÁO CÁO HIỆU QUẢ KINH DOANH');
+        const reach = tot.beRev ? tot.rev / tot.beRev : null;
+        let r = xlTable(ws, 6, [{ h: 'Chỉ tiêu', w: 38 }, { h: 'Số tiền', w: 18, fmt: '#,##0' }, { h: 'Ghi chú', w: 30, wrap: true }], [
+          ['Doanh thu (Bán vé + Kế hoạch)', Math.round(tot.rev), `${tot.bills} đơn, ${tot.days} ngày`],
+          [`Trả tài xế (${bizCfg.driverPct}%)`, -Math.round(tot.driver), ''],
+          ['Hoa hồng nhân viên', -Math.round(tot.comm), ''],
+          ['Lương nhân viên (theo ngày có bán)', -Math.round(tot.wage), ''],
+          ['Chi phí khác', -Math.round(tot.other), ''],
+          [tot.profit < 0 ? 'LỖ' : 'LỢI NHUẬN', Math.round(tot.profit), tot.rev ? 'Biên lợi nhuận ' + Math.round(tot.profit / tot.rev * 100) + '%' : ''],
+          ['Doanh thu cần đạt để HÒA VỐN', tot.beRev == null ? 0 : Math.round(tot.beRev), reach == null ? '' : `Đang đạt ${Math.round(reach * 100)}%`]
+        ], i => i === 5 ? (tot.profit < 0 ? 'FFFEE2E2' : 'FFDCFCE7') : (i === 6 ? 'FFDBEAFE' : null));
+        r = xlTable(ws, r + 2, [{ h: 'Theo nhóm nhân viên', w: 38 }, { h: 'Doanh thu', w: 18, fmt: '#,##0' }, { h: 'Lợi nhuận', w: 30, fmt: '#,##0' }],
+          Object.entries(groups).map(([k, x]) => [`${k} (${x.n} NV)`, Math.round(x.rev), Math.round(x.profit)]), i => null);
+        ws.autoFilter = undefined;
+        ws.getColumn(4).width = 6; ws.getColumn(5).width = 6; ws.getColumn(6).width = 6;
+        xlSignature(ws, r + 2, 6);
+        // Trang 2: Theo nhân viên
+        ws = xlSheetSetup(wb, 'Theo Nhân Viên', true);
+        xlTitle(ws, 14, f, 'HIỆU QUẢ THEO NHÂN VIÊN');
+        r = xlTable(ws, 6, [
+          { h: 'STT', w: 5, align: 'center' }, { h: 'Nhân viên', w: 26, wrap: true }, { h: 'Nhóm', w: 8, align: 'center' }, { h: 'Ngày bán', w: 8, align: 'center' }, { h: 'Số đơn', w: 8, align: 'center' },
+          { h: 'Doanh thu', w: 14, fmt: '#,##0' }, { h: 'Tài xế', w: 13, fmt: '#,##0' }, { h: 'Hoa hồng', w: 12, fmt: '#,##0' }, { h: 'Lương', w: 12, fmt: '#,##0' },
+          { h: 'Lợi nhuận cho Cty', w: 15, fmt: '#,##0' }, { h: 'DT TB/ngày', w: 13, fmt: '#,##0' }, { h: 'Hòa vốn/ngày', w: 13, fmt: '#,##0' }, { h: '% đạt', w: 8, align: 'center' }, { h: 'Đánh giá', w: 30, wrap: true }
+        ], rows.map((x, i) => [i + 1, `${x.name} (TK ${x.accs})`, x.g || '?', x.days, x.bills, Math.round(x.rev), Math.round(x.driver), Math.round(x.comm), Math.round(x.wage),
+          Math.round(x.profit), Math.round(x.avgDay), x.beDay == null || !x.w ? '' : Math.round(x.beDay), x.ratio == null ? '' : Math.round(x.ratio * 100) + '%',
+          x.rate.t.replace(/^\S+\s/, '') + (x.need ? ` (cần thêm ~${fmtMoney(Math.round(x.need))}/ngày)` : '')]), i => rows[i].rate.fill);
+        xlSignature(ws, r + 2, 14);
+        // Trang 3: Cài đặt
+        ws = xlSheetSetup(wb, 'Cài Đặt', false);
+        xlTitle(ws, 4, f, `CÀI ĐẶT TÍNH TOÁN (Tài xế hưởng ${bizCfg.driverPct}%)`);
+        xlTable(ws, 6, [{ h: 'Nhóm', w: 12 }, { h: '% Hoa hồng', w: 14, align: 'center' }, { h: 'Lương / ngày', w: 16, fmt: '#,##0' }, { h: 'Hòa vốn / ngày', w: 18, fmt: '#,##0' }],
+          Object.entries(bizCfg.groups).map(([k, x]) => { const m = 1 - bizCfg.driverPct / 100 - x.c / 100; return [k, x.c + '%', x.w, m > 0 ? Math.round(x.w / m) : '']; }), () => null);
+        const buf = await wb.xlsx.writeBuffer();
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+        a.download = `Hieu_Qua_Kinh_Doanh_TSS_${bizFrom.replace(/-/g, '')}-${bizTo.replace(/-/g, '')}.xlsx`;
+        document.body.appendChild(a); a.click();
+        setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000);
+      } catch (e) {
+        alert('Lỗi xuất Excel: ' + (e && e.message ? e.message : e));
+      } finally {
+        if (btn) { btn.disabled = false; btn.innerText = old; }
+      }
     }
     function ddmm(k) { return k ? `${k.slice(8, 10)}/${k.slice(5, 7)}` : ''; }
     function renderReminderBox() {

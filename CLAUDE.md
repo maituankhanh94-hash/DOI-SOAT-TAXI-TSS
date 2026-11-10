@@ -75,6 +75,13 @@
 - (09/11) Nút riêng "📥 Xuất Excel Giảm Giá Vượt Mức" trong khung 💸 → `exportReminderExcel('discount')`: chỉ 2 trang Giảm Giá Vượt Mức (có ký tên) + Theo Nhân Viên, file `Giam_Gia_Vuot_Muc_TSS_….xlsx`.
 - Khung Nhắc Báo Cáo là BẢNG RIÊNG ("📋 Nhắc Báo Cáo & Giảm Giá Vượt Mức", ngay trên Bảng Đối Soát), chọn Từ–Đến ngày (`remindFrom/remindTo`, nút Hôm nay/Hôm qua/7 ngày/Tháng này). Excel: trang Đối Soát ghi 💸 vào cột Ghi chú; trang Dữ Liệu MISA thêm cột Giá bảng giá, Giảm %, Vùng, Vượt mức, Mục bảng giá.
 
+## Hiệu quả kinh doanh (nhánh `hieu-qua-kinh-doanh`, 10/11 — BẢN THỬ, chưa lên main)
+- Khung "📈 Hiệu Quả Kinh Doanh" (Trang Quản Lý, dưới Nhắc Báo Cáo): chọn Từ–Đến (`bizFrom/bizTo`, gộp vào `refreshManagerWindow`). Chỉ tính đơn role pos + plan (`PRICE_ROLES`), theo `staff` (đơn chia tiền theo phần từng người).
+- Người dùng mô tả: tài xế hưởng 64%; HH theo nhóm NV: QT/QN 3%, C10 7%, CTV 15%; lương ngày: C10 320k, T1/T3 = C10, KH = C10, QT/QN 160k (còn làm TĐNT), KIOT 160k, CTV 0. CHƯA RÕ %HH của T1/T3/KH/KIOT → mặc định 7/7/7/3, ghi "cần xác nhận".
+- Cài đặt ở `meta/biz` = {driverPct, groups:{nhóm:{c,w}}, staffGroup:{placeSlug(tên NV): nhóm}} (chỉ QL ghi; NV đọc được vì meta .read active). Nhóm NV: QL chọn trong bảng; chưa chọn thì tự nhận nếu tên chứa mã nhóm (vd "Lan C10").
+- Lương = lương/ngày × số NGÀY CÓ BÁN ĐƠN trong kỳ (không có chấm công). Lợi nhuận NV = DT×(1−64%−HH) − lương. Hòa vốn/ngày = lương/(1−64%−HH). Đánh giá 🔴 âm / 🟡 <130% / 🟢 ≥130% / ⚪ chưa xếp nhóm. Công ty: tổng + "Chi phí khác trong kỳ" (nhập tay, không lưu) → doanh thu cần đạt hòa vốn.
+- Excel `exportBizExcel`: Tổng Hợp / Theo Nhân Viên (màu theo đánh giá) / Cài Đặt. xlSignature cần lastCol ≥ 6.
+
 ## Lỗi/rủi ro đã phát hiện (06/11/2026) — 3–9 ĐÃ SỬA ở nhánh `cai-tien-doi-soat` (08/11)
 1. ĐÃ SỬA 07/11: quy tắc RTDB thật trước đây `.read/.write: true`; nay là quy-tac-buoc-2 + Firebase Auth. Còn tồn: dữ liệu thử `test_env/` và tài khoản Auth `@test.taxi-tss.local`. Số liệu 07/11: lưu 1,61 MB, tải về 121 MB/6 ngày, kết nối đỉnh 33/100 (gói Spark). DB thật còn 2 nhánh cũ không dùng: `deleted_trips`, `drivers`.
 2. ĐÃ SỬA: màn hình & Excel dùng chung `computeAuditGroups`/`getAuditStatus`; Excel ExcelJS có màu/kẻ ô/nhóm ngày/tổng/ký tên + sheet Tổng Hợp; ngày gõ thiếu dấu tự sửa, ngày sai bị chặn.

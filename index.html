@@ -1286,9 +1286,12 @@
       return b === trips.length ? `${b} đơn` : `${b} đơn (${trips.length} dòng chia tiền)`;
     }
 
+    // Số phiếu hiển thị (10/11, người dùng yêu cầu): đơn 1 người -> "113625-1/1"; đơn chia tiền giữ "113625-1/2", "113625-2/2".
+    // Chỉ đổi cách HIỂN THỊ / XUẤT EXCEL, không đổi dữ liệu đã lưu (ghép cặp vẫn theo số phiếu gốc).
     function formatDisplayTicket(ticketStr) {
-      if (!ticketStr) return '';
-      return String(ticketStr);
+      const s = String(ticketStr == null ? '' : ticketStr).trim();
+      if (!s) return '';
+      return /-\d+[\/-]\d+$/.test(s) ? s : s + '-1/1';
     }
 
     function sortTripsByDateAndTime(trips) {
@@ -3751,7 +3754,7 @@
           const first = r;
           g.trips.forEach(t => {
             const role = XL.role[t.role] || { label: t.role || '', color: 'FF334155' };
-            const vals = [stt, normalizeDateInput(t.dateStr) || '',t.timeStr || '', role.label, t.staff || '', t.ticketNumber || '', plateCell(t.plateNumber),
+            const vals = [stt, normalizeDateInput(t.dateStr) || '',t.timeStr || '', role.label, t.staff || '', formatDisplayTicket(t.ticketNumber), plateCell(t.plateNumber),
               t.carType || '', t.source || '', t.pickup ? 'Ga ' + t.pickup : '', t.destination || '', t.paymentMethod || '(Chưa ghi)',
               [t.note || '', (di => di && di.over ? `💸 ${discountText(di)}` : '')(discountInfo(t))].filter(Boolean).join(' | '),
               Number(t.totalFare || 0), auditStatusText(g)];
@@ -3823,19 +3826,35 @@
       const d = String(v == null ? '' : v).replace(/\D/g, '');
       return d ? Number(d.slice(-3)) : '';
     }
-    // 1 dòng tiêu đề, mỗi dòng 1 đơn, KHÔNG gộp ô, KHÔNG dòng tổng/tiêu đề ngày, ngày là kiểu Ngày thật, tiền là số thuần.
+    // Trang "Dữ Liệu MISA" (10/11): cột A→R ĐÚNG THỨ TỰ mẫu nạp MISA của kế toán (file đẩy, trang MISA) -> copy dán thẳng.
+    // Cột không có dữ liệu trong app thì để trống (Mã khách hàng). Sau 1 cột trống là các cột tham khảo thêm.
+    // Tiền là SỐ có phân cách hàng nghìn (#,##0), ngày là kiểu Ngày, mã TK/ĐVT là chữ.
     function buildFlatSheet(wb, groups) {
       const ws = wb.addWorksheet('Dữ Liệu MISA', { views: [{ state: 'frozen', ySplit: 1 }] });
-      const cols = [
-        ['Ngày', 12], ['Giờ nộp', 9], ['Phân vùng', 15], ['Nhân sự', 22], ['Số phiếu', 13], ['Số phiếu gốc', 13], ['Biển số', 12], ['BSX 3 số (MISA)', 10],
-        ['Loại xe', 12], ['Nguồn đơn', 14], ['Điểm đón', 10], ['Điểm đến', 30], ['Hình thức thanh toán', 20], ['Ghi chú', 22],
-        ['Số tiền', 13], ['Trạng thái đối soát', 26], ['Tài khoản nhập', 14],
+      const MISA_COLS = [
+        ['Phương thức thanh toán', 18], ['Ngày hạch toán (*)', 13], ['Ngày chứng từ (*)', 13], ['Số chứng từ (*)', 14], ['Số hóa đơn', 14],
+        ['Mã khách hàng', 16], ['Mã dịch vụ (*)', 10], ['TK Tiền/Chi phí/Nợ (*)', 12], ['TK Doanh thu/Có (*)', 12], ['ĐVT', 8], ['Số lượng', 8],
+        ['Đơn giá', 13], ['Thành tiền', 13], ['Mã công trình', 16], ['Mã nhân viên bán hàng', 24], ['Mã thống kê', 12], ['Mã thống kê', 12], ['Mã thống kê', 30]
+      ];
+      const EXTRA_COLS = [
+        ['', 3], ['BSX 3 số', 9], ['Biển số', 12], ['Phân vùng', 15], ['Tài khoản nhập', 14], ['Trạng thái đối soát', 26], ['Loại xe', 11], ['Ghi chú', 22],
         ['Giá bảng giá (cả đơn)', 14], ['Giảm so với bảng giá (%)', 12], ['Vùng', 11], ['Vượt mức giảm', 12], ['Mục bảng giá', 40]
       ];
+      const cols = MISA_COLS.concat(EXTRA_COLS);
       ws.columns = cols.map(([header, width]) => ({ header, width }));
-      ws.getRow(1).font = { bold: true };
+      const hr = ws.getRow(1);
+      hr.height = 30;
+      cols.forEach((c, i) => {
+        const cell = hr.getCell(i + 1);
+        if (!c[0]) return;
+        cell.font = { bold: true };
+        cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: i < MISA_COLS.length ? 'FF92D050' : 'FFE2E8F0' } };
+        cell.border = XL.border;
+      });
       const roleTxt = { pos: 'Bán vé (Quầy)', plan: 'Team Kế hoạch', driver: 'Cổng Chủ xe' };
       const clean = v => String(v == null ? '' : v).replace(/[\r\n\t]+/g, ' ').replace(/\s{2,}/g, ' ').trim();
+      const MONEY = '#,##0';
       groups.forEach(g => {
         const st = clean(auditStatusText(g));
         g.trips.forEach(t => {
@@ -3843,20 +3862,28 @@
           const p = dk ? dk.split('-').map(Number) : null;
           // Dùng giờ UTC để Excel không lệch sang ngày hôm trước
           const dateVal = p ? new Date(Date.UTC(p[0], p[1] - 1, p[2])) : clean(t.dateStr);
+          const ticket = formatDisplayTicket(clean(t.ticketNumber));
+          const fare = Number(t.totalFare || 0);
+          const di = discountInfo(t);
           const row = ws.addRow([
-            dateVal, clean(t.timeStr), roleTxt[t.role] || clean(t.role), clean(t.staff), clean(t.ticketNumber),
-            clean(t.originalTicket || baseTicketOf(t.ticketNumber)), plateCell(t.plateNumber), plate3Num(t.plateNumber), clean(t.carType), clean(t.source),
-            t.pickup ? 'Ga ' + clean(t.pickup) : '', clean(t.destination), clean(t.paymentMethod), clean(t.note),
-            Number(t.totalFare || 0), st, clean(t.createdBy),
-            ...(di => di ? [di.list, Math.round(di.pct * 1000) / 10, di.zone === 'ngoai' ? 'Ngoại thành' : 'Nội thành', di.over ? 'VƯỢT MỨC' : '', clean(di.label) + (di.inferred ? ' [ước tính]' : '')] : ['', '', '', '', ''])(discountInfo(t))
+            'Chưa thu tiền', dateVal, dateVal, ticket, ticket,
+            '', 'VC', '131', '5113', 'Chuyến', 1,
+            fare, fare, clean(t.source), clean(t.staff),
+            clean(t.paymentMethod), t.pickup ? 'Ga ' + clean(t.pickup) : '', clean(t.destination),
+            '', plate3Num(t.plateNumber), plateCell(t.plateNumber), roleTxt[t.role] || clean(t.role), clean(t.createdBy), st, clean(t.carType), clean(t.note),
+            ...(di ? [di.list, Math.round(di.pct * 1000) / 10, di.zone === 'ngoai' ? 'Ngoại thành' : 'Nội thành', di.over ? 'VƯỢT MỨC' : '', clean(di.label) + (di.inferred ? ' [ước tính]' : '')] : ['', '', '', '', ''])
           ]);
-          if (p) row.getCell(1).numFmt = 'dd/mm/yyyy';
-          row.getCell(7).numFmt = '0'; row.getCell(8).numFmt = '0';
-          row.getCell(15).numFmt = '0';
+          if (p) { row.getCell(2).numFmt = 'dd/mm/yyyy'; row.getCell(3).numFmt = 'dd/mm/yyyy'; }
+          [4, 5, 6, 8, 9, 10, 14, 15, 16, 17, 18].forEach(i => { row.getCell(i).numFmt = '@'; });
+          row.getCell(11).numFmt = '0';
+          row.getCell(12).numFmt = MONEY; row.getCell(13).numFmt = MONEY;
+          row.getCell(20).numFmt = '0'; row.getCell(21).numFmt = '0';
+          row.getCell(27).numFmt = MONEY;
         });
       });
-      ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: cols.length } };
+      ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: MISA_COLS.length } };
     }
+
 
     function buildSummarySheet(wb, groups, f) {
       const ws = wb.addWorksheet('Tổng Hợp', {

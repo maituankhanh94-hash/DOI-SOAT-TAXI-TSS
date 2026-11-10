@@ -3857,7 +3857,9 @@
       const MONEY = '#,##0';
       groups.forEach(g => {
         const st = clean(auditStatusText(g));
-        g.trips.forEach(t => {
+        // Mỗi cuốc chỉ ghi 1 lần: có bên Bán vé/Kế hoạch thì lấy bên đó; chỉ có bên Chủ xe thì mới lấy bên Chủ xe (tránh trùng doanh thu)
+        const sale = g.trips.filter(t => t.role !== 'driver');
+        (sale.length ? sale : g.trips).forEach(t => {
           const dk = tripDateKey(t);
           const p = dk ? dk.split('-').map(Number) : null;
           // Dùng giờ UTC để Excel không lệch sang ngày hôm trước

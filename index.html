@@ -1019,16 +1019,25 @@
     }
 
     // Khung nhắc LỚN khi thiếu Quận (mẫu 3 người dùng chọn). CHỈ NHẮC, KHÔNG gợi ý (người dùng yêu cầu 09/11).
-    function showDestFixModal(items) {
+    // Khung nhắc LỚN. items: {dest} = thiếu Phường/Xã (mẫu 3, không ghi số dòng) hoặc {text} = lỗi khác (ghi rõ dòng).
+    // savedCount > 0: đã lưu được một phần, các dòng lỗi vẫn GIỮ trên màn hình (tô đỏ) để sửa rồi lưu tiếp.
+    function showDestFixModal(items, savedCount) {
       let el = document.getElementById('dest-fix-modal');
       if (!el) { el = document.createElement('div'); el.id = 'dest-fix-modal'; document.body.appendChild(el); }
       const blocks = items.map(it => `
         <div class="rounded-2xl p-4 border-2 bg-amber-50 border-amber-400">
-          <p class="text-lg sm:text-xl font-extrabold text-slate-900 leading-snug">Vui lòng nhập thêm <span class="text-red-600 underline">PHƯỜNG / XÃ</span> (hoặc Quận cũ) cho điểm đến <span class="text-blue-700">"${escHtml(it.dest)}"</span> mới thực hiện lưu đơn được.</p>
+          <p class="text-lg sm:text-xl font-extrabold text-slate-900 leading-snug">${it.dest != null
+            ? `Vui lòng nhập thêm <span class="text-red-600 underline">PHƯỜNG / XÃ</span> (hoặc Quận cũ) cho điểm đến <span class="text-blue-700">"${escHtml(it.dest)}"</span> mới thực hiện lưu đơn được.`
+            : it.html}</p>
         </div>`).join('');
+      const head = savedCount > 0
+        ? `<div class="bg-emerald-600 text-white text-center p-3 text-lg sm:text-xl font-black">✅ ĐÃ LƯU ${savedCount} ĐƠN</div>
+           <div class="bg-red-600 text-white text-center p-3 text-lg sm:text-xl font-black">⚠️ CÒN ${items.length} DÒNG CHƯA LƯU</div>
+           <div class="bg-red-50 text-red-800 text-center px-3 py-2 text-sm font-bold">Các dòng này vẫn đang GIỮ trên bảng nhập (tô đỏ). Sửa xong bấm Lưu lại.</div>`
+        : `<div class="bg-red-600 text-white text-center p-4 text-xl sm:text-2xl font-black tracking-wide">⚠️ CHƯA LƯU ĐƯỢC ĐƠN</div>`;
       el.innerHTML = `<div class="fixed inset-0 bg-slate-900/80 z-[70] flex items-center justify-center p-3 backdrop-blur-sm">
         <div class="bg-white rounded-3xl w-full max-w-lg max-h-[92vh] flex flex-col overflow-hidden border-4 border-red-500 shadow-2xl">
-          <div class="bg-red-600 text-white text-center p-4 text-xl sm:text-2xl font-black tracking-wide">⚠️ CHƯA LƯU ĐƯỢC ĐƠN</div>
+          ${head}
           <div class="p-4 space-y-3 overflow-y-auto">${blocks}</div>
           <div class="p-4 border-t bg-slate-50">
             <button onclick="closeDestFix()" class="w-full p-3.5 text-lg sm:text-xl font-black bg-blue-600 hover:bg-blue-700 text-white rounded-xl shadow-lg">✏️ ĐÃ HIỂU, TÔI SẼ SỬA</button>
@@ -1398,6 +1407,7 @@
               <button onclick="submitBatch('${role}')" class="px-5 py-2.5 ${btnThemeClass} text-white font-extrabold text-xs rounded-xl shadow-lg transition-all">🚀 Lưu Đơn Lên Cloud</button>
             </div>
             ${PRICE_ROLES.includes(role) ? `<div class="text-[11px] sm:text-xs bg-amber-50 border border-amber-300 text-amber-900 rounded-xl p-2.5 font-semibold">📌 <b>QUY ƯỚC Ô ĐIỂM ĐẾN:</b> ${escHtml(DEST_RULE_TEXT)}</div>` : ''}
+            <div id="batch-draft-note"></div>
             <div class="overflow-x-auto custom-scrollbar max-h-[450px]">
               <table class="w-full text-left border-collapse min-w-[1700px]">
                 <thead class="sticky top-0 z-20 shadow-md">
@@ -1416,13 +1426,14 @@
                     <th class="p-3 min-w-[180px] bg-slate-900">Ghi Chú</th>
                   </tr>
                 </thead>
-                <tbody id="tbody-batch" class="divide-y divide-slate-200 text-xs"></tbody>
+                <tbody id="tbody-batch" class="divide-y divide-slate-200 text-xs" oninput="scheduleBatchDraft()" onchange="scheduleBatchDraft()"></tbody>
               </table>
             </div>
           </div>
         </div>
       `;
       renderBatchRows(role);
+      restoreBatchDraft();
 
       const todayObj = new Date();
       const yyyy = todayObj.getFullYear();
@@ -1497,6 +1508,55 @@
         `;
       }
       tb.innerHTML = html;
+    }
+
+    // ===== GIỮ DÒNG CHƯA LƯU (09-10/11: tránh mất đơn) =====
+    // Mỗi dòng nhập được lưu tạm trên máy (localStorage) -> tải lại trang / mất mạng / tắt máy vẫn còn, bấm Lưu lại được.
+    const BATCH_FIELDS = ['date', 'staff', 't', 'p', 'c', 'src', 'pick', 'd', 'f', 'm', 'note'];
+    function readBatchRow(i) {
+      const o = {};
+      BATCH_FIELDS.forEach(k => { const el = document.getElementById(`${k}-${i}`); if (el) o[k] = el.value; });
+      ['d', 'f'].forEach(k => { const el = document.getElementById(`${k}-${i}`); if (el) o[k + '_ds'] = Object.assign({}, el.dataset); });
+      return o;
+    }
+    function writeBatchRow(i, o) {
+      BATCH_FIELDS.forEach(k => {
+        const el = document.getElementById(`${k}-${i}`);
+        if (!el || o[k] == null) return;
+        if (el.tagName === 'SELECT' && ![...el.options].some(op => op.value === o[k])) return;
+        el.value = o[k];
+      });
+      ['d', 'f'].forEach(k => { const el = document.getElementById(`${k}-${i}`); if (el && o[k + '_ds']) Object.entries(o[k + '_ds']).forEach(([a, v]) => { el.dataset[a] = v; }); });
+    }
+    // Dòng có nội dung do người nhập gõ (số phiếu tự nhảy một mình không tính)
+    function batchRowHasContent(i) {
+      return ['staff', 'p', 'd'].some(k => { const el = document.getElementById(`${k}-${i}`); return el && el.value.trim(); });
+    }
+    function batchDraftKey() { return loggedInUser ? `tss_batch_draft_${DB_PREFIX || 'main'}_${loggedInUser.user}` : null; }
+    function saveBatchDraft() {
+      const k = batchDraftKey();
+      if (!k || !document.getElementById('tbody-batch')) return;
+      const rows = [];
+      for (let i = 0; i < 20; i++) if (batchRowHasContent(i)) rows.push({ i, v: readBatchRow(i) });
+      try { rows.length ? localStorage.setItem(k, JSON.stringify({ ts: Date.now(), rows })) : localStorage.removeItem(k); } catch (e) {}
+    }
+    let batchDraftTimer = null;
+    function scheduleBatchDraft() { clearTimeout(batchDraftTimer); batchDraftTimer = setTimeout(saveBatchDraft, 300); }
+    function restoreBatchDraft() {
+      const k = batchDraftKey();
+      if (!k) return;
+      let d = null;
+      try { d = JSON.parse(localStorage.getItem(k) || 'null'); } catch (e) {}
+      if (!d || !Array.isArray(d.rows) || !d.rows.length) return;
+      if (Date.now() - (d.ts || 0) > 7 * 86400000) { try { localStorage.removeItem(k); } catch (e) {} return; }
+      d.rows.forEach(r => { if (r && r.i >= 0 && r.i < 20) writeBatchRow(r.i, r.v || {}); });
+      const note = document.getElementById('batch-draft-note');
+      if (note) note.innerHTML = `<div class="text-xs sm:text-sm bg-blue-50 border-2 border-blue-400 text-blue-900 rounded-xl p-3 font-bold">♻️ Đã khôi phục <b>${d.rows.length} dòng CHƯA LƯU</b> từ lần nhập trước (lúc ${new Date(d.ts).toLocaleString('vi-VN')}). Kiểm tra lại rồi bấm <b>Lưu Đơn Lên Cloud</b>.</div>`;
+    }
+    if (!window.__batchDraftHooks) {
+      window.__batchDraftHooks = true;
+      document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveBatchDraft(); });
+      window.addEventListener('pagehide', saveBatchDraft);
     }
 
     function syncBatchDates(val) {
@@ -2170,21 +2230,30 @@
 
     async function submitBatch(role) {
       if (!loggedInUser) return;
-      // Quy ước: địa chỉ nội thành bắt buộc ghi Quận (Bán vé + Kế hoạch). Có dòng thiếu -> chưa lưu dòng nào, để sửa lại.
-      if (usesPriceList()) {
-        const noDistrict = [];   // chỉ số dòng thiếu Quận
-        for (let i = 0; i < 20; i++) {
-          const dEl = document.getElementById(`d-${i}`);
-          const dest = dEl ? dEl.value.trim() : '';
-          const filled = document.getElementById(`staff-${i}`).value.trim() && document.getElementById(`t-${i}`).value.trim() && document.getElementById(`p-${i}`).value.trim() && dest;
-          if (!filled) continue;
-          const it = rowPriceItem(i);
-          if (!destHasDistrict(dest, it && it.id, (document.getElementById(`m-${i}`) || {}).value)) { noDistrict.push(i); dEl.classList.add('ring-2', 'ring-red-500'); }
-          else dEl.classList.remove('ring-2', 'ring-red-500');
+      saveBatchDraft();   // lưu tạm trên máy trước, lỡ mất mạng / tải lại trang vẫn còn
+      // Kiểm tra từng dòng. Dòng lỗi KHÔNG lưu nhưng vẫn GIỮ trên màn hình; các dòng đúng vẫn lưu bình thường.
+      const RED = ['ring-2', 'ring-red-500'];
+      const problems = [];          // {i, dest} hoặc {i, html}
+      const keepRows = new Set();   // dòng chưa lưu, giữ lại
+      const FIELD_NAMES = { staff: 'Tên nhân sự', t: 'Số phiếu', p: 'Biển số', d: 'Điểm đến' };
+      for (let i = 0; i < 20; i++) {
+        ['staff', 't', 'p', 'd', 'date'].forEach(k => { const el = document.getElementById(`${k}-${i}`); if (el) el.classList.remove(...RED); });
+        if (!batchRowHasContent(i)) continue;
+        const missing = Object.keys(FIELD_NAMES).filter(k => !document.getElementById(`${k}-${i}`).value.trim());
+        if (missing.length) {
+          missing.forEach(k => document.getElementById(`${k}-${i}`).classList.add(...RED));
+          problems.push({ i, html: `Dòng ${i+1}: còn thiếu <span class="text-red-600 underline">${missing.map(k => FIELD_NAMES[k]).join(', ')}</span> — vui lòng nhập thêm mới lưu được.` });
+          keepRows.add(i);
+          continue;
         }
-        if (noDistrict.length) {
-          showDestFixModal(noDistrict.map(i => ({ label: `dòng ${i+1}`, dest: document.getElementById(`d-${i}`).value.trim() })));
-          return;
+        if (usesPriceList()) {
+          const dEl = document.getElementById(`d-${i}`);
+          const it = rowPriceItem(i);
+          if (!destHasDistrict(dEl.value.trim(), it && it.id, (document.getElementById(`m-${i}`) || {}).value)) {
+            dEl.classList.add(...RED);
+            problems.push({ i, dest: dEl.value.trim() });
+            keepRows.add(i);
+          }
         }
       }
       // Đơn nhập cho ngày cũ hơn khoảng đã tải: tải thêm đơn của đúng ngày đó để kiểm tra trùng
@@ -2231,8 +2300,12 @@
         const pay = document.getElementById(`m-${i}`).value;
         const note = document.getElementById(`note-${i}`).value.trim();
 
+        if (keepRows.has(i)) continue;
         if (rawStaff && ticket && plate && dest && !isValidDateStr(formattedDate)) {
           invalidDateRows.push(`Dòng ${i+1} ("${rawDate}")`);
+          document.getElementById(`date-${i}`).classList.add(...RED);
+          problems.push({ i, html: `Dòng ${i+1}: ngày <span class="text-red-600 underline">"${escHtml(rawDate)}"</span> không đúng dạng ngày/tháng/năm (vd 09/11/2026).` });
+          keepRows.add(i);
           continue;
         }
 
@@ -2299,10 +2372,7 @@
         }
       }
 
-      if (invalidDateRows.length > 0) {
-        alert(`Ngày tháng không đúng dạng ngày/tháng/năm (vd 07/11/2026) ở: ${invalidDateRows.join(', ')}.\nCác dòng này CHƯA được lưu, vui lòng sửa lại ngày.`);
-      }
-
+      problems.sort((a, b) => a.i - b.i);
       if (duplicateDetails.length > 0) {
         showFloatingWarning(`Đã chặn ${duplicateDetails.length} đơn trùng lặp (trùng trong danh sách nhập hoặc đã có trên Cloud): ${duplicateDetails.join(', ')}`);
       }
@@ -2310,8 +2380,19 @@
       if (count > 0) {
         dbRoot().update(updates).then(() => {
           recordPlaces(savedDests);
-          alert(`Đã lưu thành công và phân tách hoa hồng cho ${count} đơn!` + (overDiscountRows.length && !SILENT_DISCOUNT_WATCH ? `\n\n⚠️ Có ${overDiscountRows.length} đơn GIẢM GIÁ VƯỢT MỨC cho phép (${pctText(DISCOUNT_LIMIT.noi)} nội thành, ${pctText(DISCOUNT_LIMIT.ngoai)} ngoại thành) — Quản lý sẽ kiểm tra:\n${overDiscountRows.join('\n')}` : ''));
+          // Xóa các dòng ĐÃ LƯU, giữ nguyên các dòng chưa lưu (cùng vị trí, tô đỏ)
+          const kept = [...keepRows].map(i => ({ i, v: readBatchRow(i) }));
           renderBatchRows(role);
+          kept.forEach(r => writeBatchRow(r.i, r.v));
+          problems.forEach(pr => {
+            if (pr.dest != null) { document.getElementById(`d-${pr.i}`).classList.add(...RED); return; }
+            ['staff', 't', 'p', 'd'].forEach(k => { const el = document.getElementById(`${k}-${pr.i}`); if (el && !el.value.trim()) el.classList.add(...RED); });
+            if (!isValidDateStr(normalizeDateInput(document.getElementById(`date-${pr.i}`).value.trim()))) document.getElementById(`date-${pr.i}`).classList.add(...RED);
+          });
+          saveBatchDraft();
+          const note = document.getElementById('batch-draft-note'); if (note) note.innerHTML = '';
+          if (problems.length) { showDestFixModal(problems, count); }
+          else alert(`Đã lưu thành công và phân tách hoa hồng cho ${count} đơn!` + (overDiscountRows.length && !SILENT_DISCOUNT_WATCH ? `\n\n⚠️ Có ${overDiscountRows.length} đơn GIẢM GIÁ VƯỢT MỨC cho phép (${pctText(DISCOUNT_LIMIT.noi)} nội thành, ${pctText(DISCOUNT_LIMIT.ngoai)} ngoại thành) — Quản lý sẽ kiểm tra:\n${overDiscountRows.join('\n')}` : ''));
           const histInput = document.getElementById('filter-history-date');
           if (histInput && lastFormattedDate) {
             const parts = formatDateForInput(lastFormattedDate);
@@ -2319,9 +2400,11 @@
             renderActiveWorksheetTrips(role);
           }
         }).catch(err => {
-          alert("Lỗi lưu dữ liệu: " + err.message);
+          alert("⚠️ CHƯA LƯU ĐƯỢC (lỗi mạng hoặc quyền): " + err.message + "\n\nCác dòng vẫn còn trên màn hình và đã được giữ tạm trên máy. Kiểm tra mạng rồi bấm Lưu lại.");
         });
-      } else if (duplicateDetails.length === 0 && invalidDateRows.length === 0) {
+      } else if (problems.length) {
+        showDestFixModal(problems, 0);
+      } else if (duplicateDetails.length === 0) {
         alert("Vui lòng điền đầy đủ Tên Nhân Sự, Số Phiếu, Biển Số và Điểm Đến!");
       }
     }

@@ -28,6 +28,7 @@
 - Dữ liệu tài khoản: `login_index/<USER>={ver}` (công khai, để biết email khi đăng nhập), `accounts/<USER>={role,active,uid,ver}` (quản lý đọc), `roles/<uid>={user,role,active}` (quy tắc dựa vào đây).
 - Quản lý tạo/đặt lại MK bằng app Firebase phụ (`createAuthUserFor`) → không bị đăng xuất. Không đổi được MK người khác → tạo phiên bản email mới, giữ tên tài khoản.
 - Lần đầu (chưa có `login_index`): nút Trang Quản Lý → "Thiết lập quản lý lần đầu" (cần MK cũ 999), quy tắc cho phép tự phong quản lý chỉ khi `roles` trống. Sau đó nút "Chuyển Đổi Tài Khoản Cũ" chuyển `settings/accounts` (MK dạng chữ) sang Firebase rồi xóa nó.
+- (10/11) BỎ giới hạn 6 ký tự: mật khẩu app ngắn bao nhiêu cũng được (chỉ cần không trống) — Firebase vẫn ổn nhờ tiền tố `authPassword`. Áp cho tạo TK, đặt lại MK, đổi MK, thiết lập lần đầu.
 - Xóa đơn ở Trang Quản Lý: nhập lại MK của chính quản lý (reauthenticate). Nút 🔑 Đổi Mật Khẩu cho mọi tài khoản. Bị khóa khi đang dùng → tự đăng xuất.
 - Môi trường: `FORCE_TEST_ENV` trong index.html (nhánh thử = true, main = false) hoặc hostname có `-git-`/localhost → vùng `test_env/`, nhãn 🧪 BẢN THỬ, có nút "Chép dữ liệu thật vào bản thử" (chỉ đọc dữ liệu thật).
 - Quy tắc: `firebase-rules/quy-tac-buoc-1.json` (chuyển tiếp: đường dẫn thật vẫn công khai, `test_env` khóa chặt) và `quy-tac-buoc-2.json` (khóa chặt cả hai). Sinh bằng script trong lịch sử phiên; giữ hai file đồng bộ khi sửa.

@@ -376,7 +376,7 @@
         <p class="text-[11px] text-slate-600 font-semibold text-center">Lần đầu dùng hệ thống bảo mật mới. Hãy tạo tài khoản Quản Lý.</p>
         <input type="password" id="boot-old" autocomplete="off" placeholder="Mật khẩu quản lý cũ..." class="${inputCls}">
         <input type="text" id="boot-user" autocomplete="username" value="ADMIN" placeholder="Tên tài khoản quản lý..." class="${inputCls}">
-        <input type="password" id="boot-pass" autocomplete="new-password" placeholder="Mật khẩu mới (ít nhất 6 ký tự)..." class="${inputCls}">
+        <input type="password" id="boot-pass" autocomplete="new-password" placeholder="Mật khẩu mới (ngắn cũng được, vd 123)..." class="${inputCls}">
         <input type="password" id="boot-pass2" autocomplete="new-password" placeholder="Nhập lại mật khẩu mới..." class="${inputCls}" onkeydown="if(event.key==='Enter') executeBootstrapManager()">`;
       document.body.insertAdjacentHTML('beforeend', loginModalHtml('boot-modal', 'bg-slate-900', '🛡️', 'Thiết Lập Quản Lý Lần Đầu', body, 'Tạo & Đăng Nhập', 'executeBootstrapManager()'));
     }
@@ -388,7 +388,7 @@
       const p2 = document.getElementById('boot-pass2').value.trim();
       if (oldP !== '999') { setModalBusy('boot-modal', false, 'Mật khẩu quản lý cũ không đúng!'); return; }
       if (!/^[A-Z0-9_.-]{2,30}$/.test(u)) { setModalBusy('boot-modal', false, 'Tên tài khoản chỉ gồm chữ không dấu, số (2-30 ký tự)!'); return; }
-      if (p.length < 6) { setModalBusy('boot-modal', false, 'Mật khẩu mới phải có ít nhất 6 ký tự!'); return; }
+      if (!p) { setModalBusy('boot-modal', false, 'Vui lòng nhập mật khẩu mới!'); return; }
       if (p !== p2) { setModalBusy('boot-modal', false, 'Hai lần nhập mật khẩu không giống nhau!'); return; }
       setModalBusy('boot-modal', true, 'Đang tạo tài khoản...');
       try {
@@ -1212,7 +1212,7 @@
       closeLoginModals();
       const body = `
         <input type="password" id="own-old" autocomplete="current-password" placeholder="Mật khẩu hiện tại..." class="${inputCls}">
-        <input type="password" id="own-new" autocomplete="new-password" placeholder="Mật khẩu mới (ít nhất 6 ký tự)..." class="${inputCls}">
+        <input type="password" id="own-new" autocomplete="new-password" placeholder="Mật khẩu mới (ngắn cũng được, vd 123)..." class="${inputCls}">
         <input type="password" id="own-new2" autocomplete="new-password" placeholder="Nhập lại mật khẩu mới..." class="${inputCls}" onkeydown="if(event.key==='Enter') executeChangeOwnPassword()">`;
       document.body.insertAdjacentHTML('beforeend', loginModalHtml('ownpw-modal', 'bg-blue-600', '🔑', `Đổi Mật Khẩu (${escHtml(loggedInUser.user)})`, body, 'Lưu Mật Khẩu', 'executeChangeOwnPassword()'));
     }
@@ -1220,7 +1220,7 @@
       const o = document.getElementById('own-old').value.trim();
       const n = document.getElementById('own-new').value.trim();
       const n2 = document.getElementById('own-new2').value.trim();
-      if (n.length < 6) { setModalBusy('ownpw-modal', false, 'Mật khẩu mới phải có ít nhất 6 ký tự!'); return; }
+      if (!n) { setModalBusy('ownpw-modal', false, 'Vui lòng nhập mật khẩu mới!'); return; }
       if (n !== n2) { setModalBusy('ownpw-modal', false, 'Hai lần nhập mật khẩu mới không giống nhau!'); return; }
       setModalBusy('ownpw-modal', true, 'Đang lưu...');
       try {
@@ -2447,7 +2447,7 @@
             <div id="legacy-migrate-box"></div>
             <div class="grid grid-cols-1 sm:grid-cols-4 gap-2 text-xs">
               <input type="text" id="new-user" autocomplete="off" placeholder="Tài khoản (vd TSS05)..." class="p-2.5 bg-slate-50 border rounded-xl font-bold uppercase">
-              <input type="text" id="new-pass" autocomplete="off" placeholder="Mật khẩu (ít nhất 6 ký tự)..." class="p-2.5 bg-slate-50 border rounded-xl font-bold">
+              <input type="text" id="new-pass" autocomplete="off" placeholder="Mật khẩu (ngắn cũng được, vd 123)..." class="p-2.5 bg-slate-50 border rounded-xl font-bold">
               <select id="new-role" class="p-2.5 bg-slate-50 border rounded-xl font-bold">
                 <option value="pos">Bán Vé (Quầy)</option>
                 <option value="driver">Cổng Chủ Xe</option>
@@ -4059,7 +4059,7 @@
       const p = document.getElementById('new-pass').value.trim();
       const r = document.getElementById('new-role').value;
       if (!USER_RE.test(u)) { alert("Tên tài khoản chỉ gồm chữ không dấu, số, dấu . _ - (2-30 ký tự)!"); return; }
-      if (p.length < 6) { alert("Mật khẩu phải có ít nhất 6 ký tự!"); return; }
+      if (!p) { alert("Vui lòng nhập mật khẩu!"); return; }
       if (accountsMap[u] || pendingLegacyAccounts().some(a => String(a.user).toUpperCase() === u)) {
         alert("Tài khoản này đã tồn tại trong hệ thống!");
         return;
@@ -4082,7 +4082,7 @@
     function openResetPasswordModal(u) {
       closeLoginModals();
       const body = `
-        <input type="text" id="reset-pass" autocomplete="off" placeholder="Mật khẩu mới (ít nhất 6 ký tự)..." class="${inputCls}" onkeydown="if(event.key==='Enter') executeResetPassword('${escHtml(u)}')">
+        <input type="text" id="reset-pass" autocomplete="off" placeholder="Mật khẩu mới (ngắn cũng được, vd 123)..." class="${inputCls}" onkeydown="if(event.key==='Enter') executeResetPassword('${escHtml(u)}')">
         <p class="text-[11px] text-slate-500">Nhân viên đăng nhập bằng tài khoản <b>${escHtml(u)}</b> với mật khẩu mới. Đơn hàng cũ giữ nguyên.</p>`;
       document.body.insertAdjacentHTML('beforeend', loginModalHtml('reset-modal', 'bg-blue-600', '🔑', `Đặt Lại Mật Khẩu: ${escHtml(u)}`, body, 'Lưu Mật Khẩu Mới', `executeResetPassword('${escHtml(u)}')`));
       setTimeout(() => { const i = document.getElementById('reset-pass'); if (i) i.focus(); }, 50);
@@ -4093,7 +4093,7 @@
       const a = accountsMap[u];
       const p = document.getElementById('reset-pass').value.trim();
       if (!a) return;
-      if (p.length < 6) { setModalBusy('reset-modal', false, 'Mật khẩu phải có ít nhất 6 ký tự!'); return; }
+      if (!p) { setModalBusy('reset-modal', false, 'Vui lòng nhập mật khẩu mới!'); return; }
       setModalBusy('reset-modal', true, 'Đang lưu...');
       try {
         const { uid, ver } = await createAuthUserFor(u, p, (a.ver || 0) + 1);

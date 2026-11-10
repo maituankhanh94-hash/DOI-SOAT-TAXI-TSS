@@ -1467,7 +1467,7 @@
               <div id="staff-drop-${i}"></div>
             </td>
             <td class="p-2.5"><input type="text" id="t-${i}" autocomplete="off" placeholder="Phiếu..." class="w-full p-2 bg-slate-50 border rounded-xl font-mono font-bold text-xs" onfocus="handleSmartTicketFocus(${i})"></td>
-            <td class="p-2.5"><input type="text" id="p-${i}" autocomplete="off" placeholder="51H-..." class="w-full p-2 bg-slate-50 border rounded-xl font-mono font-bold uppercase text-xs"></td>
+            <td class="p-2.5"><input type="text" id="p-${i}" autocomplete="off" placeholder="${plateOptional(role) ? 'Không bắt buộc' : '51H-...'}" class="w-full p-2 bg-slate-50 border rounded-xl font-mono font-bold uppercase text-xs"></td>
             <td class="p-2.5">
               <select id="c-${i}" class="w-full p-2 bg-slate-50 border rounded-xl font-bold text-xs" onchange="applyRowPrice(${i})">
                 ${carTypeOptions.map(ct => `<option value="${escHtml(ct)}" ${ct === defaultCarType ? 'selected' : ''}>${escHtml(ct)}</option>`).join('')}
@@ -2010,8 +2010,8 @@
       const paymentMethod = document.getElementById('edit-modal-payment').value;
       const note = document.getElementById('edit-modal-note').value.trim();
 
-      if (!ticket || !plate || !destination || !staff) {
-        alert("Vui lòng điền đầy đủ Số Phiếu, Biển Số, Nhân Sự và Điểm Đến!");
+      if (!ticket || (!plate && !plateOptional(trip.role)) || !destination || !staff) {
+        alert(plateOptional(trip.role) ? "Vui lòng điền đầy đủ Số Phiếu, Nhân Sự và Điểm Đến!" : "Vui lòng điền đầy đủ Số Phiếu, Biển Số, Nhân Sự và Điểm Đến!");
         return;
       }
       if (usesPriceList() && destination !== String(trip.destination || '').trim()) {
@@ -2171,15 +2171,18 @@
       }
     }
 
+    // Team Kế hoạch: biển số KHÔNG bắt buộc (10/11). Các phân vùng khác vẫn bắt buộc.
+    function plateOptional(role) { return role === 'plan'; }
     async function submitBatch(role) {
       if (!loggedInUser) return;
+      const plateOpt = plateOptional(loggedInUser.role);
       // Quy ước: địa chỉ nội thành bắt buộc ghi Quận (Bán vé + Kế hoạch). Có dòng thiếu -> chưa lưu dòng nào, để sửa lại.
       if (usesPriceList()) {
         const noDistrict = [];   // chỉ số dòng thiếu Quận
         for (let i = 0; i < 20; i++) {
           const dEl = document.getElementById(`d-${i}`);
           const dest = dEl ? dEl.value.trim() : '';
-          const filled = document.getElementById(`staff-${i}`).value.trim() && document.getElementById(`t-${i}`).value.trim() && document.getElementById(`p-${i}`).value.trim() && dest;
+          const filled = document.getElementById(`staff-${i}`).value.trim() && document.getElementById(`t-${i}`).value.trim() && (plateOpt || document.getElementById(`p-${i}`).value.trim()) && dest;
           if (!filled) continue;
           const it = rowPriceItem(i);
           if (!destHasDistrict(dest, it && it.id, (document.getElementById(`m-${i}`) || {}).value)) { noDistrict.push(i); dEl.classList.add('ring-2', 'ring-red-500'); }
@@ -2234,14 +2237,14 @@
         const pay = document.getElementById(`m-${i}`).value;
         const note = document.getElementById(`note-${i}`).value.trim();
 
-        if (rawStaff && ticket && plate && dest && !isValidDateStr(formattedDate)) {
+        if (rawStaff && ticket && (plate || plateOpt) && dest && !isValidDateStr(formattedDate)) {
           invalidDateRows.push(`Dòng ${i+1} ("${rawDate}")`);
           continue;
         }
 
         // Bảng giá (Bán vé + Kế hoạch): lưu giá bảng theo điểm đến + loại xe. Giảm quá mức VẪN CHO LƯU, Quản lý lọc ra xem.
         let priceFields = {};
-        if (rawStaff && ticket && plate && dest && usesPriceList()) {
+        if (rawStaff && ticket && (plate || plateOpt) && dest && usesPriceList()) {
           const it = rowPriceItem(i);
           const list = priceForItem(it, carType);
           if (it && list) {
@@ -2251,7 +2254,7 @@
           }
         }
 
-        if (rawStaff && ticket && plate && dest) {
+        if (rawStaff && ticket && (plate || plateOpt) && dest) {
           const cleanTicket = ticket.trim().toUpperCase();
           const cleanPlate = plate.trim().toUpperCase();
 
@@ -2773,7 +2776,7 @@
       else value = String(value).trim();
       const oldVal = field === 'totalFare' ? Number(trip[field] || 0) : String(trip[field] == null ? '' : trip[field]);
       if (value === oldVal) return;
-      if ((field === 'ticketNumber' || field === 'plateNumber') && !value) {
+      if ((field === 'ticketNumber' || (field === 'plateNumber' && !plateOptional(trip.role))) && !value) {
         alert('Số phiếu và biển số không được để trống!');
         updateManagerAuditTable();
         return;
@@ -3052,7 +3055,7 @@
 
     // Trả về danh sách nhóm [{trips, status, dateKey}] đã lọc theo bộ lọc trên màn hình
     function computeAuditGroups(f) {
-      const pairMap = {};
+      const pairMap = {}, noPlate = [];
       allCompanyTrips.forEach(t => {
         if (f.roleFilter !== 'all' && t.role !== f.roleFilter) return;
         if (f.startDateVal || f.endDateVal) {
@@ -3070,9 +3073,17 @@
           const key = `${baseTicket}_${plate}_${normalizeDateInput(t.dateStr)}`;
           if (!pairMap[key]) pairMap[key] = [];
           pairMap[key].push(t);
+        } else if (ticketKey) {
+          noPlate.push({ t, ticketKey });   // vd đơn Team Kế hoạch không ghi biển số -> ghép sau theo Số phiếu + Ngày
         } else {
           pairMap['single_' + t.id] = [t];
         }
+      });
+      noPlate.forEach(({ t, ticketKey }) => {
+        const d = normalizeDateInput(t.dateStr);
+        const hits = Object.keys(pairMap).filter(k => !k.startsWith('single_') && k.startsWith(ticketKey + '_') && k.endsWith('_' + d) && k.split('_').length === 3);
+        const key = hits.length === 1 ? hits[0] : `${ticketKey}__${d}`;
+        (pairMap[key] = pairMap[key] || []).push(t);
       });
 
       const defaultPay = paymentOptions[0] || 'Nhân Viên Quầy Thu';

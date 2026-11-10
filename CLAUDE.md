@@ -34,6 +34,7 @@
 - Quy tắc: `firebase-rules/quy-tac-buoc-1.json` (chuyển tiếp: đường dẫn thật vẫn công khai, `test_env` khóa chặt) và `quy-tac-buoc-2.json` (khóa chặt cả hai). Sinh bằng script trong lịch sử phiên; giữ hai file đồng bộ khi sửa.
 - Trình tự lên bản chính: bật Email/Password (đã xong) → dán quy tắc bước 1 (đã xong) → thử bản thử (đã xong) → FORCE_TEST_ENV=false, merge main (07/11) → quản lý thiết lập lần đầu + chuyển đổi tài khoản → dán quy tắc bước 2 (ảnh console xác nhận đã Publish quy tắc bước 2 ngày 07/11). HIỆN TẠI DB THẬT ĐÃ KHÓA. Trên nhánh thử, link `-git-` vẫn tự vào vùng thử nên giữ FORCE_TEST_ENV=false cũng được.
 - Nhập hàng loạt 20 dòng; tên nhân sự "A + B" → tách đơn chia đều tiền (phiếu `123-1/2`). Chặn trùng (phiếu+biển số+ngày) trong tài khoản. Khóa sửa/xóa sau `lockHour` giờ sáng hôm sau.
+- (10/11) Team Kế hoạch (plan): BIỂN SỐ KHÔNG BẮT BUỘC (`plateOptional`) ở nhập hàng loạt, modal sửa, sửa nhanh; các phân vùng khác vẫn bắt buộc. Đối soát: đơn không biển số ghép vào nhóm cùng Số phiếu + Ngày nếu có đúng 1 nhóm (`noPlate` trong computeAuditGroups).
 - Đối soát (Quản lý): gom nhóm theo `số phiếu gốc + biển số + ngày`; so bên Quầy/Kế hoạch với bên Tài xế: lệch tiền < 1.000đ và cùng hình thức TT (hoặc thuộc nhóm đối tác/kế hoạch) → Trùng khớp; thiếu 1 bên → Chưa khớp; còn lại → Lệch. Xuất Excel bằng SheetJS (không màu).
 
 ## Chức năng thêm (nhánh bao-mat-dang-nhap)

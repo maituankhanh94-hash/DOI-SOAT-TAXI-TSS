@@ -2773,6 +2773,16 @@
       if (!trip) return;
       if (field === 'totalFare') value = parseFloat(String(value).replace(/[^0-9]/g, '')) || 0;
       else if (field === 'plateNumber') value = String(value).trim().toUpperCase();
+      else if (field === 'dateStr') {
+        // Sửa ngày (10/11): tự sửa dạng gõ thiếu (vd 9/11 -> 09/11/2026), ngày sai thì chặn
+        const raw = String(value).trim();
+        value = normalizeDateInput(/^\d{1,2}\/\d{1,2}$/.test(raw) ? `${raw}/${new Date().getFullYear()}` : raw);   // "1/11" -> 01/11/năm nay
+        if (!raw || !isValidDateStr(value)) {
+          alert(`Ngày "${raw}" không đúng dạng ngày/tháng/năm (vd 09/11/2026).`);
+          updateManagerAuditTable();
+          return;
+        }
+      }
       else value = String(value).trim();
       const oldVal = field === 'totalFare' ? Number(trip[field] || 0) : String(trip[field] == null ? '' : trip[field]);
       if (value === oldVal) return;
@@ -2783,6 +2793,7 @@
       }
       const changes = { [field]: value };
       if (field === 'ticketNumber') changes.originalTicket = baseTicketOf(value);
+      if (field === 'dateStr') changes.dateKey = tripDateKey({ dateStr: value });
       const updates = {};
       Object.keys(changes).forEach(k => {
         updates[`trips/${tripId}/${k}`] = changes[k];
@@ -2791,6 +2802,7 @@
       Object.assign(trip, changes);
       dbRoot().update(updates).then(() => {
         updateManagerRevenueSummary();
+        if (field === 'dateStr') updateManagerAuditTable();   // đổi ngày -> nhóm đối soát thay đổi
       }).catch(err => {
         alert("Lỗi cập nhật: " + err.message);
       });
@@ -3183,7 +3195,7 @@
           rowsHtml += `
             <tr class="${rowBg} hover:bg-slate-100/80 transition-all ${borderClass}">
               <td class="p-2.5 text-center align-middle">${checkboxHtml}</td>
-              <td class="p-2.5">${escHtml(t.dateStr || '--')}</td>
+              <td class="p-2.5"><input type="text" value="${escHtml(t.dateStr || '')}" placeholder="dd/mm/yyyy" class="inline-edit-input w-24" onblur="updateInlineTripField('${t.id}', 'dateStr', this.value)"></td>
               <td class="p-2.5 font-mono font-bold text-slate-600">${escHtml(t.timeStr || '--')}</td>
               <td class="p-2.5">${roleBadge}</td>
               <td class="p-2.5 font-extrabold text-slate-800">${escHtml(t.staff || 'N/A')}</td>

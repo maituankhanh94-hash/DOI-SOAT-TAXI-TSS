@@ -23,6 +23,13 @@ function strict(B){
         ".validate": "newData.hasChildren(['name', 'n']) && newData.child('name').isString() && newData.child('name').val().length <= 200 && newData.child('n').isNumber()" } },
     "meta": { ".read": active, ".write": mgr },
     "deleted_trips": { ".read": mgr, ".write": mgr },
+    // Thùng rác (11/11): quản lý đọc/ghi; nhân viên chỉ được THÊM bản sao đơn của chính mình khi xóa
+    "trash": { ".read": mgr, ".indexOn": ["deletedAt"],
+      "$k": { ".write": `${mgr} || (${active} && !data.exists() && newData.child('createdBy').val() === ${me} && newData.child('deletedBy').val() === ${me})` } },
+    // Nhật ký (11/11): chỉ THÊM, không ai sửa/xóa; người ghi phải là chính mình
+    "trip_log": { ".read": mgr,
+      "$k": { ".write": `${active} && !data.exists() && newData.child('by').val() === ${me}`,
+        ".validate": "newData.hasChildren(['at', 'by', 'action']) && newData.child('at').isNumber() && newData.child('at').val() <= now" } },
     "drivers": { ".read": mgr, ".write": mgr }
   };
 }

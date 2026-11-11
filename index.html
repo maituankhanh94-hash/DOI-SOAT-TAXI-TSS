@@ -3495,6 +3495,7 @@
           });
           xlSignature(ws, endRow + 3, 6);
         }
+        xlStripIcons(wb);
         const buf = await wb.xlsx.writeBuffer();
         const now = new Date();
         const range = remindFrom === remindTo ? remindFrom.replace(/-/g, '') : `${remindFrom.replace(/-/g, '')}-${remindTo.replace(/-/g, '')}`;
@@ -3513,6 +3514,23 @@
 
     // ===== XUẤT EXCEL CÓ ĐỊNH DẠNG (ExcelJS, tải khi cần) =====
     let excelJsPromise = null;
+    // (11/11) Bỏ mọi icon/emoji (và dấu × xóa dính vào tên) trong file Excel báo cáo — chạy ngay trước khi ghi file.
+    const XL_ICON_RE = /[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\u{2300}-\u{23FF}\u{25A0}-\u{25FF}\u{1F1E6}-\u{1F1FF}\u{FE0E}\u{FE0F}\u{200D}\u{20E3}\u{E0020}-\u{E007F}\u{00D7}]/gu;
+    function stripIcons(str) {
+      return String(str).replace(XL_ICON_RE, '').replace(/[ \t]{2,}/g, ' ').replace(/^\s*[|•]\s*|\s*[|•]\s*$/g, '').trim();
+    }
+    function xlStripIcons(wb) {
+      wb.eachSheet(ws => {
+        ws.eachRow({ includeEmpty: false }, row => {
+          row.eachCell({ includeEmpty: false }, cell => {
+            if (cell.isMerged && cell.master !== cell) return;
+            const v = cell.value;
+            if (typeof v === 'string') { const c = stripIcons(v); if (v.replace(XL_ICON_RE, '') !== v) cell.value = c; }
+            else if (v && Array.isArray(v.richText)) cell.value = { richText: v.richText.map(r => Object.assign({}, r, { text: String(r.text || '').replace(XL_ICON_RE, '') })) };
+          });
+        });
+      });
+    }
     function loadExcelJS() {
       if (window.ExcelJS) return Promise.resolve(window.ExcelJS);
       if (excelJsPromise) return excelJsPromise;
@@ -3556,6 +3574,7 @@
         buildAuditSheet(wb, groups, f);
         buildSummarySheet(wb, groups, f);
         buildFlatSheet(wb, groups);
+        xlStripIcons(wb);
         const buf = await wb.xlsx.writeBuffer();
         const now = new Date();
         const pad = n => String(n).padStart(2, '0');

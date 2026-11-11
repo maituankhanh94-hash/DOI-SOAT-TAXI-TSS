@@ -42,6 +42,14 @@
 
 - (11/11, LÊN MAIN) Khung Nhắc Báo Cáo – "Tài xế chưa báo": mỗi phiếu 1 dòng "Xe 489 – Phiếu 113379 – họ tên (TK) (bán vé/kế hoạch) đã nhập, đi …, tiền", xếp liền theo xe (xe ≥2 phiếu có vạch cam). Bấm 1 dòng (cả mục Bán vé chưa nhập) → `jumpToAuditTicket(ticket)`: Bảng Đối Soát lọc khoảng ngày nhắc + từ khóa = số phiếu, cuộn xuống.
 
+## Nhập đơn nhanh (11/11, nhánh `nhap-don-nhanh`, BẢN THỬ)
+- Nhân viên than nhập trên điện thoại mất thời gian (bảng ngang 1700px, 20 dòng). Đã GỘP nhánh `giu-dong-chua-luu` (giữ dòng lỗi, lưu tạm localStorage, khôi phục sau F5; giữ `plateOptional` cho Kế hoạch; vẫn ghi `trip_log` create).
+- Điện thoại (<768px): CSS biến mỗi `tr.batch-row` thành THẺ (grid 2 cột, nhãn bằng `data-label`, thứ tự: Số phiếu, Biển số, Điểm đến, Tiền, Thanh toán, rồi tóm tắt). Tên/Ngày/Loại xe/Nguồn/Ga/Ghi chú (`bf-more`) gom vào dòng tóm tắt `bsum-i` + nút ✏️ Sửa (`toggleBatchMore`); thu gọn khi đã có tên mặc định; dòng thiếu tên/ô đỏ tự mở. Máy tính vẫn là bảng.
+- Vẫn đủ 20 dòng trong DOM (giữ id `t-i`…), chỉ ẩn (`batch-hidden`): điện thoại hiện 3, máy tính 10; gõ dòng cuối tự mở thêm 1; nút ➕ Thêm 1 đơn; nút LƯU to dưới cùng (điện thoại).
+- Tự điền: `tss_batch_def_<env>_<user>` (localStorage) = {staff, c, src, pick, m, lastTicket} lưu sau mỗi lần lưu thành công. Ô chọn mọi dòng lấy theo đó; gõ lần đầu vào 1 dòng (`onBatchInput`) → chép tên + ô chọn từ dòng trên. Số phiếu dòng đầu = phiếu lớn nhất (lần trước / trên bảng) + 1, chọn sẵn để gõ đè.
+- Bàn phím số (`inputmode=numeric`) cho Số phiếu + Tiền; tiền gõ 350 = 350.000 (có sẵn).
+- Đã thử emulator (iPhone 13): 3 thẻ, tự nhảy phiếu, tự chép tên/thanh toán, dòng thiếu điểm đến được giữ, F5 khôi phục, nhật ký create.
+
 ## Nhật ký & Thùng rác (11/11, ĐÃ LÊN MAIN; nhánh `nhat-ky-thung-rac`; người dùng đã dán quy tắc mới có trash + trip_log)
 - Sự cố: đơn xe 298 ngày 10/11 (8 đơn, 3.050.000đ) đã hiện trên máy tài xế lúc 03:51 rồi biến mất; app không có dấu vết ai xóa. Rà code: chỉ chủ tài khoản (trước lockHour hôm sau) hoặc quản lý xóa được; không có đoạn tự xóa.
 - `trip_log/<pushId>` = {at (ServerValue), by, action create|edit|delete|restore, tripId, owner, ticket, plate, dateStr, fare, detail}. CHỈ THÊM: quy tắc `!data.exists()` + `by === chính mình`; chỉ quản lý đọc. Ghi ở: submitBatch (create, mỗi đơn 1 dòng), saveEditedTrip (edit, `changeText(before, after)`), updateInlineTripField, fixDateOffGroup, restoreDeletedTrips, restoreFromTrash.

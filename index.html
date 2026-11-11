@@ -12,6 +12,28 @@
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap');
     body { font-family: 'Plus Jakarta Sans', sans-serif; touch-action: pan-x pan-y; }
+    /* (11/11) Nhập đơn trên điện thoại: mỗi dòng thành 1 THẺ, ô xếp dọc, không kéo ngang */
+    .batch-hidden { display: none !important; }
+    @media (max-width: 767px) {
+      #batch-wrap { max-height: none !important; overflow: visible !important; }
+      #batch-table { min-width: 0 !important; display: block; }
+      #batch-table thead { display: none; }
+      #batch-table tbody { display: block; border: 0; }
+      #batch-table tr.batch-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 10px; border: 2px solid #cbd5e1; border-radius: 18px; padding: 12px; margin-bottom: 14px; background: #fff; box-shadow: 0 2px 6px rgba(15,23,42,.06); }
+      #batch-table tr.batch-row td { display: block; padding: 0 !important; min-width: 0; }
+      #batch-table td[data-label]::before { content: attr(data-label); display: block; font-size: 12px; font-weight: 800; color: #475569; margin-bottom: 3px; }
+      #batch-table td.bf-full { grid-column: 1 / -1; }
+      #batch-table td.bf-stt { grid-column: 1 / -1; text-align: left !important; font-size: 15px; font-weight: 900; color: #1e293b; }
+      #batch-table td.bf-stt::before { content: 'ĐƠN '; }
+      #batch-table input, #batch-table select { font-size: 16px !important; padding: 10px 12px !important; }
+      #batch-table .bf-t { order: 1; } #batch-table .bf-p { order: 2; } #batch-table .bf-d { order: 3; }
+      #batch-table .bf-f { order: 4; } #batch-table .bf-m { order: 5; } #batch-table .bf-staff { order: 6; }
+      #batch-table .bf-date { order: 7; } #batch-table .bf-c { order: 8; } #batch-table .bf-src { order: 9; }
+      #batch-table .bf-pick { order: 10; } #batch-table .bf-note { order: 11; } #batch-table .bf-stt { order: 0; }
+      #batch-table td.bf-sum { display: block; grid-column: 1 / -1; order: 6; }
+      #batch-table tr.bf-collapsed .bf-more { display: none !important; }
+    }
+    @media (min-width: 768px) { #batch-table td.bf-sum { display: none; } }
     .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
     .custom-scrollbar::-webkit-scrollbar-track { background: #f1f5f9; }
     .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
@@ -1406,13 +1428,13 @@
           <!-- BẢNG 3: NHẬP HÀNG LOẠT 20 ĐƠN -->
           <div class="bg-white p-4 sm:p-6 rounded-3xl shadow-xl border border-slate-200 space-y-4">
             <div class="flex flex-col sm:flex-row items-center justify-between gap-3 border-b pb-4">
-              <h3 class="text-xs sm:text-sm font-extrabold uppercase ${themeColorClass}">📋 Nhập Hàng Loạt 20 Dòng Nhanh</h3>
+              <h3 class="text-xs sm:text-sm font-extrabold uppercase ${themeColorClass}">📋 Nhập Đơn Nhanh <span class="normal-case font-bold text-slate-500">(tên, nguồn, loại xe, thanh toán tự điền theo đơn trước)</span></h3>
               <button onclick="submitBatch('${role}')" class="px-5 py-2.5 ${btnThemeClass} text-white font-extrabold text-xs rounded-xl shadow-lg transition-all">🚀 Lưu Đơn Lên Cloud</button>
             </div>
             ${PRICE_ROLES.includes(role) ? `<div class="text-[11px] sm:text-xs bg-amber-50 border border-amber-300 text-amber-900 rounded-xl p-2.5 font-semibold">📌 <b>QUY ƯỚC Ô ĐIỂM ĐẾN:</b> ${escHtml(DEST_RULE_TEXT)}</div>` : ''}
             <div id="batch-draft-note"></div>
-            <div class="overflow-x-auto custom-scrollbar max-h-[450px]">
-              <table class="w-full text-left border-collapse min-w-[1700px]">
+            <div id="batch-wrap" class="overflow-x-auto custom-scrollbar max-h-[450px]">
+              <table id="batch-table" class="w-full text-left border-collapse min-w-[1700px]">
                 <thead class="sticky top-0 z-20 shadow-md">
                   <tr class="bg-slate-900 text-white text-[11px] font-bold">
                     <th class="p-3 text-center w-10 bg-slate-900">STT</th>
@@ -1429,8 +1451,12 @@
                     <th class="p-3 min-w-[180px] bg-slate-900">Ghi Chú</th>
                   </tr>
                 </thead>
-                <tbody id="tbody-batch" class="divide-y divide-slate-200 text-xs" oninput="scheduleBatchDraft()" onchange="scheduleBatchDraft()"></tbody>
+                <tbody id="tbody-batch" class="divide-y divide-slate-200 text-xs" oninput="scheduleBatchDraft(); onBatchInput(event)" onchange="scheduleBatchDraft()"></tbody>
               </table>
+            </div>
+            <div class="flex flex-col sm:flex-row gap-2">
+              <button type="button" onclick="addBatchRow()" class="flex-1 px-4 py-3 bg-slate-100 hover:bg-slate-200 border-2 border-dashed border-slate-300 text-slate-700 font-extrabold text-sm rounded-xl">➕ Thêm 1 đơn</button>
+              <button type="button" onclick="submitBatch('${role}')" class="md:hidden flex-1 px-4 py-3.5 ${btnThemeClass} text-white font-black text-base rounded-xl shadow-lg">🚀 LƯU ĐƠN LÊN CLOUD</button>
             </div>
           </div>
         </div>
@@ -1470,47 +1496,133 @@
       for (let i = 0; i < 20; i++) {
         const dateInputHandler = (i === 0) ? `oninput="syncBatchDates(this.value)"` : ``;
         html += `
-          <tr>
-            <td class="p-2.5 text-center font-bold">${i+1}</td>
-            <td class="p-2.5"><input type="text" id="date-${i}" autocomplete="off" value="${defaultDate}" ${dateInputHandler} class="w-full p-2 bg-slate-50 border rounded-xl font-mono text-xs"></td>
-            <td class="p-2.5 relative">
+          <tr class="batch-row" data-row="${i}">
+            <td class="p-2.5 text-center font-bold bf-stt">${i+1}</td>
+            <td class="bf-sum"><button type="button" onclick="toggleBatchMore(${i})" class="w-full text-left text-[13px] bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 font-semibold text-slate-600"><span id="bsum-${i}"></span> <span class="text-blue-700 font-extrabold whitespace-nowrap">✏️ Sửa</span></button></td>
+            <td class="p-2.5 bf-date bf-more" data-label="Ngày"><input type="text" id="date-${i}" autocomplete="off" value="${defaultDate}" ${dateInputHandler} class="w-full p-2 bg-slate-50 border rounded-xl font-mono text-xs"></td>
+            <td class="p-2.5 relative bf-staff bf-more" data-label="Tên nhân sự">
               <input type="text" id="staff-${i}" autocomplete="off" value="" placeholder="Gõ tên để đề xuất..." class="w-full p-2 bg-slate-50 border rounded-xl font-bold text-xs" oninput="showStaffSuggestions(this, 'staff-drop-${i}')" onfocus="showStaffSuggestions(this, 'staff-drop-${i}')" onkeydown="suggestKeydown(event, 'staff-drop-${i}')" onblur="hideSuggestLater('staff-drop-${i}')">
               <div id="staff-drop-${i}"></div>
             </td>
-            <td class="p-2.5"><input type="text" id="t-${i}" autocomplete="off" placeholder="Phiếu..." class="w-full p-2 bg-slate-50 border rounded-xl font-mono font-bold text-xs" onfocus="handleSmartTicketFocus(${i})"></td>
-            <td class="p-2.5"><input type="text" id="p-${i}" autocomplete="off" placeholder="${plateOptional(role) ? 'Không bắt buộc' : '51H-...'}" class="w-full p-2 bg-slate-50 border rounded-xl font-mono font-bold uppercase text-xs"></td>
-            <td class="p-2.5">
+            <td class="p-2.5 bf-t" data-label="Số phiếu"><input type="text" id="t-${i}" inputmode="numeric" autocomplete="off" placeholder="Phiếu..." class="w-full p-2 bg-slate-50 border rounded-xl font-mono font-bold text-xs" onfocus="handleSmartTicketFocus(${i})"></td>
+            <td class="p-2.5 bf-p" data-label="${plateOptional(role) ? 'Biển số (không bắt buộc)' : 'Biển số'}"><input type="text" id="p-${i}" autocomplete="off" placeholder="${plateOptional(role) ? 'Không bắt buộc' : '51H-...'}" class="w-full p-2 bg-slate-50 border rounded-xl font-mono font-bold uppercase text-xs"></td>
+            <td class="p-2.5 bf-c bf-more" data-label="Loại xe">
               <select id="c-${i}" class="w-full p-2 bg-slate-50 border rounded-xl font-bold text-xs" onchange="applyRowPrice(${i})">
                 ${carTypeOptions.map(ct => `<option value="${escHtml(ct)}" ${ct === defaultCarType ? 'selected' : ''}>${escHtml(ct)}</option>`).join('')}
               </select>
             </td>
-            <td class="p-2.5">
+            <td class="p-2.5 bf-src bf-more" data-label="Nguồn đơn">
               <select id="src-${i}" class="w-full p-2 bg-slate-50 border rounded-xl font-bold text-xs">
                 ${sourceOptions.map(s => `<option value="${escHtml(s)}">${escHtml(s)}</option>`).join('')}
               </select>
             </td>
-            <td class="p-2.5">
+            <td class="p-2.5 bf-pick bf-more" data-label="Điểm đón">
               <select id="pick-${i}" class="w-full p-2 bg-slate-50 border rounded-xl font-bold text-xs">
                 ${TERMINAL_OPTIONS.map(t => `<option value="${t}">Ga ${t}</option>`).join('')}
               </select>
             </td>
-            <td class="p-2.5 relative">
+            <td class="p-2.5 relative bf-d bf-full" data-label="Điểm đến">
               <input type="text" id="d-${i}" autocomplete="off" placeholder="${PRICE_ROLES.includes(role) ? 'Vd: Võ Duy Ninh, Thạnh Mỹ Tây (bắt buộc ghi Phường/Xã)' : 'Gõ điểm đến (vd: đề thám)...'}" class="w-full p-2 bg-amber-50 border border-amber-300 rounded-xl font-semibold text-xs" oninput="showDestSuggestions(this, 'dest-drop-${i}', ${i})" onkeydown="suggestKeydown(event, 'dest-drop-${i}')" onblur="hideSuggestLater('dest-drop-${i}'); autoMatchRowPrice(${i})">
               <div id="dest-drop-${i}"></div>
             </td>
-            <td class="p-2.5"><input type="text" id="f-${i}" autocomplete="off" placeholder="Số tiền..." oninput="onRowFareInput(${i})" onblur="formatCurrSmartInput(this); updateRowPriceHint(${i})" class="w-full p-2 bg-emerald-50 border border-emerald-300 rounded-xl font-extrabold text-emerald-800 text-right text-xs"><div id="fh-${i}" class="text-[10px] leading-tight mt-0.5 text-right"></div></td>
-            <td class="p-2.5">
+            <td class="p-2.5 bf-f" data-label="Tổng tiền (gõ 350 = 350.000)"><input type="text" id="f-${i}" inputmode="numeric" autocomplete="off" placeholder="Số tiền..." oninput="onRowFareInput(${i})" onblur="formatCurrSmartInput(this); updateRowPriceHint(${i})" class="w-full p-2 bg-emerald-50 border border-emerald-300 rounded-xl font-extrabold text-emerald-800 text-right text-xs"><div id="fh-${i}" class="text-[10px] leading-tight mt-0.5 text-right"></div></td>
+            <td class="p-2.5 bf-m" data-label="Thanh toán">
               <select id="m-${i}" class="w-full p-2 bg-slate-50 border rounded-xl font-bold text-xs" onchange="updateRowPriceHint(${i})">
                 ${activePayments.map(opt => `<option value="${escHtml(opt)}">${escHtml(opt)}</option>`).join('')}
               </select>
             </td>
-            <td class="p-2.5">
+            <td class="p-2.5 bf-note bf-more bf-full" data-label="Ghi chú">
               <input type="text" id="note-${i}" autocomplete="off" placeholder="Ghi chú thêm..." class="w-full p-2 bg-slate-50 border rounded-xl text-xs">
             </td>
           </tr>
         `;
       }
       tb.innerHTML = html;
+      applyBatchDefaults();
+      initBatchCollapse();
+      batchVisible = isMobileBatch() ? 3 : 10;
+      applyBatchVisibility();
+    }
+
+    // ===== NHẬP NHANH (11/11): ít dòng, thêm dòng khi cần, tự điền theo đơn trước =====
+    let batchVisible = 10;
+    function isMobileBatch() { return window.matchMedia && window.matchMedia('(max-width: 767px)').matches; }
+    function applyBatchVisibility() {
+      for (let i = 0; i < 20; i++) {
+        if (batchRowHasContent(i) || (document.getElementById(`t-${i}`) || {}).value) batchVisible = Math.max(batchVisible, i + 1);
+      }
+      batchVisible = Math.min(20, Math.max(1, batchVisible));
+      document.querySelectorAll('#tbody-batch tr.batch-row').forEach(tr => tr.classList.toggle('batch-hidden', Number(tr.dataset.row) >= batchVisible));
+    }
+    // Điện thoại: tên/ngày/loại xe/nguồn/ga/ghi chú gom thành 1 dòng tóm tắt (tự điền theo đơn trước), bấm "Sửa" mới mở
+    function updateBatchSummary(i) {
+      const el = document.getElementById(`bsum-${i}`); if (!el) return;
+      const v = k => (document.getElementById(`${k}-${i}`) || {}).value || '';
+      const autoStaff = v('staff') || ((prevBatchRow(i) || loadBatchDefaults()).staff || '');
+      el.textContent = [autoStaff || '(chưa có tên nhân sự)', v('date'), v('c'), v('src'), v('pick') ? 'Ga ' + v('pick') : '', v('note')].filter(Boolean).join(' • ');
+    }
+    function toggleBatchMore(i, open) {
+      const tr = document.querySelector(`#tbody-batch tr.batch-row[data-row="${i}"]`); if (!tr) return;
+      const collapse = open === undefined ? !tr.classList.contains('bf-collapsed') : !open;
+      tr.classList.toggle('bf-collapsed', collapse);
+      updateBatchSummary(i);
+    }
+    function initBatchCollapse() {
+      const hasStaff = !!loadBatchDefaults().staff;
+      document.querySelectorAll('#tbody-batch tr.batch-row').forEach(tr => {
+        const i = Number(tr.dataset.row);
+        tr.classList.toggle('bf-collapsed', hasStaff);
+        updateBatchSummary(i);
+      });
+    }
+    function markBatchRowsInit() {
+      document.querySelectorAll('#tbody-batch tr.batch-row').forEach(tr => {
+        const i = Number(tr.dataset.row);
+        if (batchRowHasContent(i)) tr.dataset.init = '1';
+        updateBatchSummary(i);
+        // dòng thiếu tên nhân sự / ngày / có ô tô đỏ -> mở ra cho thấy
+        if (batchRowHasContent(i) && (!(document.getElementById(`staff-${i}`) || {}).value || tr.querySelector('.bf-more .ring-red-500'))) tr.classList.remove('bf-collapsed');
+      });
+    }
+    function addBatchRow() {
+      if (batchVisible >= 20) { alert('Tối đa 20 đơn mỗi lần lưu. Bấm Lưu rồi nhập tiếp.'); return; }
+      batchVisible++;
+      applyBatchVisibility();
+      const t = document.getElementById(`t-${batchVisible - 1}`);
+      if (t) { t.scrollIntoView({ behavior: 'smooth', block: 'center' }); t.focus(); }
+    }
+    function batchDefaultsKey() { return loggedInUser ? `tss_batch_def_${DB_PREFIX || 'main'}_${loggedInUser.user}` : null; }
+    function loadBatchDefaults() { try { return JSON.parse(localStorage.getItem(batchDefaultsKey()) || 'null') || {}; } catch (e) { return {}; } }
+    function saveBatchDefaults(v, lastTicket) {
+      const k = batchDefaultsKey(); if (!k || !v) return;
+      const o = { staff: v.staff || '', c: v.c, src: v.src, pick: v.pick, m: v.m, lastTicket: lastTicket || '' };
+      try { localStorage.setItem(k, JSON.stringify(o)); } catch (e) {}
+    }
+    function setSelectIfExists(el, val) { if (el && val != null && [...el.options].some(o => o.value === val)) el.value = val; }
+    // Ô chọn (loại xe, nguồn, điểm đón, thanh toán) của mọi dòng = lần nhập trước
+    function applyBatchDefaults() {
+      const d = loadBatchDefaults();
+      for (let i = 0; i < 20; i++) ['c', 'src', 'pick', 'm'].forEach(k => setSelectIfExists(document.getElementById(`${k}-${i}`), d[k]));
+    }
+    // Dòng có nội dung gần nhất phía trên dòng i
+    function prevBatchRow(i) {
+      for (let j = i - 1; j >= 0; j--) if (batchRowHasContent(j)) return readBatchRow(j);
+      return null;
+    }
+    // Người dùng gõ vào 1 dòng: lần đầu -> chép tên nhân sự + các ô chọn từ dòng trên (hoặc lần nhập trước); gõ dòng cuối -> mở thêm 1 dòng
+    function onBatchInput(ev) {
+      const el = ev && ev.target; if (!el || !el.id) return;
+      const m = /^([a-z]+)-(\d+)$/.exec(el.id); if (!m) return;
+      const i = Number(m[2]), tr = el.closest('tr.batch-row');
+      if (tr && tr.dataset.init !== '1' && m[1] !== 'date') {
+        tr.dataset.init = '1';
+        const src = prevBatchRow(i) || loadBatchDefaults();
+        const st = document.getElementById(`staff-${i}`);
+        if (st && !st.value.trim() && m[1] !== 'staff' && src.staff) st.value = src.staff;
+        ['c', 'src', 'pick', 'm'].forEach(k => { if (k !== m[1]) setSelectIfExists(document.getElementById(`${k}-${i}`), src[k]); });
+      }
+      updateBatchSummary(i);
+      if (i === batchVisible - 1 && batchVisible < 20 && el.value) { batchVisible++; applyBatchVisibility(); }
     }
 
     // ===== GIỮ DÒNG CHƯA LƯU (09-10/11: tránh mất đơn) =====
@@ -1553,6 +1665,7 @@
       if (!d || !Array.isArray(d.rows) || !d.rows.length) return;
       if (Date.now() - (d.ts || 0) > 7 * 86400000) { try { localStorage.removeItem(k); } catch (e) {} return; }
       d.rows.forEach(r => { if (r && r.i >= 0 && r.i < 20) writeBatchRow(r.i, r.v || {}); });
+      markBatchRowsInit(); applyBatchVisibility();
       const note = document.getElementById('batch-draft-note');
       if (note) note.innerHTML = `<div class="text-xs sm:text-sm bg-blue-50 border-2 border-blue-400 text-blue-900 rounded-xl p-3 font-bold">♻️ Đã khôi phục <b>${d.rows.length} dòng CHƯA LƯU</b> từ lần nhập trước (lúc ${new Date(d.ts).toLocaleString('vi-VN')}). Kiểm tra lại rồi bấm <b>Lưu Đơn Lên Cloud</b>.</div>`;
     }
@@ -2374,6 +2487,16 @@
 
     function handleSmartTicketFocus(currentIndex) {
       const currentInput = document.getElementById(`t-${currentIndex}`);
+      // Dòng đầu (hoặc chưa có dòng nào trên): số phiếu = phiếu cuối lần lưu trước + 1 (chọn sẵn để gõ đè nếu khác)
+      if (currentInput && !currentInput.value.trim() && ![...Array(currentIndex).keys()].some(j => (document.getElementById(`t-${j}`) || {}).value)) {
+        // lấy phiếu lớn nhất giữa: phiếu cuối lần lưu trước và các phiếu đang có trên bảng (vd dòng chưa lưu được giữ lại)
+        const cands = [String(loadBatchDefaults().lastTicket || '')];
+        for (let j = 0; j < 20; j++) { const v = (document.getElementById(`t-${j}`) || {}).value; if (v) cands.push(baseTicketOf(v.trim())); }
+        const last = cands.filter(v => /\d+$/.test(v)).sort((a, b) => Number(a.match(/(\d+)$/)[1]) - Number(b.match(/(\d+)$/)[1])).pop() || '';
+        const mm = last.match(/^(.*?)(\d+)$/);
+        if (mm) { currentInput.value = mm[1] + String(parseInt(mm[2], 10) + 1).padStart(mm[2].length, '0'); setTimeout(() => { try { currentInput.select(); } catch (e) {} }, 0); }
+        return;
+      }
       if (currentInput && !currentInput.value.trim() && currentIndex > 0) {
         for (let j = currentIndex - 1; j >= 0; j--) {
           const prevInput = document.getElementById(`t-${j}`);
@@ -2550,10 +2673,14 @@
         dbRoot().update(updates).then(() => {
           recordPlaces(savedDests);
           logTrips('create', Object.keys(updates).filter(k => k.startsWith('trips/')).map(k => updates[k]), () => 'Nhập đơn mới');
+          // Nhớ tên nhân sự / loại xe / nguồn / thanh toán / số phiếu cuối của đơn vừa lưu -> lần sau tự điền
+          const okRows = [...Array(20).keys()].filter(i => batchRowHasContent(i) && !keepRows.has(i));
+          if (okRows.length) { const lv = readBatchRow(okRows[okRows.length - 1]); saveBatchDefaults(lv, String(lv.t || '').replace(/-\d+\/\d+$/, '')); }
           // Xóa các dòng ĐÃ LƯU, giữ nguyên các dòng chưa lưu (cùng vị trí, tô đỏ)
           const kept = [...keepRows].map(i => ({ i, v: readBatchRow(i) }));
           renderBatchRows(role);
           kept.forEach(r => writeBatchRow(r.i, r.v));
+          markBatchRowsInit(); applyBatchVisibility();
           problems.forEach(pr => {
             if (pr.dest != null) { document.getElementById(`d-${pr.i}`).classList.add(...RED); return; }
             ['staff', 't', 'p', 'd'].forEach(k => { const el = document.getElementById(`${k}-${pr.i}`); if (el && !el.value.trim()) el.classList.add(...RED); });
@@ -2573,6 +2700,7 @@
           alert("⚠️ CHƯA LƯU ĐƯỢC (lỗi mạng hoặc quyền): " + err.message + "\n\nCác dòng vẫn còn trên màn hình và đã được giữ tạm trên máy. Kiểm tra mạng rồi bấm Lưu lại.");
         });
       } else if (problems.length) {
+        markBatchRowsInit();
         showDestFixModal(problems, 0);
       } else if (duplicateDetails.length === 0) {
         alert("Vui lòng điền đầy đủ Tên Nhân Sự, Số Phiếu, Biển Số và Điểm Đến!");

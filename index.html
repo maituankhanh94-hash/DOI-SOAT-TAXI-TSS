@@ -1996,6 +1996,7 @@
     function saveEditedTrip(id, role) {
       const trip = personalTrips.find(x => x.id === id);
       if (!trip) return;
+      const before = Object.assign({}, trip);   // để ghi nhật ký sửa
 
       const rawDate = document.getElementById('edit-modal-date').value;
       const formattedDate = normalizeDateInput(rawDate);
@@ -2051,6 +2052,8 @@
       updates[`trips/${id}`] = trip;
 
       dbRoot().update(updates).then(() => {
+        const ch = changeText(before, trip);
+        if (ch) logTrips('edit', [trip], () => ch);
         alert("Đã cập nhật đơn hàng thành công!");
         document.getElementById('edit-trip-modal').remove();
         updatePersonalSummary(role);
@@ -2076,16 +2079,15 @@
           const id = cb.value;
           const trip = personalTrips.find(x => x.id === id);
           if (trip && canDeleteTrip(trip.timestamp)) {
-            updates[`users_trips/${loggedInUser.user}/${id}`] = null;
-            updates[`trips/${id}`] = null;
             deletedList.push(trip);
           }
         });
+        if (!deletedList.length) { alert('Các đơn đã chọn đã bị khóa, không xóa được.'); return; }
 
-        dbRoot().update(updates).then(() => {
+        deleteTripsSafe(deletedList).then(() => {
           lastDeletedTripBackup = deletedList;
           showUndoButton(`Đã xóa ${deletedList.length} đơn hàng!`);
-        });
+        }).catch(err => alert("Lỗi khi xóa: " + err.message));
       }
     }
 
@@ -2101,11 +2103,7 @@
         }
 
         if (confirm("Vui lòng xác nhận xóa đơn hàng này?")) {
-          let updates = {};
-          updates[`users_trips/${loggedInUser.user}/${id}`] = null;
-          updates[`trips/${id}`] = null;
-
-          dbRoot().update(updates).then(() => {
+          deleteTripsSafe([trip || { id, createdBy: loggedInUser.user }]).then(() => {
             lastDeletedTripBackup = [trip || { id }];
             showUndoButton("Đã xóa đơn hàng!");
           }).catch(err => {
@@ -2113,6 +2111,169 @@
           });
         }
       });
+    }
+
+    // ===== NHẬT KÝ & THÙNG RÁC (11/11) =====
+    // trip_log/<pushId> = {at, by, action, tripId, owner, ticket, plate, dateStr, detail}: chỉ THÊM, không ai sửa/xóa được (quy tắc).
+    // trash/<id>_<ms> = bản sao đầy đủ của đơn bị xóa + deletedAt, deletedBy. Quản lý xem & khôi phục.
+    function tripLogEntry(action, t, detail) {
+      return { at: firebase.database.ServerValue.TIMESTAMP, by: loggedInUser ? loggedInUser.user : '', action,
+        tripId: t.id || '', owner: t.createdBy || '', ticket: String(t.ticketNumber || ''), plate: String(t.plateNumber || ''),
+        dateStr: String(t.dateStr || ''), fare: Number(t.totalFare || 0), detail: String(detail || '').slice(0, 500) };
+    }
+    // Ghi nhật ký riêng (không chặn việc chính nếu lỗi)
+    function logTrips(action, trips, detailFn) {
+      if (!loggedInUser || !trips || !trips.length) return;
+      const upd = {};
+      trips.forEach(t => { upd['trip_log/' + dbRef('trip_log').push().key] = tripLogEntry(action, t, detailFn ? detailFn(t) : ''); });
+      dbRoot().update(upd).catch(e => console.warn('trip_log', e && e.message));
+    }
+    // Mô tả thay đổi: "Ngày: 10/11/2026 → 11/11/2026; Tiền: 300.000 → 350.000"
+    const LOG_FIELDS = { dateStr: 'Ngày', timeStr: 'Giờ', ticketNumber: 'Số phiếu', plateNumber: 'Biển số', staff: 'Nhân sự', carType: 'Loại xe', source: 'Nguồn', pickup: 'Điểm đón', destination: 'Điểm đến', paymentMethod: 'Thanh toán', note: 'Ghi chú', totalFare: 'Tiền' };
+    function changeText(before, after) {
+      const fmt = (k, v) => k === 'totalFare' ? Number(v || 0).toLocaleString('vi-VN') : String(v == null || v === '' ? '(trống)' : v);
+      return Object.keys(LOG_FIELDS).filter(k => k in after && String(before[k] == null ? '' : before[k]) !== String(after[k] == null ? '' : after[k]))
+        .map(k => `${LOG_FIELDS[k]}: ${fmt(k, before[k])} → ${fmt(k, after[k])}`).join('; ');
+    }
+    // XÓA ĐƠN: cùng 1 lần ghi -> xóa ở trips + users_trips, chép vào thùng rác, ghi nhật ký.
+    // Nếu quy tắc Firebase chưa cập nhật (chưa có trash/trip_log) -> xóa như cũ để không chặn công việc.
+    async function deleteTripsSafe(trips) {
+      const by = loggedInUser.user, at = firebase.database.ServerValue.TIMESTAMP, now = Date.now();
+      const base = {}, extra = {};
+      trips.forEach((t, i) => {
+        base[`trips/${t.id}`] = null;
+        const owner = t.createdBy || (isManager() ? '' : by);
+        if (owner) base[`users_trips/${owner}/${t.id}`] = null;
+        extra[`trash/${t.id}_${now + i}`] = Object.assign({}, t, { deletedAt: at, deletedBy: by });
+        extra['trip_log/' + dbRef('trip_log').push().key] = tripLogEntry('delete', t, `Xóa đơn ${formatDisplayTicket(t.ticketNumber)} • ${t.destination || ''} • ${Number(t.totalFare || 0).toLocaleString('vi-VN')}đ`);
+      });
+      try {
+        await dbRoot().update(Object.assign({}, base, extra));
+        return true;
+      } catch (e) {
+        console.warn('Thùng rác chưa sẵn sàng (quy tắc cũ?)', e && e.message);
+        await dbRoot().update(base);
+        return false;
+      }
+    }
+
+    // ----- Màn hình Quản lý: Nhật ký & Thùng rác -----
+    let logTrashTab = 'log', logItems = [], trashItems = [], logLimit = 1500;
+    const LOG_ACTION = {
+      create: ['➕ Nhập mới', 'bg-emerald-100 text-emerald-800'],
+      edit: ['✏️ Sửa', 'bg-blue-100 text-blue-800'],
+      delete: ['🗑️ Xóa', 'bg-rose-100 text-rose-800'],
+      restore: ['♻️ Khôi phục', 'bg-purple-100 text-purple-800']
+    };
+    function fmtTs(ms) {
+      if (!ms) return '';
+      const d = new Date(ms), p = n => String(n).padStart(2, '0');
+      return `${p(d.getHours())}:${p(d.getMinutes())} ${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()}`;
+    }
+    function openLogTrashModal() {
+      const old = document.getElementById('log-trash-modal'); if (old) old.remove();
+      document.getElementById('main-container').insertAdjacentHTML('beforeend', `
+        <div id="log-trash-modal" class="fixed inset-0 bg-slate-900/85 z-50 flex items-center justify-center p-2 sm:p-3 backdrop-blur-sm">
+          <div class="bg-white rounded-3xl shadow-2xl max-w-6xl w-full p-4 sm:p-5 space-y-3 max-h-[94vh] flex flex-col">
+            <div class="flex flex-wrap items-center justify-between gap-2 border-b pb-3">
+              <h3 class="text-sm font-extrabold text-slate-900 uppercase">🗂️ Nhật Ký Đơn Hàng & Thùng Rác</h3>
+              <button onclick="document.getElementById('log-trash-modal').remove()" class="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold">Đóng</button>
+            </div>
+            <div class="flex flex-wrap items-center gap-2">
+              <button id="lt-tab-log" onclick="setLogTrashTab('log')" class="px-3 py-1.5 rounded-xl text-xs font-extrabold">📜 Nhật Ký (ai nhập / sửa / xóa)</button>
+              <button id="lt-tab-trash" onclick="setLogTrashTab('trash')" class="px-3 py-1.5 rounded-xl text-xs font-extrabold">🗑️ Thùng Rác (đơn đã xóa)</button>
+              <input id="lt-search" type="text" autocomplete="off" oninput="renderLogTrash()" placeholder="🔍 Tìm số phiếu, tài khoản, biển số, ngày..." class="px-3 py-1.5 bg-slate-50 border rounded-xl font-bold text-xs flex-1 min-w-[180px]">
+            </div>
+            <div id="lt-info" class="text-[11px] text-slate-500 font-bold"></div>
+            <div class="overflow-auto custom-scrollbar flex-1 border rounded-2xl">
+              <table class="w-full text-left border-collapse text-xs">
+                <thead id="lt-head" class="bg-slate-800 text-white sticky top-0"></thead>
+                <tbody id="lt-body" class="divide-y divide-slate-200"><tr><td class="p-4 text-center text-slate-400">Đang tải...</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+        </div>`);
+      setLogTrashTab(logTrashTab);
+      loadLogTrash();
+    }
+    function setLogTrashTab(tab) {
+      logTrashTab = tab;
+      ['log', 'trash'].forEach(t => {
+        const b = document.getElementById('lt-tab-' + t);
+        if (b) b.className = 'px-3 py-1.5 rounded-xl text-xs font-extrabold ' + (t === tab ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-700 hover:bg-slate-200');
+      });
+      renderLogTrash();
+    }
+    async function loadLogTrash() {
+      const info = document.getElementById('lt-info');
+      try {
+        const [ls, ts] = await Promise.all([
+          dbRef('trip_log').orderByKey().limitToLast(logLimit).once('value'),
+          dbRef('trash').orderByChild('deletedAt').startAt(Date.now() - 90 * 86400000).once('value')
+        ]);
+        logItems = []; ls.forEach(c => { logItems.push(Object.assign({ _k: c.key }, c.val())); });
+        logItems.reverse();
+        trashItems = []; ts.forEach(c => { trashItems.push(Object.assign({ _k: c.key }, c.val())); });
+        trashItems.reverse();
+        renderLogTrash();
+      } catch (e) {
+        if (info) info.innerHTML = `<span class="text-rose-600">Chưa đọc được nhật ký/thùng rác: ${escHtml(authErrorText(e))}. Có thể quy tắc Firebase chưa được cập nhật (cần dán quy tắc mới và bấm Publish).</span>`;
+        const tb = document.getElementById('lt-body'); if (tb) tb.innerHTML = '';
+      }
+    }
+    function logTrashMatch(o, kw) {
+      if (!kw) return true;
+      const txt = removeAccents([o.ticket, o.ticketNumber, o.plate, o.plateNumber, o.by, o.owner, o.createdBy, o.deletedBy, o.staff, o.dateStr, o.detail, o.destination].join(' '));
+      return removeAccents(kw).split(/\s+/).filter(Boolean).every(w => txt.includes(w));
+    }
+    function renderLogTrash() {
+      const head = document.getElementById('lt-head'), tb = document.getElementById('lt-body'), info = document.getElementById('lt-info');
+      if (!head || !tb) return;
+      const kw = (document.getElementById('lt-search') || {}).value || '';
+      if (logTrashTab === 'log') {
+        head.innerHTML = '<tr><th class="p-2.5">Thời điểm</th><th class="p-2.5">Người làm</th><th class="p-2.5">Việc</th><th class="p-2.5">Đơn của TK</th><th class="p-2.5">Ngày đơn</th><th class="p-2.5">Số phiếu</th><th class="p-2.5">Biển số</th><th class="p-2.5 text-right">Tiền</th><th class="p-2.5">Chi tiết</th></tr>';
+        const rows = logItems.filter(o => logTrashMatch(o, kw));
+        if (info) info.innerText = `Hiện ${Math.min(rows.length, 500)}/${rows.length} dòng (trong ${logItems.length} thao tác gần nhất, mới nhất ở trên). Nhật ký chỉ có từ khi cập nhật bản này.`;
+        tb.innerHTML = rows.slice(0, 500).map(o => {
+          const a = LOG_ACTION[o.action] || [o.action, 'bg-slate-100 text-slate-700'];
+          return `<tr class="hover:bg-slate-50"><td class="p-2 font-mono whitespace-nowrap">${fmtTs(o.at)}</td><td class="p-2 font-extrabold">${escHtml(o.by)}</td>
+            <td class="p-2"><span class="px-2 py-0.5 rounded-md font-extrabold text-[10px] whitespace-nowrap ${a[1]}">${escHtml(a[0])}</span></td>
+            <td class="p-2">${escHtml(o.owner)}</td><td class="p-2 font-mono">${escHtml(o.dateStr)}</td><td class="p-2 font-bold text-blue-700">${escHtml(formatDisplayTicket(o.ticket))}</td>
+            <td class="p-2">${escHtml(o.plate)}</td><td class="p-2 text-right font-bold">${Number(o.fare || 0).toLocaleString('vi-VN')}</td><td class="p-2 text-slate-600">${escHtml(o.detail)}</td></tr>`;
+        }).join('') || '<tr><td colspan="9" class="p-4 text-center text-slate-400">Không có dòng nào.</td></tr>';
+      } else {
+        head.innerHTML = '<tr><th class="p-2.5">Xóa lúc</th><th class="p-2.5">Người xóa</th><th class="p-2.5">Đơn của TK</th><th class="p-2.5">Ngày đơn</th><th class="p-2.5">Số phiếu</th><th class="p-2.5">Biển số</th><th class="p-2.5">Nhân sự</th><th class="p-2.5">Điểm đến</th><th class="p-2.5 text-right">Tiền</th><th class="p-2.5"></th></tr>';
+        const rows = trashItems.filter(o => logTrashMatch(o, kw));
+        if (info) info.innerText = `${rows.length} đơn đã xóa trong 90 ngày gần nhất. Bấm "Khôi phục" để đưa đơn trở lại.`;
+        tb.innerHTML = rows.slice(0, 500).map(o => `<tr class="hover:bg-slate-50"><td class="p-2 font-mono whitespace-nowrap">${fmtTs(o.deletedAt)}</td><td class="p-2 font-extrabold text-rose-700">${escHtml(o.deletedBy)}</td>
+            <td class="p-2">${escHtml(o.createdBy)}</td><td class="p-2 font-mono">${escHtml(o.dateStr)}</td><td class="p-2 font-bold text-blue-700">${escHtml(formatDisplayTicket(o.ticketNumber))}</td>
+            <td class="p-2">${escHtml(o.plateNumber)}</td><td class="p-2">${escHtml(o.staff)}</td><td class="p-2">${escHtml(o.destination)}</td>
+            <td class="p-2 text-right font-bold">${Number(o.totalFare || 0).toLocaleString('vi-VN')}</td>
+            <td class="p-2"><button onclick="restoreFromTrash('${escHtml(o._k)}')" class="px-2 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-extrabold text-[10px] whitespace-nowrap">♻️ Khôi phục</button></td></tr>`).join('')
+          || '<tr><td colspan="10" class="p-4 text-center text-slate-400">Thùng rác trống.</td></tr>';
+      }
+    }
+    async function restoreFromTrash(key) {
+      const o = trashItems.find(x => x._k === key);
+      if (!o) return;
+      if (!confirm(`Khôi phục đơn ${formatDisplayTicket(o.ticketNumber)} (${o.dateStr}, TK ${o.createdBy || '?'})?`)) return;
+      try {
+        const cur = await dbRef(`trips/${o.id}`).once('value');
+        const trip = Object.assign({}, o); delete trip._k; delete trip.deletedAt; delete trip.deletedBy;
+        if (!trip.dateKey) trip.dateKey = tripDateKey(trip) || fallbackDateKey(trip);
+        const upd = {};
+        upd[`trash/${key}`] = null;
+        if (!cur.exists()) {
+          upd[`trips/${trip.id}`] = trip;
+          if (trip.createdBy) upd[`users_trips/${trip.createdBy}/${trip.id}`] = trip;
+          upd['trip_log/' + dbRef('trip_log').push().key] = tripLogEntry('restore', trip, `Khôi phục từ thùng rác (xóa bởi ${o.deletedBy || '?'} lúc ${fmtTs(o.deletedAt)})`);
+        }
+        await dbRoot().update(upd);
+        alert(cur.exists() ? 'Đơn này đang có sẵn (đã được khôi phục trước đó) — đã bỏ khỏi thùng rác.' : 'Đã khôi phục đơn!');
+        trashItems = trashItems.filter(x => x._k !== key);
+        renderLogTrash();
+        loadLogTrash();
+      } catch (e) { alert('Lỗi khôi phục: ' + authErrorText(e)); }
     }
 
     function showUndoButton(message) {
@@ -2141,7 +2302,9 @@
           updates[`users_trips/${trip.createdBy}/${trip.id}`] = trip;
         }
       });
+      const restored = lastDeletedTripBackup;
       dbRoot().update(updates).then(() => {
+        logTrips('restore', restored, () => 'Bấm "Khôi phục đơn vừa xóa"');
         alert("Đã khôi phục đơn hàng thành công!");
         lastDeletedTripBackup = null;
         const container = document.getElementById('floating-undo-container');
@@ -2316,6 +2479,7 @@
       if (count > 0) {
         dbRoot().update(updates).then(() => {
           recordPlaces(savedDests);
+          logTrips('create', Object.keys(updates).filter(k => k.startsWith('trips/')).map(k => updates[k]), () => 'Nhập đơn mới');
           alert(`Đã lưu thành công và phân tách hoa hồng cho ${count} đơn!` + (overDiscountRows.length && !SILENT_DISCOUNT_WATCH ? `\n\n⚠️ Có ${overDiscountRows.length} đơn GIẢM GIÁ VƯỢT MỨC cho phép (${pctText(DISCOUNT_LIMIT.noi)} nội thành, ${pctText(DISCOUNT_LIMIT.ngoai)} ngoại thành) — Quản lý sẽ kiểm tra:\n${overDiscountRows.join('\n')}` : ''));
           renderBatchRows(role);
           const histInput = document.getElementById('filter-history-date');
@@ -2493,6 +2657,7 @@
               <div class="flex items-center space-x-3">
                 <h4 class="text-xs sm:text-sm font-extrabold text-slate-800 uppercase">🔍 Bảng Đối Soát Đơn Hàng & Chọn Mốc Thời Gian</h4>
                 <button onclick="deleteSelectedManagerTrips()" class="px-3 py-1 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl text-xs shadow-sm">🗑️ Xóa Các Đơn Đã Chọn</button>
+                <button onclick="openLogTrashModal()" class="px-3 py-1 bg-slate-800 hover:bg-slate-900 text-white font-bold rounded-xl text-xs shadow-sm">🗂️ Nhật Ký & Thùng Rác</button>
               </div>
               <div class="flex flex-wrap items-center gap-2">
                 <div class="flex items-center space-x-1 text-xs">
@@ -2724,24 +2889,16 @@
       if (checkboxes.length === 0) { alert("Vui lòng tích chọn ít nhất một đơn hàng để xóa!"); return; }
 
       verifyAndDelete(() => {
-        let updates = {};
         let deletedList = [];
         checkboxes.forEach(cb => {
-          const id = cb.value;
-          const trip = allCompanyTrips.find(x => x.id === id);
-          if (trip) {
-            updates[`trips/${id}`] = null;
-            if (trip.createdBy) {
-              updates[`users_trips/${trip.createdBy}/${id}`] = null;
-            }
-            deletedList.push(trip);
-          }
+          const trip = allCompanyTrips.find(x => x.id === cb.value);
+          if (trip) deletedList.push(trip);
         });
 
-        dbRoot().update(updates).then(() => {
+        deleteTripsSafe(deletedList).then(() => {
           lastDeletedTripBackup = deletedList;
           showUndoButton(`Đã xóa ${deletedList.length} đơn hàng!`);
-        });
+        }).catch(err => alert("Lỗi khi xóa: " + err.message));
       });
     }
 
@@ -2750,16 +2907,10 @@
         let trip = allCompanyTrips.find(x => x.id === id);
         if (!trip) return;
 
-        let updates = {};
-        updates[`trips/${id}`] = null;
-        if (createdBy) {
-          updates[`users_trips/${createdBy}/${id}`] = null;
-        }
-
-        dbRoot().update(updates).then(() => {
+        deleteTripsSafe([trip]).then(() => {
           lastDeletedTripBackup = [trip];
           showUndoButton("Đã xóa đơn hàng!");
-        });
+        }).catch(err => alert("Lỗi khi xóa: " + err.message));
       });
     }
 
@@ -2800,8 +2951,10 @@
         updates[`trips/${tripId}/${k}`] = changes[k];
         if (trip.createdBy) updates[`users_trips/${trip.createdBy}/${tripId}/${k}`] = changes[k];
       });
+      const before = Object.assign({}, trip);
       Object.assign(trip, changes);
       dbRoot().update(updates).then(() => {
+        logTrips('edit', [trip], () => changeText(before, changes) || `${field}: ${oldVal} → ${value}`);
         updateManagerRevenueSummary();
         if (field === 'dateStr') updateManagerAuditTable();   // đổi ngày -> nhóm đối soát thay đổi
       }).catch(err => {
@@ -2825,6 +2978,7 @@
         }
       });
       dbRoot().update(updates).then(() => {
+        logTrips('edit', trips, t => `Sửa ngày theo bên bán: ${t.dateStr} → ${newStr}`);
         trips.forEach(t => { t.dateStr = newStr; t.dateKey = sellDateKey; });
         updateManagerAuditTable();
         updateManagerRevenueSummary();

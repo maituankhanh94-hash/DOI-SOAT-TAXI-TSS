@@ -520,8 +520,8 @@
           const rev = v('revenue-date-picker') || today;
           const starts = [aS, rev, remindFrom].filter(Boolean).sort();
           const ends = [aE || '9999-12-31', rev, remindTo].filter(Boolean).sort();
-          from = starts[0];
-          to = ends[ends.length - 1];
+          from = shiftDateKey(starts[0], -1);   // tải thêm 1 ngày trước/sau để ghép đơn tài xế ghi lệch ngày
+          to = ends[ends.length - 1] === '9999-12-31' ? '9999-12-31' : shiftDateKey(ends[ends.length - 1], 1);
         }
       }
       const key = from + '|' + to;
@@ -2515,6 +2515,7 @@
                   <option value="all">⚡ Tất Cả Trạng Thái</option>
                   <option value="unmatched">⏳ Đơn Chưa Khớp (Thiếu 1 bên)</option>
                   <option value="match">🟢 Trùng Khớp</option>
+                  <option value="dateoff">🔵 Khớp – Lệch Ngày (tài xế ghi sai ngày)</option>
                   <option value="mismatch">🔴 Đơn Lệch</option>
                   <option value="overdiscount">💸 Giảm Giá Quá Mức</option>
                   <option value="overdue">⏰ Quá Hạn Chưa Báo Cáo (cả 2 bên)</option>
@@ -2808,6 +2809,28 @@
       });
     }
 
+    // Nút "Sửa ngày theo bên bán" (nhóm Khớp – Lệch ngày): đổi ngày các đơn TÀI XẾ trong nhóm về ngày bên bán ghi
+    function fixDateOffGroup(idsCsv, sellDateKey) {
+      const trips = String(idsCsv || '').split(',').map(id => allCompanyTrips.find(x => x.id === id)).filter(Boolean);
+      if (!trips.length || !sellDateKey) return;
+      const newStr = fmtDateKeyVN(sellDateKey);
+      if (!confirm(`Đổi ngày ${trips.length} đơn của tài xế (${[...new Set(trips.map(t => t.staff || t.createdBy))].join(', ')}) từ ${trips[0].dateStr} thành ${newStr}?`)) return;
+      const updates = {};
+      trips.forEach(t => {
+        updates[`trips/${t.id}/dateStr`] = newStr;
+        updates[`trips/${t.id}/dateKey`] = sellDateKey;
+        if (t.createdBy) {
+          updates[`users_trips/${t.createdBy}/${t.id}/dateStr`] = newStr;
+          updates[`users_trips/${t.createdBy}/${t.id}/dateKey`] = sellDateKey;
+        }
+      });
+      dbRoot().update(updates).then(() => {
+        trips.forEach(t => { t.dateStr = newStr; t.dateKey = sellDateKey; });
+        updateManagerAuditTable();
+        updateManagerRevenueSummary();
+      }).catch(err => alert('Lỗi cập nhật: ' + err.message));
+    }
+
     function resetAuditDateToAll() {
       const startInp = document.getElementById('audit-start-date');
       const endInp = document.getElementById('audit-end-date');
@@ -2968,11 +2991,24 @@
     // ===== ĐỐI SOÁT: một hàm dùng chung cho màn hình và file Excel (để 2 nơi luôn ra cùng kết quả) =====
     const AUDIT_STATUS = {
       match: { label: '🟢 Trùng Khớp', text: 'Trùng Khớp' },
+      dateoff: { label: '🔵 Khớp – Lệch Ngày', text: 'Khớp – Lệch ngày' },
       mismatch: { label: '🔴 Đơn Lệch', text: 'Đơn Lệch' },
       unmatched: { label: '⏳ Đơn Chưa Khớp (Thiếu 1 bên)', text: 'Chưa Khớp (Thiếu 1 bên)' }
     };
     const PARTNER_KEYWORDS = ['kế hoạch', 'sq', 'g1', 'vto', 'công nợ', 'sanna', 'stella', 'jovia', 'vdt', 'monica', 'november', 'thanhlong', 'fast track'];
 
+    // "2026-11-10" + n ngày -> "2026-11-11" (tính theo lịch, không lệch múi giờ)
+    function shiftDateKey(k, n) {
+      const p = String(k || '').split('-').map(Number);
+      if (p.length !== 3 || !p[0]) return k;
+      const d = new Date(Date.UTC(p[0], p[1] - 1, p[2] + n));
+      return d.toISOString().slice(0, 10);
+    }
+    // Lệch ngày (11/11): "Bán vé ghi 10/11, Tài xế ghi 11/11"
+    function dateOffText(g) {
+      if (!g || !g.dateOff) return '';
+      return `Lệch ngày: ${g.dateOff.sellLabel} ghi ${ddmm(g.dateOff.sell)}, Tài xế ghi ${ddmm(g.dateOff.drv)}`;
+    }
     function tripDateKey(t) {
       // dd/mm/yyyy -> yyyy-mm-dd (để so sánh / sắp xếp); '' nếu ngày không hợp lệ
       const p = normalizeDateInput(t.dateStr).split('/');
@@ -2994,7 +3030,8 @@
       return { missing, overdue: !!(dl && Date.now() >= dl.getTime()) };
     }
     function auditStatusText(g) {
-      if (g.status === 'mismatch') return `Đơn Lệch (${getMismatchReason(g.trips)})`;
+      if (g.status === 'mismatch') return `Đơn Lệch (${[getMismatchReason(g.trips), dateOffText(g)].filter(Boolean).join('; ')})`;
+      if (g.status === 'dateoff') return `Khớp – ${dateOffText(g)}`;
       if (g.status !== 'unmatched') return AUDIT_STATUS[g.status].text;
       const who = g.missing === 'driver' ? 'Tài xế' : 'Bán vé/KH';
       return g.overdue ? `Quá hạn: ${who} chưa báo` : `Chờ ${who} báo`;
@@ -3068,13 +3105,22 @@
     // Trả về danh sách nhóm [{trips, status, dateKey}] đã lọc theo bộ lọc trên màn hình
     function computeAuditGroups(f) {
       const pairMap = {}, noPlate = [];
+      // Lấy thêm 1 ngày trước/sau khoảng đang xem để ghép đơn tài xế ghi lệch ngày; nhóm nằm hẳn ngoài khoảng sẽ bị bỏ ở cuối
+      const inRange = t => {
+        const k = tripDateKey(t);
+        if (!k) return true;
+        if (f.startDateVal && k < f.startDateVal) return false;
+        if (f.endDateVal && k > f.endDateVal) return false;
+        return true;
+      };
+      const exFrom = f.startDateVal ? shiftDateKey(f.startDateVal, -1) : '', exTo = f.endDateVal ? shiftDateKey(f.endDateVal, 1) : '';
       allCompanyTrips.forEach(t => {
         if (f.roleFilter !== 'all' && t.role !== f.roleFilter) return;
-        if (f.startDateVal || f.endDateVal) {
+        if (exFrom || exTo) {
           const k = tripDateKey(t);
           if (k) {
-            if (f.startDateVal && k < f.startDateVal) return;
-            if (f.endDateVal && k > f.endDateVal) return;
+            if (exFrom && k < exFrom) return;
+            if (exTo && k > exTo) return;
           }
         }
         const ticketKey = (t.originalTicket || baseTicketOf(t.ticketNumber)).replace(/\s+/g, '').toUpperCase();
@@ -3098,11 +3144,47 @@
         (pairMap[key] = pairMap[key] || []).push(t);
       });
 
+      // GHÉP LỆCH NGÀY (11/11): số phiếu không bao giờ trùng -> nhóm chỉ có bên Bán vé/KH và nhóm chỉ có bên Tài xế,
+      // cùng số phiếu + biển số (hoặc bên bán không ghi biển số), ngày cách nhau đúng 1 ngày, và chỉ có đúng 1 cặp như vậy -> ghép lại.
+      // KHÔNG sửa dữ liệu; quản lý bấm nút "Sửa ngày theo bên bán" nếu muốn sửa.
+      const isSell = t => t.role === 'pos' || t.role === 'plan';
+      const entries = Object.entries(pairMap).filter(([k]) => !k.startsWith('single_')).map(([k, trips]) => {
+        const sides = new Set(trips.map(t => isSell(t) ? 'S' : 'D'));
+        const dk = tripDateKey(trips[0]);
+        if (sides.size !== 1 || !dk) return null;
+        const t0 = trips[0];
+        return { k, side: [...sides][0], dk,
+          ticket: (t0.originalTicket || baseTicketOf(t0.ticketNumber)).replace(/\s+/g, '').toUpperCase(),
+          plate: normalizePlate(t0.plateNumber) };
+      }).filter(Boolean);
+      const sells = entries.filter(e => e.side === 'S'), drvs = entries.filter(e => e.side === 'D');
+      const near = (a, b) => b.dk === shiftDateKey(a.dk, 1) || b.dk === shiftDateKey(a.dk, -1);
+      const cand = new Map();
+      sells.forEach(sg => {
+        const hits = drvs.filter(dg => dg.ticket === sg.ticket && (!sg.plate || dg.plate === sg.plate) && near(sg, dg));
+        if (hits.length === 1) cand.set(sg.k, hits[0]);
+      });
+      const usedDrv = {};
+      cand.forEach(dg => { usedDrv[dg.k] = (usedDrv[dg.k] || 0) + 1; });
+      const dateOffOf = {};
+      cand.forEach((dg, sk) => {
+        if (usedDrv[dg.k] !== 1) return;   // 1 nhóm tài xế khớp nhiều nhóm bán -> không chắc, để nguyên
+        const sg = sells.find(e => e.k === sk);
+        const sellTrips = pairMap[sk];
+        pairMap[sk] = sellTrips.concat(pairMap[dg.k]);
+        delete pairMap[dg.k];
+        dateOffOf[sk] = { sell: sg.dk, drv: dg.dk, sellLabel: sellTrips.some(t => t.role === 'pos') ? 'Bán vé' : 'Kế hoạch' };
+      });
+
       const defaultPay = paymentOptions[0] || 'Nhân Viên Quầy Thu';
       const groups = [];
-      Object.values(pairMap).forEach(trips => {
+      Object.entries(pairMap).forEach(([gKey, trips]) => {
+        // Nhóm chỉ thuộc ngày lấy thêm -> bỏ. Nhóm lệch ngày tính theo NGÀY BÊN BÁN (để xuất Excel/MISA từng ngày không bị trùng doanh thu)
+        if ((f.startDateVal || f.endDateVal) && (dateOffOf[gKey] ? !inRange(trips.find(isSell)) : !trips.some(inRange))) return;
         trips.sort((a, b) => ((a.role === 'pos' || a.role === 'plan') ? 0 : 1) - ((b.role === 'pos' || b.role === 'plan') ? 0 : 1) || (a.timestamp || 0) - (b.timestamp || 0));
-        const status = getAuditStatus(trips);
+        const dateOff = dateOffOf[gKey] || null;
+        let status = getAuditStatus(trips);
+        if (dateOff && status === 'match') status = 'dateoff';
         const dateKey = tripDateKey(trips[0]);
         const det = auditDetail(trips, status, dateKey);
         const sf = f.matchStatusFilter;
@@ -3112,11 +3194,14 @@
           if (!det.overdue) return;
           if (sf === 'overdue_driver' && det.missing !== 'driver') return;
           if (sf === 'overdue_pos' && det.missing !== 'pos') return;
+        } else if (sf === 'dateoff') {
+          if (!dateOff) return;
         } else if (sf !== 'all' && status !== sf) return;
         const kw = f.keyword;
         if (kw) {
           let pass;
-          if (kw === 'khớp' || kw === 'trùng khớp') pass = status === 'match';
+          if (kw === 'khớp' || kw === 'trùng khớp') pass = status === 'match' || status === 'dateoff';
+          else if (kw === 'lệch ngày' || kw === 'sai ngày') pass = !!dateOff;
           else if (kw === 'lệch' || kw === 'đơn lệch') pass = status === 'mismatch';
           else if (kw === 'chưa khớp' || kw === 'đơn lẻ' || kw === 'thiếu') pass = status === 'unmatched';
           else if (kw === 'chưa báo' || kw === 'quá hạn') pass = det.overdue;
@@ -3124,7 +3209,7 @@
           else pass = trips.some(t => `${t.dateStr} ${t.timeStr} ${t.role} ${t.staff} ${t.ticketNumber} ${t.plateNumber} ${t.carType || ''} ${t.source || ''} ${t.destination} ${t.paymentMethod || defaultPay} ${t.note || ''} ${t.totalFare}`.toLowerCase().includes(kw));
           if (!pass) return;
         }
-        groups.push({ trips, status, dateKey, missing: det.missing, overdue: det.overdue, ts: Math.min(...trips.map(t => t.timestamp || 0)) });
+        groups.push({ trips, status, dateKey, dateOff, missing: det.missing, overdue: det.overdue, ts: Math.min(...trips.map(t => t.timestamp || 0)) });
       });
       return groups;
     }
@@ -3158,6 +3243,7 @@
       const statusBadge = {
         unmatched: '<span class="px-2 py-1 bg-amber-100 text-amber-800 font-bold rounded-lg text-[10px]">⏳ Đơn Chưa Khớp (Thiếu 1 bên)</span>',
         match: '<span class="px-2 py-1 bg-emerald-100 text-emerald-800 font-extrabold rounded-lg text-[10px]">🟢 Trùng Khớp</span>',
+        dateoff: '<span class="px-2 py-1 bg-blue-600 text-white font-extrabold rounded-lg text-[10px] inline-block">🔵 Khớp – Lệch Ngày</span>',
         mismatch: '<span class="px-2 py-1 bg-rose-100 text-rose-800 font-extrabold rounded-lg animate-pulse text-[10px]">🔴 Đơn Lệch</span>'
       };
 
@@ -3166,6 +3252,11 @@
         const group = g.trips, status = g.status;
         let statusHtml = statusBadge[status];
         if (status === 'mismatch') statusHtml += `<div class="text-[10px] font-bold text-rose-700 mt-1">${escHtml(getMismatchReason(group))}</div>`;
+        if (g.dateOff) {
+          const drvIds = group.filter(t => t.role === 'driver').map(t => t.id).join(',');
+          statusHtml += `<div class="text-[10px] font-bold text-blue-800 mt-1">${escHtml(dateOffText(g))}</div>` +
+            `<button onclick="fixDateOffGroup('${drvIds}', '${g.dateOff.sell}')" class="mt-1 px-2 py-1 bg-blue-50 hover:bg-blue-100 border border-blue-300 text-blue-700 font-extrabold rounded-lg text-[10px]">📅 Sửa ngày theo ${escHtml(g.dateOff.sellLabel.toLowerCase())}</button>`;
+        }
         if (status === 'unmatched') {
           statusHtml = g.overdue
             ? `<span class="px-2 py-1 bg-orange-600 text-white font-extrabold rounded-lg text-[10px] inline-block">⏰ Quá hạn: ${g.missing === 'driver' ? '🚗 Tài xế' : '🚖 Bán vé/KH'} chưa báo</span>`
@@ -3601,6 +3692,7 @@
       border: { top: { style: 'thin', color: { argb: 'FF94A3B8' } }, left: { style: 'thin', color: { argb: 'FF94A3B8' } }, bottom: { style: 'thin', color: { argb: 'FF94A3B8' } }, right: { style: 'thin', color: { argb: 'FF94A3B8' } } },
       status: {
         match: { fill: 'FFDCFCE7', badge: 'FF16A34A', text: 'FF14532D' },
+        dateoff: { fill: 'FFDBEAFE', badge: 'FF2563EB', text: 'FF1E3A8A' },
         mismatch: { fill: 'FFFEE2E2', badge: 'FFDC2626', text: 'FF7F1D1D' },
         unmatched: { fill: 'FFFEF3C7', badge: 'FFF59E0B', text: 'FF78350F' }
       },
@@ -3616,7 +3708,7 @@
 
     function filterDescription(f) {
       const roleTxt = { all: 'Tất cả', pos: 'Bán vé', driver: 'Tài xế', plan: 'Kế hoạch' }[f.roleFilter] || f.roleFilter;
-      const stTxt = { all: 'Tất cả', match: 'Trùng khớp', mismatch: 'Đơn lệch', unmatched: 'Chưa khớp', overdue: 'Quá hạn chưa báo cáo', overdue_driver: 'Tài xế chưa báo cáo', overdue_pos: 'Bán vé/KH chưa báo cáo' }[f.matchStatusFilter] || f.matchStatusFilter;
+      const stTxt = { all: 'Tất cả', match: 'Trùng khớp', dateoff: 'Lệch ngày', overdiscount: 'Giảm giá quá mức', mismatch: 'Đơn lệch', unmatched: 'Chưa khớp', overdue: 'Quá hạn chưa báo cáo', overdue_driver: 'Tài xế chưa báo cáo', overdue_pos: 'Bán vé/KH chưa báo cáo' }[f.matchStatusFilter] || f.matchStatusFilter;
       return `Phân vùng: ${roleTxt}  •  Trạng thái: ${stTxt}` + (f.keyword ? `  •  Từ khóa: "${f.keyword}"` : '');
     }
     function periodDescription(f) {
@@ -3705,11 +3797,11 @@
       xlTitle(ws, N, f, 'BÁO CÁO ĐỐI SOÁT ĐƠN HÀNG');
 
       // Ô tổng hợp nhanh (dòng 6)
-      const cnt = { match: 0, mismatch: 0, unmatched: 0 };
+      const cnt = { match: 0, dateoff: 0, mismatch: 0, unmatched: 0 };
       let totPos = 0, totDrv = 0;
       groups.forEach(g => { cnt[g.status]++; const s = sideSums(g.trips); totPos += s.pos; totDrv += s.drv; });
       const boxes = [
-        [1, 3, `Trùng khớp: ${cnt.match} nhóm`, 'match'],
+        [1, 3, `Trùng khớp: ${cnt.match + cnt.dateoff} nhóm` + (cnt.dateoff ? ` (lệch ngày: ${cnt.dateoff})` : ''), 'match'],
         [4, 6, `Đơn lệch: ${cnt.mismatch} nhóm`, 'mismatch'],
         [7, 9, `Chưa khớp: ${cnt.unmatched} nhóm`, 'unmatched'],
         [10, 12, `Tiền Quầy + Kế hoạch: ${totPos.toLocaleString('vi-VN')}`, null],
@@ -3847,7 +3939,7 @@
       r++;
       ws.mergeCells(r, 1, r, N);
       const note = ws.getCell(r, 1);
-      note.value = 'Ghi chú: Tiền "Quầy + Kế hoạch" là doanh thu bán vé; tiền "Chủ xe" là số chủ xe/tài xế báo lại để đối chiếu (không cộng dồn hai bên). Màu xanh = trùng khớp, đỏ = lệch, vàng = chưa đủ 2 bên.';
+      note.value = 'Ghi chú: Tiền "Quầy + Kế hoạch" là doanh thu bán vé; tiền "Chủ xe" là số chủ xe/tài xế báo lại để đối chiếu (không cộng dồn hai bên). Màu xanh lá = trùng khớp, xanh dương = khớp nhưng tài xế ghi lệch 1 ngày, đỏ = lệch, vàng = chưa đủ 2 bên.';
       xlFont(note, { italic: true, size: 9, color: { argb: 'FF475569' } });
       note.alignment = { wrapText: true, vertical: 'top' };
       ws.getRow(r).height = 28;
@@ -3962,7 +4054,7 @@
       section('1. Theo trạng thái đối soát');
       header(['Trạng thái', 'Số nhóm đơn', 'Số đơn Quầy + KH', 'Tiền Quầy + KH', 'Số đơn Chủ xe', 'Tiền Chủ xe']);
       const tot = { n: 0, posN: 0, pos: 0, drvN: 0, drv: 0 };
-      ['match', 'mismatch', 'unmatched'].forEach(st => {
+      ['match', 'dateoff', 'mismatch', 'unmatched'].forEach(st => {
         const gs = groups.filter(g => g.status === st);
         const s = { posN: 0, pos: 0, drvN: 0, drv: 0 };
         gs.forEach(g => { const x = sideSums(g.trips); s.posN += x.posN; s.pos += x.pos; s.drvN += x.drvN; s.drv += x.drv; });

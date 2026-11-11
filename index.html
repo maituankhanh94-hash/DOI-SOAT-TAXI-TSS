@@ -3504,13 +3504,29 @@
       const dlTxt = dl ? `${pad(dl.getHours())}:${pad(dl.getMinutes())} ngày ${pad(dl.getDate())}/${pad(dl.getMonth() + 1)}` : '';
       const late = dl && Date.now() >= dl.getTime();
       // Tài xế chưa báo -> theo biển số xe. Bán vé chưa nhập -> theo số phiếu (kèm xe / tài xế đã báo)
+      // (11/11) Tài xế chưa báo: mỗi phiếu 1 dòng, xếp liền theo xe; bấm vào -> Bảng Đối Soát lọc đúng phiếu đó
       const byPlate = {};
-      drv.forEach(g => { const t = g.trips[0]; const k = (t.plateNumber || '?').toUpperCase(); (byPlate[k] = byPlate[k] || []).push(`${t.originalTicket || t.ticketNumber}${one ? '' : ' (' + ddmm(g.dateKey) + ')'}`); });
-      const plateChips = Object.entries(byPlate).sort((a, b) => b[1].length - a[1].length).map(([k, v]) =>
-        `<span class="inline-block bg-white border border-slate-300 rounded-lg px-2 py-1 mr-1 mb-1" title="Phiếu: ${escHtml(v.join(', '))}"><b>🚗 ${escHtml(k)}</b> <span class="text-slate-500">(${v.length} phiếu)</span></span>`).join('');
+      drv.forEach(g => { const k = normalizePlate(g.trips[0].plateNumber) || '?'; (byPlate[k] = byPlate[k] || []).push(g); });
+      const tk = g => String(g.trips[0].originalTicket || baseTicketOf(g.trips[0].ticketNumber) || '');
+      const fare = g => g.trips.reduce((a, t) => a + Number(t.totalFare || 0), 0).toLocaleString('vi-VN') + 'đ';
+      const lineCls = 'block w-full text-left bg-white border border-slate-300 hover:border-blue-500 hover:bg-blue-50 rounded-lg px-2 py-1 mb-1 cursor-pointer';
+      const jump = g => `onclick="jumpToAuditTicket('${escHtml(tk(g))}')" title="Bấm để xem phiếu này ở Bảng Đối Soát"`;
+      const plateChips = Object.values(byPlate)
+        .sort((a, b) => b.length - a.length || String(a[0].trips[0].plateNumber || '').localeCompare(String(b[0].trips[0].plateNumber || '')))
+        .map(list => {
+          list.sort((a, b) => (a.dateKey || '').localeCompare(b.dateKey || '') || tk(a).localeCompare(tk(b)));
+          const plate = list[0].trips[0].plateNumber || '';
+          const rows = list.map(g => {
+            const t = g.trips[0];
+            const who = t.role === 'plan' ? 'kế hoạch' : 'bán vé';
+            return `<button type="button" ${jump(g)} class="${lineCls}">🚗 <b>${plate ? 'Xe ' + escHtml(plate) : '(chưa ghi biển số)'} – Phiếu ${escHtml(tk(g))}</b>${one ? '' : ` <span class="text-slate-500">(${ddmm(g.dateKey)})</span>`}`
+              + ` <span class="text-slate-600">– ${escHtml(fullStaffName(g.trips))} (${who}) đã nhập${t.destination ? ', đi ' + escHtml(t.destination) : ''}, ${fare(g)}</span></button>`;
+          }).join('');
+          return list.length > 1 ? `<div class="border-l-4 border-amber-400 pl-1.5 mb-1.5">${rows}</div>` : rows;
+        }).join('');
       const posChips = pos.map(g => {
         const t = g.trips[0];
-        return `<span class="inline-block bg-white border border-slate-300 rounded-lg px-2 py-1 mr-1 mb-1"><b>Phiếu ${escHtml(t.originalTicket || t.ticketNumber)}</b>${one ? '' : ` <span class="text-slate-500">(${ddmm(g.dateKey)})</span>`} <span class="text-slate-500">– xe ${escHtml(t.plateNumber || '?')}, ${escHtml(t.staff || '')} đã báo</span></span>`;
+        return `<button type="button" ${jump(g)} class="${lineCls}"><b>Phiếu ${escHtml(t.originalTicket || t.ticketNumber)}</b>${one ? '' : ` <span class="text-slate-500">(${ddmm(g.dateKey)})</span>`} <span class="text-slate-500">– xe ${escHtml(t.plateNumber || '?')}, ${escHtml(t.staff || '')} đã báo, ${fare(g)}</span></button>`;
       }).join('');
       const head = one
         ? (late ? `<span class="px-2 py-0.5 bg-rose-600 text-white rounded-lg">⏰ Đã quá hạn (${dlTxt})</span>` : `<span class="px-2 py-0.5 bg-slate-200 text-slate-700 rounded-lg">Hạn báo cáo: ${dlTxt}</span>`)
@@ -3534,6 +3550,18 @@
           <div><div class="font-extrabold text-blue-800 mb-1">🚖 Bán vé / Kế hoạch chưa nhập: ${pos.length} phiếu</div>${posChips || '<span class="text-emerald-700 font-bold">Không có</span>'}</div>`}
         </div>
         ${overDiscountHtml(remindFrom, remindTo)}`;
+    }
+    // Bấm 1 phiếu trong khung nhắc -> Bảng Đối Soát lọc đúng phiếu đó (trong khoảng ngày đang nhắc)
+    function jumpToAuditTicket(ticket) {
+      const s = document.getElementById('audit-start-date'), e = document.getElementById('audit-end-date');
+      if (s) s.value = remindFrom;
+      if (e) e.value = remindTo;
+      const st = document.getElementById('audit-match-status-filter');
+      if (st) st.value = 'all';
+      const kw = document.getElementById('audit-search-input');
+      if (kw) kw.value = ticket;
+      updateManagerAuditTable();
+      const tb = document.getElementById('tbody-mgr'); if (tb) tb.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
     function showReminderDetail() {
       const s = document.getElementById('audit-start-date'), e = document.getElementById('audit-end-date');

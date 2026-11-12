@@ -2167,8 +2167,33 @@
       create: ['➕ Nhập mới', 'bg-emerald-100 text-emerald-800'],
       edit: ['✏️ Sửa', 'bg-blue-100 text-blue-800'],
       delete: ['🗑️ Xóa', 'bg-rose-100 text-rose-800'],
-      restore: ['♻️ Khôi phục', 'bg-purple-100 text-purple-800']
+      restore: ['♻️ Khôi phục', 'bg-purple-100 text-purple-800'],
+      scan: ['📷 Quét giấy', 'bg-amber-100 text-amber-800'],
+      scan_fail: ['📷 Quét lỗi', 'bg-orange-200 text-orange-900']
     };
+    // Khóa push của Firebase bắt đầu bằng thời điểm tạo -> lấy được mọi dòng nhật ký từ 1 thời điểm mà không cần .indexOn
+    function pushKeyAt(ms) {
+      const C = '-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz';
+      let k = '';
+      for (let i = 0; i < 8; i++) { k = C.charAt(ms % 64) + k; ms = Math.floor(ms / 64); }
+      return k;
+    }
+    // Đếm lượt quét giấy hôm nay (thành công / lỗi), theo từng tài khoản
+    async function loadScanStats() {
+      const el = document.getElementById('lt-scan-stats'); if (!el) return;
+      try {
+        const d = new Date(); d.setHours(0, 0, 0, 0);
+        const snap = await dbRef('trip_log').orderByKey().startAt(pushKeyAt(d.getTime())).once('value');
+        let ok = 0, fail = 0, quota = 0; const per = {};
+        snap.forEach(c => { const v = c.val() || {};
+          if (v.action === 'scan') { ok++; per[v.by] = (per[v.by] || 0) + 1; }
+          else if (v.action === 'scan_fail') { fail++; if (/429|hết lượt/i.test(v.detail || '')) quota++; } });
+        const top = Object.entries(per).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([u, n]) => `${escHtml(u)}: ${n}`).join(' • ');
+        el.innerHTML = `<div class="p-2.5 rounded-xl border ${quota ? 'bg-orange-50 border-orange-300' : 'bg-emerald-50 border-emerald-300'} text-xs font-bold text-slate-700">
+          📷 Quét giấy hôm nay: <span class="text-emerald-700">${ok} lượt thành công</span>${fail ? ` • <span class="text-orange-700">${fail} lượt lỗi${quota ? ` (${quota} lần hết lượt miễn phí)` : ''}</span>` : ''}
+          ${top ? `<div class="font-semibold text-slate-500 mt-0.5">${top}</div>` : ''}</div>`;
+      } catch (e) { el.innerHTML = ''; }
+    }
     function fmtTs(ms) {
       if (!ms) return '';
       const d = new Date(ms), p = n => String(n).padStart(2, '0');
@@ -2188,6 +2213,7 @@
               <button id="lt-tab-trash" onclick="setLogTrashTab('trash')" class="px-3 py-1.5 rounded-xl text-xs font-extrabold">🗑️ Thùng Rác (đơn đã xóa)</button>
               <input id="lt-search" type="text" autocomplete="off" oninput="renderLogTrash()" placeholder="🔍 Tìm số phiếu, tài khoản, biển số, ngày..." class="px-3 py-1.5 bg-slate-50 border rounded-xl font-bold text-xs flex-1 min-w-[180px]">
             </div>
+            <div id="lt-scan-stats"></div>
             <div id="lt-info" class="text-[11px] text-slate-500 font-bold"></div>
             <div class="overflow-auto custom-scrollbar flex-1 border rounded-2xl">
               <table class="w-full text-left border-collapse text-xs">
@@ -2199,6 +2225,7 @@
         </div>`);
       setLogTrashTab(logTrashTab);
       loadLogTrash();
+      loadScanStats();
     }
     function setLogTrashTab(tab) {
       logTrashTab = tab;
@@ -2603,6 +2630,14 @@
         }).filter(r => r.t)
       };
     }
+    // Ghi 1 dòng nhật ký cho mỗi lần quét (để Quản lý đếm số lượt/ngày). Lỗi thì bỏ qua.
+    function logScan(ok, detail) {
+      if (!loggedInUser) return;
+      const now = new Date();
+      const entry = { at: firebase.database.ServerValue.TIMESTAMP, by: loggedInUser.user, action: ok ? 'scan' : 'scan_fail', tripId: '', owner: loggedInUser.user,
+        ticket: '', plate: '', dateStr: `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()}`, fare: 0, detail: String(detail || '').slice(0, 300) };
+      dbRef('trip_log').push(entry).catch(() => {});
+    }
     async function runScanAI(role) {
       const st = document.getElementById('scan-ai-status'), btn = document.getElementById('btn-scan-ai');
       const say = (cls, html) => { if (st) st.innerHTML = `<div class="p-3 rounded-xl font-bold ${cls}">${html}</div>`; };
@@ -2613,15 +2648,23 @@
       try {
         const images = [];
         for (const f of scanFiles.slice(0, 4)) images.push(await shrinkImage(f, 1800));
-        const token = await fbAuth.currentUser.getIdToken();
-        const r = await fetch('/api/scan', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-          body: JSON.stringify({ images, env: IS_TEST_ENV ? 'test' : 'main', lists: { staff: staffOptions, sources: sourceOptions } })
-        });
-        let data = null; try { data = await r.json(); } catch (e) {}
-        if (!r.ok) throw new Error((data && data.error) || `Lỗi máy chủ (${r.status})`);
+        const payload = JSON.stringify({ images, env: IS_TEST_ENV ? 'test' : 'main', lists: { staff: staffOptions, sources: sourceOptions } });
+        // Hết lượt mỗi phút (429) -> tự chờ rồi thử lại tối đa 2 lần
+        let r = null, data = null;
+        for (let attempt = 0; attempt < 3; attempt++) {
+          const token = await fbAuth.currentUser.getIdToken();
+          r = await fetch('/api/scan', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token }, body: payload });
+          data = null; try { data = await r.json(); } catch (e) {}
+          if (r.status !== 429 || attempt === 2) break;
+          for (let sec = 30; sec > 0; sec--) {
+            say('bg-amber-50 border border-amber-300 text-amber-900', `⏳ Nhiều người đang quét cùng lúc — app tự thử lại sau <b>${sec}</b> giây (lần ${attempt + 1}/2)...`);
+            await new Promise(res => setTimeout(res, 1000));
+          }
+          say('bg-blue-50 border border-blue-200 text-blue-900', '⏳ Đang thử đọc lại...');
+        }
+        if (!r.ok) { logScan(false, `Lỗi ${r.status}: ${(data && data.error) || ''}`); throw new Error((data && data.error) || `Lỗi máy chủ (${r.status})`); }
         const parsed = aiToParsed(data || {});
+        logScan(true, `${data.model || ''} • ${images.length} ảnh • ${parsed.rows.length} đơn`);
         if (!parsed.rows.length) { say('bg-amber-50 border border-amber-300 text-amber-900', 'Không thấy đơn nào trong ảnh (cần có số phiếu). Chụp gần hơn, rõ hơn rồi thử lại.'); return; }
         const n = applyScanToBatch(parsed, role);
         document.getElementById('scan-modal').remove();

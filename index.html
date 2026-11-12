@@ -1398,7 +1398,11 @@
           <div class="bg-white p-4 sm:p-6 rounded-3xl shadow-xl border border-slate-200 space-y-4">
             <div class="flex flex-col sm:flex-row items-center justify-between gap-3 border-b pb-4">
               <h3 class="text-xs sm:text-sm font-extrabold uppercase ${themeColorClass}">📋 Nhập Hàng Loạt 20 Dòng Nhanh</h3>
-              <button onclick="submitBatch('${role}')" class="px-5 py-2.5 ${btnThemeClass} text-white font-extrabold text-xs rounded-xl shadow-lg transition-all">🚀 Lưu Đơn Lên Cloud</button>
+              <div class="flex flex-wrap items-center gap-2">
+                <button onclick="printScanTemplate('${role}')" class="px-3 py-2.5 bg-white border-2 border-slate-300 hover:bg-slate-50 text-slate-700 font-extrabold text-xs rounded-xl">🖨️ In Mẫu Giấy</button>
+                <button onclick="openScanModal('${role}')" class="px-4 py-2.5 bg-amber-500 hover:bg-amber-600 text-white font-extrabold text-xs rounded-xl shadow-lg">📷 Dán Chữ Quét</button>
+                <button onclick="submitBatch('${role}')" class="px-5 py-2.5 ${btnThemeClass} text-white font-extrabold text-xs rounded-xl shadow-lg transition-all">🚀 Lưu Đơn Lên Cloud</button>
+              </div>
             </div>
             ${PRICE_ROLES.includes(role) ? `<div class="text-[11px] sm:text-xs bg-amber-50 border border-amber-300 text-amber-900 rounded-xl p-2.5 font-semibold">📌 <b>QUY ƯỚC Ô ĐIỂM ĐẾN:</b> ${escHtml(DEST_RULE_TEXT)}</div>` : ''}
             <div class="overflow-x-auto custom-scrollbar max-h-[450px]">
@@ -2332,6 +2336,312 @@
           }
         }
       }
+    }
+
+    // ===== QUÉT GIẤY (12/11): nhân viên chép chữ từ ảnh (Google Lens / Live Text) rồi dán vào app =====
+    // parseScanText: tách phần GHI 1 LẦN (đầu trang) và từng ĐƠN; hiểu viết tắt. Không gửi dữ liệu đi đâu.
+    //  Bán vé + Kế hoạch: Tên, Ngày, Nguồn, Loại xe, Điểm đón ghi 1 lần; Số phiếu, Biển số, Điểm đến, Tiền, Thanh toán ghi từng đơn.
+    //  Tài xế: Tên, Ngày, Biển số, Loại xe, Điểm đón ghi 1 lần; Số phiếu, Điểm đến, Tiền, Thanh toán ghi từng đơn.
+    //  Đơn nào ghi riêng loại xe / điểm đón / biển số thì đơn đó lấy theo cái ghi riêng.
+    function scanNorm(s) { return removeAccents(String(s || '')).replace(/[“”″〃]/g, '"').replace(/\s+/g, ' ').trim(); }
+    const SCAN_PAY = [   // [mẫu (đã bỏ dấu), nhóm]
+      [/\b(nvq|nv ?quay|q\.? ?thu|quay thu|qthu|nhan vien quay( thu)?)\b/, 'NVQ'],
+      [/\b(txt|tx ?thu|tai xe thu|t\.?x\.?t|tx)\b/, 'TXT'],
+      [/\b(the|quet the|quet|card|pos)\b/, 'THE'],
+      [/\b(ck|chuyen khoan|cong no|cn|ke hoach|kh)\b/, 'KH'],
+      [/\b(free|fnb|f\.?n\.?b|mien phi|noi bo|mp)\b/, 'FREE']
+    ];
+    const SCAN_DITTO = /(^|\s)("|''|nt|n\.t|nhu tren|-\s*"\s*-)(?=\s|$)/;
+    // Tiền: 350 / 350k / 350.000 / 1tr2 / 1,2tr -> số đồng; null nếu không phải tiền
+    function scanMoney(tok) {
+      const t = String(tok || '').toLowerCase().replace(/đ|d$|vnd/g, '').trim();
+      let m;
+      if ((m = /^(\d+)(?:[.,](\d+))?\s*(tr|trieu|m)(\d*)$/.exec(t))) {
+        const dec = (m[2] || m[4] || '');
+        return Math.round((Number(m[1]) + (dec ? Number('0.' + dec) : 0)) * 1000000);
+      }
+      if ((m = /^(\d+)(?:[.,](\d+))?\s*k$/.exec(t))) return Math.round(Number(m[1] + (m[2] ? '.' + m[2] : '')) * 1000);
+      if (/^\d{1,3}([.,]\d{3})+$/.test(t)) return Number(t.replace(/[.,]/g, ''));
+      if (/^\d{1,7}$/.test(t)) { const n = Number(t); return n < 10000 ? n * 1000 : n; }
+      return null;
+    }
+    function scanDate(s) {
+      const m = /\b(\d{1,2})\s*[\/.\-]\s*(\d{1,2})(?:\s*[\/.\-]\s*(\d{2,4}))?\b/.exec(s);
+      if (!m) return '';
+      const d = Number(m[1]), mo = Number(m[2]);
+      if (d < 1 || d > 31 || mo < 1 || mo > 12) return '';
+      let y = m[3] ? Number(m[3]) : new Date().getFullYear();
+      if (y < 100) y += 2000;
+      return `${String(d).padStart(2, '0')}/${String(mo).padStart(2, '0')}/${y}`;
+    }
+    function scanPickup(n) { const m = /\b(?:t|ga|ga t|nha ga)\s?([123])\b/.exec(n); return m ? 'T' + m[1] : ''; }
+    function scanCar(n) { const m = /\b(4|7|16|29|45)\s?(c|ch|cho|chỗ)\b/.exec(n) || /\bxe\s?(4|7|16|29|45)\b/.exec(n); return m ? m[1] : ''; }
+    function scanPay(n) { for (const [re, cat] of SCAN_PAY) if (re.test(n)) return cat; return ''; }
+    function scanBestMatch(raw, list) {   // khớp tên trong danh sách (bỏ dấu, chứa nhau)
+      const n = scanNorm(raw).toLowerCase();
+      if (!n) return '';
+      let best = '', score = 0;
+      (list || []).forEach(opt => {
+        const o = scanNorm(opt).toLowerCase();
+        let sc = 0;
+        if (o === n) sc = 100; else if (o.includes(n) && n.length >= 2) sc = 60 + n.length; else if (n.includes(o) && o.length >= 2) sc = 50 + o.length;
+        else { const w = n.split(' ').filter(x => x.length > 1); const hit = w.filter(x => o.split(' ').includes(x)).length; if (hit) sc = hit * 10 + (hit === w.length ? 15 : 0); }
+        if (sc > score) { score = sc; best = opt; }
+      });
+      return score >= 20 ? best : '';
+    }
+    const SCAN_HEAD = [   // nhãn đầu trang (đã bỏ dấu)
+      ['staff', /^(ten|ho ten|nhan vien|nv|nhan su|nguoi ban|tai xe|tx)\b\s*[:.\-]?\s*/],
+      ['date', /^(ngay|ngay thang|date)\b\s*[:.\-]?\s*/],
+      ['source', /^(nguon|nguon don|doi tac|kenh)\b\s*[:.\-]?\s*/],
+      ['car', /^(loai xe|loai)\b\s*[:.\-]?\s*/],
+      ['pickup', /^(diem don|don|ga|nha ga)\b\s*[:.\-]?\s*/],
+      ['plate', /^(bien so|bien so xe|bs|bsx|so xe|xe so|xe)\b\s*[:.\-]?\s*/]
+    ];
+    const SCAN_ROW_LABELS = [   // nhãn trong 1 dòng đơn (mẫu in)
+      ['t', /\b(so phieu|phieu|sp)\s*[:.]?/], ['p', /\b(bien so|bs|xe)\s*[:.]/], ['d', /\b(diem den|den|dd)\s*[:.]/],
+      ['f', /\b(tien|so tien|gia)\s*[:.]/], ['m', /\b(thanh toan|tt|httt)\s*[:.]/], ['pick', /\b(ga|don)\s*[:.]/], ['c', /\b(loai xe|loai)\s*[:.]/], ['note', /\b(ghi chu|gc)\s*[:.]/]
+    ];
+    const SCAN_SKIP = /^(tong|tdt|tong cong|cong|tong tien|ky ten|xac nhan|stt|so phieu\s+bien so)/;
+    function parseScanText(text, role, lists) {
+      lists = lists || {};
+      const isDriver = role === 'driver';
+      const head = { staff: '', date: '', source: '', car: '', pickup: '', plate: '' };
+      const rows = [], warn = [];
+      const lines0 = String(text || '').split(/\r?\n/).map(l => l.replace(/\s+/g, ' ').trim()).filter(Boolean);
+      // Dòng đầu trang có nhiều nhãn ("TÊN: An   NGÀY: 12/11") -> tách thành nhiều dòng
+      const HL = /\b(ten|ho ten|nhan vien|ngay|nguon|loai xe|diem don|bien so|bsx)\s*:/g;
+      const lines = [];
+      lines0.forEach(l => {
+        const n = scanNorm(l).toLowerCase();
+        if (/\d{5,}/.test(n)) { lines.push(l); return; }
+        const pos = []; let x; while ((x = HL.exec(n))) pos.push(x.index);
+        if (pos.length < 2) { lines.push(l); return; }
+        if (pos[0] > 0) lines.push(l.slice(0, pos[0]).trim());
+        pos.forEach((p, i) => lines.push(l.slice(p, i + 1 < pos.length ? pos[i + 1] : l.length).trim()));
+      });
+      let prev = null;
+      lines.forEach(raw => {
+        const n = scanNorm(raw).toLowerCase();
+        if (!n || SCAN_SKIP.test(n.replace(/^\d+\s*[.,)\-]\s*/, ''))) return;
+        const hasTicket = /(^|[^\d])\d{5,}([^\d]|$)/.test(n.replace(/\b\d{1,2}[\/.\-]\d{1,2}([\/.\-]\d{2,4})?\b/g, ' '));
+        // ---- Dòng đầu trang (ghi 1 lần) ----
+        if (!hasTicket) {
+          let handled = false;
+          for (const [k, re] of SCAN_HEAD) {
+            const m = re.exec(n);
+            if (!m) continue;
+            const val = raw.slice(raw.length - (n.length - m[0].length)).trim();   // giữ dấu của phần giá trị
+            if (k === 'date') head.date = scanDate(val) || head.date;
+            else if (k === 'car') head.car = scanCar(scanNorm(val).toLowerCase()) || scanCar('xe ' + scanNorm(val).toLowerCase()) || head.car;
+            else if (k === 'pickup') head.pickup = scanPickup('t' + scanNorm(val).toLowerCase().replace(/^t/, '')) || scanPickup(scanNorm(val).toLowerCase()) || head.pickup;
+            else if (k === 'plate') { if (/\d/.test(val)) head.plate = val.replace(/^[:.\-\s]+/, '').trim().toUpperCase(); else continue; }
+            else if (k === 'staff') head.staff = val;
+            else if (k === 'source') head.source = val;
+            handled = true;
+            break;
+          }
+          if (!handled) {   // dòng không nhãn: đoán theo nội dung
+            const d = scanDate(n); if (d && !head.date) { head.date = d; handled = true; }
+            const pk = scanPickup(n); if (pk && n.length <= 8) { head.pickup = pk; handled = true; }
+            const cr = scanCar(n); if (cr && n.length <= 10) { head.car = cr; handled = true; }
+            if (!handled && lists.sources && scanBestMatch(raw, lists.sources) && n.length <= 25 && !head.source) { head.source = raw; handled = true; }
+            if (!handled && lists.staff && scanBestMatch(raw, lists.staff) && !head.staff) { head.staff = raw; handled = true; }
+          }
+          return;
+        }
+        // ---- Dòng đơn ----
+        const r = { t: '', p: '', d: '', f: null, m: '', pick: '', c: '', note: '', flags: [] };
+        const rest = raw.replace(/^\s*\d{1,2}\s*[.,)\-:]\s+/, '');   // bỏ số thứ tự "1." "2)"
+        const nn = scanNorm(rest).toLowerCase();
+        const ditto = SCAN_DITTO.test(' ' + nn + ' ');
+        const LBL = /\b(so phieu|phieu|bien so|bs|xe|diem den|den|so tien|tien|thanh toan|tt|ga|diem don|loai xe|ghi chu|gc)\s*:/g;
+        const labels = []; let lm;
+        while ((lm = LBL.exec(nn))) labels.push({ k: lm[1], a: lm.index, b: lm.index + lm[0].length });
+        if (labels.length >= 2) {
+          // Dòng theo MẪU IN: "Phiếu: 113950  Xe: 298  Đến: Q1  Tiền: 350  TT: NVQ"
+          const KEY = { 'so phieu': 't', phieu: 't', 'bien so': 'p', bs: 'p', xe: 'p', 'diem den': 'd', den: 'd', 'so tien': 'f', tien: 'f', 'thanh toan': 'm', tt: 'm', ga: 'pick', 'diem don': 'pick', 'loai xe': 'c', 'ghi chu': 'note', gc: 'note' };
+          labels.forEach((L, li) => {
+            const val = rest.slice(L.b, li + 1 < labels.length ? labels[li + 1].a : rest.length).trim().replace(/^[|,;\s]+|[|,;\s]+$/g, '');
+            const vn = scanNorm(val).toLowerCase(), k = KEY[L.k];
+            if (!val) return;
+            if (k === 'f') r.f = scanMoney(val.replace(/\s+/g, '')); else if (k === 'm') r.m = scanPay(vn) || val;
+            else if (k === 'pick') r.pick = scanPickup('t' + vn.replace(/^t/, '')); else if (k === 'c') r.c = scanCar(vn) || scanCar('xe ' + vn);
+            else if (k === 'p') r.p = val.toUpperCase(); else r[k] = val;
+          });
+          if (/^("|''|nt)$/.test(scanNorm(r.d))) { r.d = ''; }
+        } else {
+          // Dòng viết tự do: "113950  298  Q1  350  NVQ" / "1. 113950 T2 Q11 350 TXT"
+          r.m = scanPay(nn); r.pick = scanPickup(nn); r.c = scanCar(nn);
+          const words = rest.split(' ');
+          const wn = words.map(w => scanNorm(w).toLowerCase());
+          // bỏ các từ thuộc cụm thanh toán / ga / loại xe / dấu như trên
+          const drop = new Set();
+          let pos = 0; const starts = wn.map(w => { const st = nn.indexOf(w, pos); pos = st + w.length; return st; });
+          const spans = [];
+          SCAN_PAY.forEach(([re]) => { const g = new RegExp(re.source, 'g'); let x; while ((x = g.exec(nn))) spans.push([x.index, x[0].length]); });
+          { const x = /\b(?:t|ga|ga t)\s?[123]\b/.exec(nn); if (x) spans.push([x.index, x[0].length]); }   // chỉ ga ĐẦU TIÊN là điểm đón ("T2 ... T3" -> đến T3)
+          { const re = /\b(4|7|16|29|45)\s?(c|ch|cho)\b/g; let x; while ((x = re.exec(nn))) spans.push([x.index, x[0].length]); }
+          spans.forEach(([a, len]) => starts.forEach((st, wi) => { if (st >= a && st < a + len) drop.add(wi); }));
+          wn.forEach((w, wi) => { if (/^("|''|nt|n\.t)$/.test(w) || /^[|,;:\-–]+$/.test(w)) drop.add(wi); });
+          const ws = words.map((w, wi) => drop.has(wi) ? null : w.replace(/^[;|]+|[;|]+$/g, '')).filter(Boolean);
+          const bare = w => w.replace(/^[,]+|[,]+$/g, '');
+          const ti = ws.findIndex(w => /^[A-Za-z]{0,3}\d{5,}(-\d+\/\d+)?$/.test(bare(w)));
+          if (ti >= 0) { r.t = bare(ws[ti]); ws.splice(ti, 1); }
+          if (!isDriver) {
+            const pi = ws.findIndex(w => /^\d{2}[A-Za-z]{1,2}[-.]?\d{3,5}(\.\d{2})?$/.test(bare(w)));
+            if (pi >= 0) { r.p = bare(ws[pi]).toUpperCase(); ws.splice(pi, 1); }
+            else if (ws.length > 1 && /^\d{2,5}$/.test(bare(ws[0]))) { r.p = bare(ws[0]); ws.splice(0, 1); }
+          }
+          for (let k = ws.length - 1; k >= 0; k--) {
+            const v = scanMoney(bare(ws[k]));
+            if (v == null || v <= 0) continue;
+            const after = ws.slice(k + 1).some(w => /[a-zA-ZÀ-ỹ]/.test(w));
+            if (after && /^\d{1,3}$/.test(bare(ws[k]))) continue;   // "10 Phan Văn Khải": số nhà
+            r.f = v; ws.splice(k, 1); break;
+          }
+          r.d = ws.join(' ').replace(/^[\s\-–,]+|[\s\-–,]+$/g, '').trim();
+        }
+        // Dấu "như trên": ô còn trống lấy theo đơn trước
+        if (ditto && prev) { ['d', 'm', 'p'].forEach(k => { if (!r[k]) { r[k] = prev[k]; r.flags.push(k); } }); if (r.f == null) { r.f = prev.f; r.flags.push('f'); } }
+        if (!r.t) return;
+        rows.push(r); prev = r;
+      });
+      return { head, rows, warn };
+    }
+    // Nhóm thanh toán -> đúng 1 lựa chọn trong danh sách của phân vùng
+    function scanPayOption(cat, raw, role) {
+      const opts = role === 'plan' ? planPaymentOptions : paymentOptions;
+      if (!cat) return '';
+      const n = scanNorm(raw).toLowerCase();
+      const hits = opts.filter(o => paymentCategory({ role, paymentMethod: o }) === cat);
+      if (cat === 'KH') {
+        const pref = /\b(ck|chuyen khoan)\b/.test(n) ? 'chuyen khoan' : (/\b(cn|cong no)\b/.test(n) ? 'cong no' : '');
+        const h = pref && hits.find(o => scanNorm(o).toLowerCase().includes(pref));
+        if (h) return h;
+      }
+      return hits[0] || '';
+    }
+    function scanCarOption(seats) {
+      if (!seats) return '';
+      return carTypeOptions.find(o => new RegExp('\\b' + seats + '\\s*ch', 'i').test(scanNorm(o))) || '';
+    }
+    function openScanModal(role) {
+      const old = document.getElementById('scan-modal'); if (old) old.remove();
+      const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+      document.body.insertAdjacentHTML('beforeend', `
+        <div id="scan-modal" class="fixed inset-0 bg-slate-900/85 z-50 flex items-center justify-center p-3 backdrop-blur-sm">
+          <div class="bg-white rounded-3xl shadow-2xl max-w-2xl w-full p-4 sm:p-5 space-y-3 max-h-[94vh] flex flex-col">
+            <div class="flex items-center justify-between border-b pb-2">
+              <h3 class="text-sm font-extrabold text-slate-900 uppercase">📷 Dán Chữ Quét Từ Giấy</h3>
+              <button onclick="document.getElementById('scan-modal').remove()" class="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold">Đóng</button>
+            </div>
+            <div class="text-xs text-slate-700 bg-blue-50 border border-blue-200 rounded-xl p-3 space-y-1 overflow-y-auto">
+              <div class="font-extrabold text-blue-900">Cách lấy chữ từ ảnh chụp tờ giấy:</div>
+              ${isIOS
+                ? `<div>📱 <b>iPhone:</b> mở ảnh trong <b>Ảnh</b> → bấm biểu tượng <b>Văn bản trực tiếp</b> (ô vuông có dòng chữ, góc dưới) → giữ tay lên chữ → <b>Chọn tất cả</b> → <b>Sao chép</b>.</div>`
+                : `<div>📱 <b>Android:</b> mở ảnh trong <b>Google Photos</b> → bấm <b>Lens</b> 🔍 → chọn <b>Văn bản</b> → <b>Chọn tất cả</b> → <b>Sao chép</b>. (Samsung: mở ảnh trong Thư viện → bấm biểu tượng <b>T</b>.)</div>`}
+              <div>Rồi giữ tay vào ô dưới đây → <b>Dán</b> → bấm <b>Đọc & điền vào bảng</b>. Kiểm tra lại các ô <span class="px-1 bg-amber-200 rounded font-bold">tô vàng</span> rồi bấm Lưu như thường.</div>
+            </div>
+            <textarea id="scan-text" rows="10" placeholder="Dán chữ đã chép từ ảnh vào đây..." class="w-full p-3 border-2 border-slate-300 rounded-xl text-sm font-mono flex-1 min-h-[180px]"></textarea>
+            <div id="scan-result" class="text-xs"></div>
+            <button onclick="runScanFill('${role}')" class="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-black text-base rounded-xl shadow-lg">🔎 Đọc & điền vào bảng</button>
+          </div>
+        </div>`);
+      setTimeout(() => { const t = document.getElementById('scan-text'); if (t) t.focus(); }, 50);
+    }
+    function runScanFill(role) {
+      const text = (document.getElementById('scan-text') || {}).value || '';
+      const res = document.getElementById('scan-result');
+      const parsed = parseScanText(text, role, { staff: staffOptions, sources: sourceOptions });
+      if (!parsed.rows.length) {
+        if (res) res.innerHTML = `<div class="p-3 bg-rose-50 border border-rose-300 text-rose-800 rounded-xl font-bold">Không tìm thấy đơn nào (mỗi đơn cần có SỐ PHIẾU từ 5 chữ số). Kiểm tra lại chữ đã dán.</div>`;
+        return;
+      }
+      const n = applyScanToBatch(parsed, role);
+      document.getElementById('scan-modal').remove();
+      const extra = parsed.rows.length - n;
+      showFloatingWarning(`📷 Đã điền ${n} đơn từ giấy quét${extra > 0 ? ` (còn ${extra} đơn chưa điền vì bảng đã đủ 20 dòng — lưu rồi dán tiếp)` : ''}. Ô TÔ VÀNG = app chưa chắc, vui lòng kiểm tra rồi bấm Lưu.`);
+    }
+    // Điền vào bảng nhập hàng loạt (từ dòng trống đầu tiên). Trả về số đơn đã điền.
+    function applyScanToBatch(parsed, role) {
+      const h = parsed.head, isDriver = role === 'driver';
+      const YEL = ['ring-2', 'ring-amber-400', 'bg-amber-100'];
+      const now = new Date();
+      const today = `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()}`;
+      const staff = scanBestMatch(h.staff, staffOptions) || h.staff;
+      const source = scanBestMatch(h.source, sourceOptions);
+      const free = [];
+      for (let i = 0; i < 20; i++) {
+        const v = k => ((document.getElementById(`${k}-${i}`) || {}).value || '').trim();
+        if (!v('t') && !v('p') && !v('d') && !v('staff')) free.push(i);
+      }
+      let filled = 0;
+      parsed.rows.forEach((r, idx) => {
+        const i = free[idx];
+        if (i == null) return;
+        const el = k => document.getElementById(`${k}-${i}`);
+        const set = (k, val, unsure) => { const e = el(k); if (!e) return; if (val != null && val !== '') e.value = val; e.classList.remove(...YEL); if (unsure) e.classList.add(...YEL); };
+        set('date', h.date || today, !h.date);
+        set('staff', staff, !staff || !scanBestMatch(h.staff, staffOptions));
+        set('t', r.t, false);
+        const plate = isDriver ? (r.p || h.plate) : r.p;
+        set('p', plate, !plate && !plateOptional(role));
+        const car = scanCarOption(r.c || h.car);
+        set('c', car, !car);
+        set('src', source, !source && !isDriver);   // tài xế không ghi nguồn
+        const pk = r.pick || h.pickup;
+        set('pick', pk, !pk);
+        set('d', r.d, !r.d || r.flags.includes('d'));
+        const payOpt = scanPayOption(r.m, r.m, role) || (r.m ? '' : '');
+        set('m', payOpt, !payOpt || r.flags.includes('m'));
+        const f = el('f');
+        if (f) {
+          if (r.f != null) { f.value = fmtMoney(r.f); f.dataset.auto = '0'; }
+          f.classList.remove(...YEL); if (r.f == null || r.flags.includes('f')) f.classList.add(...YEL);
+        }
+        if (r.note) set('note', r.note, false);
+        if (usesPriceList()) autoMatchRowPrice(i);
+        filled++;
+      });
+      if (typeof scheduleBatchDraft === 'function') scheduleBatchDraft();
+      // Bỏ tô vàng khi người dùng sửa ô đó
+      document.querySelectorAll('#tbody-batch .ring-amber-400').forEach(e => e.addEventListener('input', () => e.classList.remove(...YEL), { once: true }));
+      document.querySelectorAll('#tbody-batch select.ring-amber-400').forEach(e => e.addEventListener('change', () => e.classList.remove(...YEL), { once: true }));
+      return filled;
+    }
+    // Mẫu giấy in (A4) theo phân vùng: phần GHI 1 LẦN ở đầu trang + 20 dòng đơn có nhãn để điện thoại đọc đúng thứ tự
+    function printScanTemplate(role) {
+      const isDriver = role === 'driver';
+      const head = isDriver
+        ? ['TÊN TÀI XẾ:', 'NGÀY:', 'BIỂN SỐ:', 'LOẠI XE:', 'ĐIỂM ĐÓN (T1/T2/T3):']
+        : ['TÊN:', 'NGÀY:', 'NGUỒN:', 'LOẠI XE:', 'ĐIỂM ĐÓN (T1/T2/T3):'];
+      const cols = isDriver
+        ? [['Phiếu:', 26], ['Đến:', 40], ['Tiền:', 16], ['TT:', 14]]
+        : [['Phiếu:', 20], ['Xe:', 12], ['Đến:', 36], ['Tiền:', 16], ['TT:', 12]];
+      const rows = Array.from({ length: 20 }, (_, i) => `<tr><td class="n">${i + 1}.</td>${cols.map(([l, w]) => `<td style="width:${w}%"><span class="l">${l}</span></td>`).join('')}</tr>`).join('');
+      const html = `<!doctype html><html><head><meta charset="utf-8"><title>Mẫu ghi đơn ${isDriver ? 'Tài xế' : 'Bán vé - Kế hoạch'}</title>
+        <style>
+          @page { size: A4; margin: 10mm; } body { font-family: Arial, sans-serif; color: #000; margin: 0; }
+          h1 { font-size: 17px; text-align: center; margin: 0 0 6px; } .sub { text-align: center; font-size: 11px; margin-bottom: 8px; }
+          .head { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 14px; border: 2px solid #000; padding: 8px; margin-bottom: 8px; font-size: 14px; font-weight: bold; }
+          .head div { border-bottom: 1px dotted #000; height: 26px; line-height: 26px; }
+          table { width: 100%; border-collapse: collapse; font-size: 13px; } td { border-bottom: 1px solid #000; height: 34px; vertical-align: bottom; padding: 0 3px 3px; }
+          td.n { width: 4%; font-weight: bold; } .l { font-weight: bold; }
+          .note { font-size: 10.5px; margin-top: 8px; line-height: 1.5; } .btn { margin: 10px auto; display: block; padding: 10px 20px; font-size: 16px; }
+          @media print { .btn { display: none; } }
+        </style></head><body>
+        <button class="btn" onclick="window.print()">🖨️ In mẫu này</button>
+        <h1>PHIẾU GHI ĐƠN ${isDriver ? 'TÀI XẾ / CHỦ XE' : 'BÁN VÉ / KẾ HOẠCH'} — TSS</h1>
+        <div class="sub">Phần khung trên CHỈ GHI 1 LẦN cho cả trang. Mỗi dòng dưới là 1 đơn. Đơn nào khác (vd xe 16 chỗ, ga khác) thì ghi thêm vào dòng đó.</div>
+        <div class="head">${head.map(x => `<div>${x}</div>`).join('')}</div>
+        <table>${rows}</table>
+        <div class="note"><b>Viết tắt được:</b> Thanh toán: NVQ (nhân viên quầy thu) • TXT (tài xế thu) • Thẻ • CK (chuyển khoản) • CN (công nợ) • Free. Tiền: 350 = 350.000 • 1tr2 = 1.200.000. Loại xe: 4c • 7c • 16c. Ga: T1 • T2 • T3.
+          Điểm đến: ghi Phường/Xã hoặc Quận (Q1, BT, TB, PN, GV, TĐ…). Giống dòng trên: ghi <b>"</b> hoặc <b>nt</b>. Viết chữ rõ, mỗi đơn 1 dòng.</div>
+        </body></html>`;
+      const w = window.open('', '_blank');
+      if (!w) { alert('Trình duyệt chặn mở trang mới. Vui lòng cho phép cửa sổ bật lên rồi thử lại.'); return; }
+      w.document.open(); w.document.write(html); w.document.close();
     }
 
     // Team Kế hoạch: biển số KHÔNG bắt buộc (10/11). Các phân vùng khác vẫn bắt buộc.

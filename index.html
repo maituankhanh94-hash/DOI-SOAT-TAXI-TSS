@@ -2536,19 +2536,41 @@
               <h3 class="text-sm font-extrabold text-slate-900 uppercase">📷 Dán Chữ Quét Từ Giấy</h3>
               <button onclick="document.getElementById('scan-modal').remove()" class="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold">Đóng</button>
             </div>
-            <div class="text-xs text-slate-700 bg-blue-50 border border-blue-200 rounded-xl p-3 space-y-1 overflow-y-auto">
-              <div class="font-extrabold text-blue-900">Cách lấy chữ từ ảnh chụp tờ giấy:</div>
-              ${isIOS
-                ? `<div>📱 <b>iPhone:</b> mở ảnh trong <b>Ảnh</b> → bấm biểu tượng <b>Văn bản trực tiếp</b> (ô vuông có dòng chữ, góc dưới) → giữ tay lên chữ → <b>Chọn tất cả</b> → <b>Sao chép</b>.</div>`
-                : `<div>📱 <b>Android:</b> mở ảnh trong <b>Google Photos</b> → bấm <b>Lens</b> 🔍 → chọn <b>Văn bản</b> → <b>Chọn tất cả</b> → <b>Sao chép</b>. (Samsung: mở ảnh trong Thư viện → bấm biểu tượng <b>T</b>.)</div>`}
-              <div>Rồi giữ tay vào ô dưới đây → <b>Dán</b> → bấm <b>Đọc & điền vào bảng</b>. Kiểm tra lại các ô <span class="px-1 bg-amber-200 rounded font-bold">tô vàng</span> rồi bấm Lưu như thường.</div>
+            <div class="overflow-y-auto space-y-3 flex-1 min-h-0">
+            <div class="grid grid-cols-2 gap-2">
+              <label class="cursor-pointer text-center px-3 py-3 bg-slate-800 hover:bg-slate-900 text-white font-extrabold text-sm rounded-xl">🖼️ Lấy ảnh từ máy
+                <input type="file" accept="image/*" multiple class="hidden" onchange="showScanImages(this.files)"></label>
+              <label class="cursor-pointer text-center px-3 py-3 bg-slate-600 hover:bg-slate-700 text-white font-extrabold text-sm rounded-xl">📸 Chụp ảnh
+                <input type="file" accept="image/*" capture="environment" class="hidden" onchange="showScanImages(this.files, true)"></label>
             </div>
-            <textarea id="scan-text" rows="10" placeholder="Dán chữ đã chép từ ảnh vào đây..." class="w-full p-3 border-2 border-slate-300 rounded-xl text-sm font-mono flex-1 min-h-[180px]"></textarea>
+            <div id="scan-images" class="space-y-2"></div>
+            <div class="text-xs text-slate-700 bg-blue-50 border border-blue-200 rounded-xl p-3 space-y-1">
+              <div class="font-extrabold text-blue-900">Cách lấy chữ từ ảnh tờ giấy:</div>
+              ${isIOS
+                ? `<div>📱 <b>iPhone:</b> chọn ảnh ở nút trên → ảnh hiện ra ở đây → <b>giữ tay lên chữ trong ảnh</b> → <b>Chọn tất cả</b> → <b>Sao chép</b>. (Hoặc mở ảnh trong app <b>Ảnh</b> → biểu tượng <b>Văn bản trực tiếp</b> → Chọn tất cả → Sao chép.)</div>`
+                : `<div>📱 <b>Android:</b> chọn ảnh ở nút trên → ảnh hiện ra ở đây → <b>giữ tay lên ảnh</b> → chọn <b>"Tìm bằng Google Lens"</b> → <b>Văn bản</b> → <b>Chọn tất cả</b> → <b>Sao chép</b> → quay lại đây. (Hoặc mở ảnh trong <b>Google Photos</b> → Lens; Samsung: Thư viện → biểu tượng <b>T</b>.)</div>`}
+              <div>Rồi giữ tay vào ô dưới → <b>Dán</b> → bấm <b>Đọc & điền vào bảng</b>. Kiểm tra lại các ô <span class="px-1 bg-amber-200 rounded font-bold">tô vàng</span> rồi bấm Lưu như thường.</div>
+            </div>
+            <textarea id="scan-text" rows="8" placeholder="Dán chữ đã chép từ ảnh vào đây..." class="w-full p-3 border-2 border-slate-300 rounded-xl text-sm font-mono min-h-[160px]"></textarea>
             <div id="scan-result" class="text-xs"></div>
+            </div>
             <button onclick="runScanFill('${role}')" class="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-black text-base rounded-xl shadow-lg">🔎 Đọc & điền vào bảng</button>
           </div>
         </div>`);
-      setTimeout(() => { const t = document.getElementById('scan-text'); if (t) t.focus(); }, 50);
+    }
+    // Hiện ảnh đã chọn ngay trong app (ảnh ở lại trên máy, KHÔNG gửi đi đâu) để dùng Live Text / Google Lens trên ảnh
+    function showScanImages(files, append) {
+      const box = document.getElementById('scan-images');
+      if (!box || !files || !files.length) return;
+      if (!append) { box.querySelectorAll('img').forEach(im => URL.revokeObjectURL(im.src)); box.innerHTML = ''; }
+      [...files].forEach((f, k) => {
+        const url = URL.createObjectURL(f);
+        box.insertAdjacentHTML('beforeend', `<div class="border-2 border-slate-300 rounded-xl overflow-hidden bg-slate-50">
+          <div class="flex items-center justify-between px-2 py-1 text-[11px] font-bold text-slate-600 bg-slate-100"><span>Ảnh ${box.children.length + 1} — giữ tay lên ảnh để chép chữ</span>
+            <a href="${url}" target="_blank" class="text-blue-700 underline">Mở to</a></div>
+          <img src="${url}" alt="Ảnh tờ giấy" class="w-full h-auto block select-text" style="-webkit-touch-callout: default;">
+        </div>`);
+      });
     }
     function runScanFill(role) {
       const text = (document.getElementById('scan-text') || {}).value || '';

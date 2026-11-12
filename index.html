@@ -4208,6 +4208,9 @@
       groups.forEach(g => {
         // Mỗi cuốc chỉ ghi 1 lần: có bên Bán vé/Kế hoạch thì lấy bên đó; chỉ có bên Chủ xe thì mới lấy bên Chủ xe (tránh trùng doanh thu)
         const sale = g.trips.filter(t => t.role !== 'driver');
+        // (13/11) Cột F "Mã khách hàng" = tên TÀI XẾ của đúng cuốc này (bên chủ xe trong cùng nhóm đối soát);
+        //         cột O "Mã nhân viên bán hàng" = tên nhân viên BÁN VÉ / KẾ HOẠCH (đơn chỉ có bên tài xế thì để trống)
+        const driverName = [...new Set(g.trips.filter(t => t.role === 'driver').map(t => clean(t.staff) || clean(t.createdBy)).filter(Boolean))].join(' + ');
         (sale.length ? sale : g.trips).forEach(t => {
           const dk = tripDateKey(t);
           const p = dk ? dk.split('-').map(Number) : null;
@@ -4217,8 +4220,8 @@
           const fare = Number(t.totalFare || 0);
           const row = ws.addRow([
             'Chưa thu tiền', dateVal, dateVal, ticket, ticket,
-            '', 'VC', '131', '5113', 'Chuyến', 1,
-            fare, fare, clean(t.source), clean(t.staff),
+            driverName, 'VC', '131', '5113', 'Chuyến', 1,
+            fare, fare, clean(t.source), t.role === 'driver' ? '' : clean(t.staff),
             clean(t.paymentMethod), t.pickup ? 'Ga ' + clean(t.pickup) : '', clean(t.destination)
           ]);
           if (p) { row.getCell(2).numFmt = 'dd/mm/yyyy'; row.getCell(3).numFmt = 'dd/mm/yyyy'; }

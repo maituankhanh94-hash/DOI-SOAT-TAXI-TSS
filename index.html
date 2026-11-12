@@ -1400,7 +1400,7 @@
               <h3 class="text-xs sm:text-sm font-extrabold uppercase ${themeColorClass}">📋 Nhập Hàng Loạt 20 Dòng Nhanh</h3>
               <div class="flex flex-wrap items-center gap-2">
                 <button onclick="printScanTemplate('${role}')" class="px-3 py-2.5 bg-white border-2 border-slate-300 hover:bg-slate-50 text-slate-700 font-extrabold text-xs rounded-xl">🖨️ In Mẫu Giấy</button>
-                <button onclick="openScanModal('${role}')" class="px-4 py-2.5 bg-amber-500 hover:bg-amber-600 text-white font-extrabold text-xs rounded-xl shadow-lg">📷 Dán Chữ Quét</button>
+                <button onclick="openScanModal('${role}')" class="px-4 py-2.5 bg-amber-500 hover:bg-amber-600 text-white font-extrabold text-xs rounded-xl shadow-lg">📷 Quét Giấy</button>
                 <button onclick="submitBatch('${role}')" class="px-5 py-2.5 ${btnThemeClass} text-white font-extrabold text-xs rounded-xl shadow-lg transition-all">🚀 Lưu Đơn Lên Cloud</button>
               </div>
             </div>
@@ -2536,7 +2536,7 @@
         <div id="scan-modal" class="fixed inset-0 bg-slate-900/85 z-50 flex items-center justify-center p-3 backdrop-blur-sm">
           <div class="bg-white rounded-3xl shadow-2xl max-w-2xl w-full p-4 sm:p-5 space-y-3 max-h-[94vh] flex flex-col">
             <div class="flex items-center justify-between border-b pb-2">
-              <h3 class="text-sm font-extrabold text-slate-900 uppercase">📷 Dán Chữ Quét Từ Giấy</h3>
+              <h3 class="text-sm font-extrabold text-slate-900 uppercase">📷 Quét Giấy Ghi Đơn</h3>
               <button onclick="document.getElementById('scan-modal').remove()" class="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold">Đóng</button>
             </div>
             <div class="overflow-y-auto space-y-3 flex-1 min-h-0">
@@ -2547,6 +2547,9 @@
                 <input type="file" accept="image/*" capture="environment" class="hidden" onchange="showScanImages(this.files, true)"></label>
             </div>
             <div id="scan-images" class="space-y-2"></div>
+            <button type="button" id="btn-scan-ai" onclick="runScanAI('${role}')" class="hidden w-full py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-base rounded-xl shadow-lg">🤖 TỰ ĐỌC ẢNH & ĐIỀN BẢNG</button>
+            <div id="scan-ai-status" class="text-xs"></div>
+            <details class="text-xs"><summary class="cursor-pointer font-bold text-slate-500 py-1">Cách khác (khi tự đọc bị lỗi / hết lượt): chép chữ từ ảnh rồi dán</summary>
             <div class="text-xs text-slate-700 bg-blue-50 border border-blue-200 rounded-xl p-3 space-y-1">
               <div class="font-extrabold text-blue-900">Cách lấy chữ từ ảnh tờ giấy:</div>
               ${isIOS
@@ -2555,12 +2558,80 @@
               <div>Rồi giữ tay vào ô dưới → <b>Dán</b> → bấm <b>Đọc & điền vào bảng</b>. Kiểm tra lại các ô <span class="px-1 bg-amber-200 rounded font-bold">tô vàng</span> rồi bấm Lưu như thường.</div>
             </div>
             <textarea id="scan-text" rows="8" placeholder="Dán chữ đã chép từ ảnh vào đây..." class="w-full p-3 border-2 border-slate-300 rounded-xl text-sm font-mono min-h-[160px]"></textarea>
-            <button type="button" onclick="pasteScanText()" class="w-full py-2.5 bg-white border-2 border-blue-400 text-blue-700 font-extrabold text-sm rounded-xl">📋 Dán chữ đã chép</button>
-            <div id="scan-result" class="text-xs"></div>
+            <button type="button" onclick="pasteScanText()" class="w-full py-2.5 mt-2 bg-white border-2 border-blue-400 text-blue-700 font-extrabold text-sm rounded-xl">📋 Dán chữ đã chép</button>
+            <div id="scan-result" class="text-xs mt-2"></div>
+            <button onclick="runScanFill('${role}')" class="w-full py-3 mt-2 bg-blue-600 hover:bg-blue-700 text-white font-black text-base rounded-xl shadow-lg">🔎 Đọc chữ đã dán & điền vào bảng</button>
+            </details>
             </div>
-            <button onclick="runScanFill('${role}')" class="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-black text-base rounded-xl shadow-lg">🔎 Đọc & điền vào bảng</button>
           </div>
         </div>`);
+    }
+    // ===== TỰ ĐỌC ẢNH bằng Google Gemini (qua /api/scan trên Vercel; khóa cất ở Vercel) =====
+    let scanFiles = [];
+    // Thu nhỏ ảnh (cạnh dài <= 1800px, JPEG) để gửi nhanh và dưới giới hạn dung lượng
+    function shrinkImage(file, maxSide) {
+      return new Promise((resolve, reject) => {
+        const url = URL.createObjectURL(file), img = new Image();
+        img.onload = () => {
+          const k = Math.min(1, maxSide / Math.max(img.naturalWidth, img.naturalHeight));
+          const c = document.createElement('canvas');
+          c.width = Math.round(img.naturalWidth * k); c.height = Math.round(img.naturalHeight * k);
+          c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+          URL.revokeObjectURL(url);
+          resolve(c.toDataURL('image/jpeg', 0.85));
+        };
+        img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Không mở được ảnh (định dạng không hỗ trợ?)')); };
+        img.src = url;
+      });
+    }
+    // Kết quả Gemini -> cùng dạng với parseScanText để dùng chung applyScanToBatch
+    function aiToParsed(data) {
+      const h = data.head || {};
+      const pick = v => { const m = /([123])/.exec(String(v || '')); return m && /t|ga|^\s*[123]\s*$/i.test(String(v)) ? 'T' + m[1] : ''; };
+      const seat = v => { const m = /(\d{1,2})/.exec(String(v || '')); return m ? m[1] : ''; };
+      const F = { ticket: 't', plate: 'p', dest: 'd', fare: 'f', payment: 'm', pickup: 'pick' };
+      return {
+        head: { staff: String(h.staff || '').trim(), date: scanDate(String(h.date || '')), source: String(h.source || '').trim(),
+          car: seat(h.car), pickup: pick(h.pickup), plate: String(h.plate || '').trim().toUpperCase() },
+        rows: (data.rows || []).map(r => {
+          const pay = String(r.payment || '').toUpperCase();
+          return { t: String(r.ticket || '').replace(/\s+/g, ''), p: String(r.plate || '').trim().toUpperCase(), d: String(r.dest || '').trim(),
+            f: Number(r.fare) > 0 ? Math.round(Number(r.fare)) : null,
+            m: pay === 'CK' || pay === 'CN' ? 'KH' : pay, mRaw: pay === 'CK' ? 'ck' : (pay === 'CN' ? 'cn' : pay),
+            pick: pick(r.pickup), c: seat(r.car), note: String(r.note || '').trim(),
+            flags: (r.unsure || []).map(x => F[x]).filter(Boolean) };
+        }).filter(r => r.t)
+      };
+    }
+    async function runScanAI(role) {
+      const st = document.getElementById('scan-ai-status'), btn = document.getElementById('btn-scan-ai');
+      const say = (cls, html) => { if (st) st.innerHTML = `<div class="p-3 rounded-xl font-bold ${cls}">${html}</div>`; };
+      if (!scanFiles.length) { say('bg-amber-50 border border-amber-300 text-amber-900', 'Chưa chọn ảnh.'); return; }
+      if (!fbAuth.currentUser) { say('bg-rose-50 border border-rose-300 text-rose-800', 'Phiên đăng nhập đã hết, vui lòng đăng nhập lại.'); return; }
+      if (btn) { btn.disabled = true; btn.innerText = '⏳ Đang đọc ảnh... (10–30 giây)'; }
+      say('bg-blue-50 border border-blue-200 text-blue-900', '⏳ Đang gửi ảnh đi đọc, vui lòng chờ...');
+      try {
+        const images = [];
+        for (const f of scanFiles.slice(0, 4)) images.push(await shrinkImage(f, 1800));
+        const token = await fbAuth.currentUser.getIdToken();
+        const r = await fetch('/api/scan', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+          body: JSON.stringify({ images, env: IS_TEST_ENV ? 'test' : 'main', lists: { staff: staffOptions, sources: sourceOptions } })
+        });
+        let data = null; try { data = await r.json(); } catch (e) {}
+        if (!r.ok) throw new Error((data && data.error) || `Lỗi máy chủ (${r.status})`);
+        const parsed = aiToParsed(data || {});
+        if (!parsed.rows.length) { say('bg-amber-50 border border-amber-300 text-amber-900', 'Không thấy đơn nào trong ảnh (cần có số phiếu). Chụp gần hơn, rõ hơn rồi thử lại.'); return; }
+        const n = applyScanToBatch(parsed, role);
+        document.getElementById('scan-modal').remove();
+        const extra = parsed.rows.length - n;
+        showFloatingWarning(`🤖 Đã đọc ảnh và điền ${n} đơn${extra > 0 ? ` (còn ${extra} đơn chưa điền vì bảng đã đủ 20 dòng — lưu rồi quét tiếp)` : ''}. Ô TÔ VÀNG = cần kiểm tra. Đối chiếu lại với tờ giấy rồi bấm Lưu.`);
+      } catch (e) {
+        say('bg-rose-50 border border-rose-300 text-rose-800', '⚠️ ' + escHtml(e.message || String(e)) + '<br><span class="font-semibold">Có thể dùng "Cách khác" bên dưới (chép chữ rồi dán).</span>');
+      } finally {
+        if (btn) { btn.disabled = false; btn.innerText = '🤖 TỰ ĐỌC ẢNH & ĐIỀN BẢNG'; }
+      }
     }
     async function pasteScanText() {
       const ta = document.getElementById('scan-text'), res = document.getElementById('scan-result');
@@ -2578,7 +2649,9 @@
     function showScanImages(files, append) {
       const box = document.getElementById('scan-images');
       if (!box || !files || !files.length) return;
-      if (!append) { box.querySelectorAll('img').forEach(im => URL.revokeObjectURL(im.src)); box.innerHTML = ''; }
+      if (!append) { box.querySelectorAll('img').forEach(im => URL.revokeObjectURL(im.src)); box.innerHTML = ''; scanFiles = []; }
+      scanFiles.push(...[...files].filter(f => /^image\//.test(f.type) || /\.(jpe?g|png|heic|webp)$/i.test(f.name)));
+      const ab = document.getElementById('btn-scan-ai'); if (ab) ab.classList.toggle('hidden', !scanFiles.length);
       [...files].forEach((f, k) => {
         const url = URL.createObjectURL(f);
         box.insertAdjacentHTML('beforeend', `<div class="border-2 border-slate-300 rounded-xl overflow-hidden bg-slate-50">
@@ -2626,16 +2699,16 @@
         const set = (k, val, unsure) => { const e = el(k); if (!e) return; if (val != null && val !== '') e.value = val; e.classList.remove(...YEL); if (unsure) e.classList.add(...YEL); };
         set('date', h.date || today, !h.date);
         set('staff', staff, !staff || !scanBestMatch(h.staff, staffOptions));
-        set('t', r.t, false);
+        set('t', r.t, (r.flags || []).includes('t'));
         const plate = isDriver ? (r.p || h.plate) : r.p;
-        set('p', plate, !plate && !plateOptional(role));
+        set('p', plate, (!plate && !plateOptional(role)) || (r.flags || []).includes('p'));
         const car = scanCarOption(r.c || h.car);
         set('c', car, !car);
         set('src', source, !source && !isDriver);   // tài xế không ghi nguồn
         const pk = r.pick || h.pickup;
-        set('pick', pk, !pk);
+        set('pick', pk, !pk || (r.flags || []).includes('pick'));
         set('d', r.d, !r.d || r.flags.includes('d'));
-        const payOpt = scanPayOption(r.m, r.m, role) || (r.m ? '' : '');
+        const payOpt = scanPayOption(r.m, r.mRaw || r.m, role);
         set('m', payOpt, !payOpt || r.flags.includes('m'));
         const f = el('f');
         if (f) {

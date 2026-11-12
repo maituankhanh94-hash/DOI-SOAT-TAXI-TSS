@@ -14,7 +14,7 @@ function strict(B){
     "accounts": { ".read": mgr, "$u": { ".write": `${mgr} || ${noRoles}` } },
     "settings": { ".write": mgr,
       "accounts": readM, "sources": readA, "staff": readA, "carTypes": readA,
-      "payments": readA, "planPayments": readA, "lockHour": readA },
+      "payments": readA, "planPayments": readA, "plan2Payments": readA, "lockHour": readA },
     "trips": { ".read": mgr, ".indexOn": ["dateKey"],
       "$id": { ".write": `${mgr} || (${active} && (!data.exists() || data.child('createdBy').val() === ${me}) && (!newData.exists() || newData.child('createdBy').val() === ${me}))` } },
     "users_trips": { "$user": { ".indexOn": ["dateKey"], ".read": `${mgr} || (${active} && $user === ${me})`, ".write": `${mgr} || (${active} && $user === ${me})` } },

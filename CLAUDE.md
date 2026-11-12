@@ -42,6 +42,13 @@
 
 - (11/11, LÊN MAIN) Khung Nhắc Báo Cáo – "Tài xế chưa báo": mỗi phiếu 1 dòng "Xe 489 – Phiếu 113379 – họ tên (TK) (bán vé/kế hoạch) đã nhập, đi …, tiền", xếp liền theo xe (xe ≥2 phiếu có vạch cam). Bấm 1 dòng (cả mục Bán vé chưa nhập) → `jumpToAuditTicket(ticket)`: Bảng Đối Soát lọc khoảng ngày nhắc + từ khóa = số phiếu, cuộn xuống.
 
+## Team Kế Hoạch 2 (13/11, nhánh `team-ke-hoach-2`, BẢN THỬ)
+- Phân vùng mới `plan2` ("Team Kế Hoạch 2", màu hồng/pink). Chạy GIỐNG `plan`: bên bán khi đối soát (`isSellRole`), biển số không bắt buộc (`plateOptional` → `isPlanRole`), thanh toán luôn nhóm KH (`paymentCategory`), áp quy ước điểm đến + bảng giá (`PRICE_ROLES`).
+- Danh sách thanh toán RIÊNG: `settings/plan2Payments` (`plan2PaymentOptions`, `payListFor(role)`). Trang Quản lý: khung "QUẢN LÝ HÌNH THỨC THANH TOÁN TEAM KẾ HOẠCH 2" (`planPayCfg`, `renderPlanPaymentsTable/addNewPlanPayment/addBulkPlanPayment/deletePlanPayment(…, role)` dùng chung cho plan & plan2).
+- Thêm ở: nút trang chủ, tiêu đề đăng nhập, ROLE_LABELS (chọn khi tạo/sửa tài khoản), lọc phân vùng ở Bảng Đối Soát, nhãn bảng/Excel (XL.role plan2), doanh thu theo hình thức, chép dữ liệu thật vào bản thử.
+- Quy tắc: `settings/plan2Payments` cho nhân viên đọc (`sinh-quy-tac.js` → sinh lại 2 file). Người dùng PHẢI dán `quy-tac-buoc-2.json` mới vào Firebase (chưa dán thì nhân viên KH2 thấy danh sách mặc định).
+- Đã thử emulator: đăng nhập KH2 thấy đúng danh sách thanh toán riêng, lưu đơn không biển số, Quản lý thêm hình thức KH2 (ghi đúng plan2Payments, không đụng planPayments), đối soát ghép KH2 với tài xế, lọc phân vùng KH2.
+
 ## Nhật ký & Thùng rác (11/11, ĐÃ LÊN MAIN; nhánh `nhat-ky-thung-rac`; người dùng đã dán quy tắc mới có trash + trip_log)
 - Sự cố: đơn xe 298 ngày 10/11 (8 đơn, 3.050.000đ) đã hiện trên máy tài xế lúc 03:51 rồi biến mất; app không có dấu vết ai xóa. Rà code: chỉ chủ tài khoản (trước lockHour hôm sau) hoặc quản lý xóa được; không có đoạn tự xóa.
 - `trip_log/<pushId>` = {at (ServerValue), by, action create|edit|delete|restore, tripId, owner, ticket, plate, dateStr, fare, detail}. CHỈ THÊM: quy tắc `!data.exists()` + `by === chính mình`; chỉ quản lý đọc. Ghi ở: submitBatch (create, mỗi đơn 1 dòng), saveEditedTrip (edit, `changeText(before, after)`), updateInlineTripField, fixDateOffGroup, restoreDeletedTrips, restoreFromTrash.

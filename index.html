@@ -143,10 +143,15 @@
     let carTypeOptions = ["Xe 4 Chỗ", "Xe 7 Chỗ", "Xe 16 Chỗ"];
     let paymentOptions = ["Nhân Viên Quầy Thu", "Thẻ", "Kế Hoạch", "Tài Xế Thu"];
     let planPaymentOptions = ["Chuyển Khoản", "Công Nợ", "Tiền Mặt"];
+    let plan2PaymentOptions = ["Chuyển Khoản", "Công Nợ", "Tiền Mặt"];   // Team Kế Hoạch 2 (13/11): danh sách thanh toán riêng
+    // Team Kế Hoạch 2 ('plan2') chạy giống Team Kế Hoạch ('plan'): bên bán khi đối soát, biển số không bắt buộc, thanh toán nhóm KH
+    function isPlanRole(r) { return r === 'plan' || r === 'plan2'; }
+    function isSellRole(r) { return r === 'pos' || r === 'plan' || r === 'plan2'; }
+    function payListFor(role) { return role === 'plan2' ? plan2PaymentOptions : (role === 'plan' ? planPaymentOptions : paymentOptions); }
     
     let lockHourSetting = 8; 
     const TERMINAL_OPTIONS = ["T2", "T1", "T3"];
-    const ROLE_LABELS = { 'pos': 'Bán Vé (Quầy)', 'driver': 'Cổng Chủ Xe', 'plan': 'Team Kế Hoạch', 'manager': 'Quản Lý' };
+    const ROLE_LABELS = { 'pos': 'Bán Vé (Quầy)', 'driver': 'Cổng Chủ Xe', 'plan': 'Team Kế Hoạch', 'plan2': 'Team Kế Hoạch 2', 'manager': 'Quản Lý' };
 
     window.addEventListener('DOMContentLoaded', async () => {
       initCloudStatusMonitor();
@@ -221,6 +226,7 @@
         ['carTypes', () => carTypeOptions, v => { carTypeOptions = toArr(v); }, () => renderCarTypesTable()],
         ['payments', () => paymentOptions, v => { paymentOptions = toArr(v); }, () => renderPaymentsTable()],
         ['planPayments', () => planPaymentOptions, v => { planPaymentOptions = toArr(v); }, () => renderPlanPaymentsTable()],
+        ['plan2Payments', () => plan2PaymentOptions, v => { plan2PaymentOptions = toArr(v); }, () => renderPlanPaymentsTable('plan2')],
         ['lockHour', () => lockHourSetting, v => {
           lockHourSetting = parseInt(v, 10);
           const inp = document.getElementById('lock-hour-input');
@@ -290,10 +296,11 @@
             <h1 class="text-2xl font-extrabold text-slate-900">HỆ THỐNG ĐIỀU XE SÂN BAY TSS</h1>
             <p class="text-xs text-slate-500 max-w-sm mx-auto">Chọn phân vùng làm việc của bạn bên dưới:</p>
           </div>
-          <div class="grid grid-cols-1 sm:grid-cols-4 gap-3 w-full max-w-2xl">
+          <div class="grid grid-cols-1 sm:grid-cols-5 gap-3 w-full max-w-3xl">
             <button onclick="promptLogin('pos')" class="p-4 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-2xl shadow-lg">🚖 Bán Vé (Quầy)</button>
             <button onclick="promptLogin('driver')" class="p-4 bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs rounded-2xl shadow-lg">🚗 Cổng Chủ Xe</button>
             <button onclick="promptLogin('plan')" class="p-4 bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs rounded-2xl shadow-lg">📋 Team Kế Hoạch</button>
+            <button onclick="promptLogin('plan2')" class="p-4 bg-pink-600 hover:bg-pink-700 text-white font-bold text-xs rounded-2xl shadow-lg">📋 Team Kế Hoạch 2</button>
             <button onclick="promptLogin('manager')" class="p-4 bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs rounded-2xl shadow-lg">📊 Trang Quản Lý</button>
           </div>
         </div>
@@ -332,7 +339,7 @@
         try { isEmpty = !(await dbRef('login_index').limitToFirst(1).once('value')).exists(); } catch (e) {}
         if (isEmpty) { promptBootstrapManager(); return; }
       }
-      const titles = { pos: 'Đăng Nhập Bán Vé', driver: 'Đăng Nhập Chủ Xe / Tài Xế', plan: 'Đăng Nhập Team Kế Hoạch', manager: 'Đăng Nhập Quản Lý' };
+      const titles = { pos: 'Đăng Nhập Bán Vé', driver: 'Đăng Nhập Chủ Xe / Tài Xế', plan: 'Đăng Nhập Team Kế Hoạch', plan2: 'Đăng Nhập Team Kế Hoạch 2', manager: 'Đăng Nhập Quản Lý' };
       const body = `
         <input type="text" id="modal-user" autocomplete="username" placeholder="Tài khoản..." class="${inputCls}">
         <input type="password" id="modal-pwd" autocomplete="current-password" placeholder="Mật khẩu..." class="${inputCls}" onkeydown="if(event.key==='Enter') executeUserLogin('${role}')">`;
@@ -543,7 +550,7 @@
     let staffMode = null, staffWinFrom = null, staffRef = null, staffCb = null, staffRole = null;
     function monthStartKey(dateKey) { return dateKey.slice(0, 8) + '01'; }
     function startWorkerSession(role) {
-      const roleLabels = { 'pos': 'Bán Vé', 'driver': 'Tài Xế', 'plan': 'Team Kế Hoạch' };
+      const roleLabels = { 'pos': 'Bán Vé', 'driver': 'Tài Xế', 'plan': 'Team Kế Hoạch', 'plan2': 'Team Kế Hoạch 2' };
       document.getElementById('header-status').innerText = `${roleLabels[role] || role}: ${loggedInUser.user}`;
       staffRole = role;
       renderWorksheetView(role);
@@ -1037,7 +1044,7 @@
     }
     function closeDestFix() { const el = document.getElementById('dest-fix-modal'); if (el) el.remove(); }
     // Áp bảng giá cho Bán vé (quầy) và Team Kế hoạch (kể cả đơn đối tác). Không xét: đơn Chủ xe, đơn Free nội bộ, đơn không có giá bảng.
-    const PRICE_ROLES = ['pos', 'plan'];
+    const PRICE_ROLES = ['pos', 'plan', 'plan2'];
     function usesPriceList() { return !!(loggedInUser && PRICE_ROLES.includes(loggedInUser.role)); }
     // Đơn cũ (nhập trước khi có bảng giá) hoặc gõ tay không chọn gợi ý: suy ra giá bảng từ điểm đến + loại xe.
     // Khớp 1 khu vực -> giá đó; khớp nhiều khu vực -> lấy GIÁ THẤP NHẤT (không bắt lỗi oan). Không khớp -> không xét.
@@ -1325,9 +1332,9 @@
 
     function renderWorksheetView(role) {
       const isPos = role === 'pos';
-      const isPlan = role === 'plan';
-      const themeColorClass = isPlan ? 'text-purple-900' : (isPos ? 'text-blue-900' : 'text-amber-800');
-      const btnThemeClass = isPlan ? 'bg-purple-600 hover:bg-purple-700' : (isPos ? 'bg-blue-600 hover:bg-blue-700' : 'bg-amber-600 hover:bg-amber-700');
+      const isPlan = isPlanRole(role);
+      const themeColorClass = role === 'plan2' ? 'text-pink-900' : (isPlan ? 'text-purple-900' : (isPos ? 'text-blue-900' : 'text-amber-800'));
+      const btnThemeClass = role === 'plan2' ? 'bg-pink-600 hover:bg-pink-700' : (isPlan ? 'bg-purple-600 hover:bg-purple-700' : (isPos ? 'bg-blue-600 hover:bg-blue-700' : 'bg-amber-600 hover:bg-amber-700'));
 
       document.getElementById('main-container').innerHTML = `
         <div class="space-y-4 pb-20 w-full">
@@ -1452,7 +1459,7 @@
       const yyyy = now.getFullYear();
       const defaultDate = `${dd}/${mm}/${yyyy}`;
 
-      const activePayments = (role === 'plan') ? planPaymentOptions : paymentOptions;
+      const activePayments = payListFor(role);
       const defaultCarType = carTypeOptions.includes("Xe 7 Chỗ") ? "Xe 7 Chỗ" : (carTypeOptions[0] || "Xe 4 Chỗ");
 
       let html = '';
@@ -1594,7 +1601,7 @@
       if(revEl) revEl.innerText = totalSum.toLocaleString('vi-VN') + ' ₫';
       if(countEl) countEl.innerText = billCountText(filtered);
 
-      const activePayments = (role === 'plan') ? planPaymentOptions : paymentOptions;
+      const activePayments = payListFor(role);
 
       if (filtered.length === 0) {
         tbody.innerHTML = `<tr><td colspan="7" class="p-4 text-center text-slate-400">Không có đơn hàng nào vào ngày ${targetDateStr}.</td></tr>`;
@@ -1642,7 +1649,7 @@
       const now = new Date();
       const currentMonth = now.getMonth() + 1;
       const currentYear = now.getFullYear();
-      const activePayments = (role === 'plan') ? planPaymentOptions : paymentOptions;
+      const activePayments = payListFor(role);
 
       let monthTrips = personalTrips.filter(t => {
         if (!t.dateStr) return false;
@@ -1756,7 +1763,7 @@
         });
       }
 
-      const activePayments = (role === 'plan') ? planPaymentOptions : paymentOptions;
+      const activePayments = payListFor(role);
       
       let methodSums = {};
       activePayments.forEach(opt => methodSums[opt] = 0);
@@ -1858,7 +1865,7 @@
       }
 
       sortTripsByDateAndTime(filteredTrips);
-      const activePayments = (role === 'plan') ? planPaymentOptions : paymentOptions;
+      const activePayments = payListFor(role);
 
       tb.innerHTML = filteredTrips.map(t => {
         const isDeletable = canDeleteTrip(t.timestamp);
@@ -1906,7 +1913,7 @@
 
       let parts = normalizeDateInput(trip.dateStr).split('/');
       let dateInputVal = parts.length === 3 ? `${parts[2]}-${parts[1]}-${parts[0]}` : '';
-      const activePayments = (role === 'plan') ? planPaymentOptions : paymentOptions;
+      const activePayments = payListFor(role);
 
       const modalHtml = `
         <div id="edit-trip-modal" class="fixed inset-0 bg-slate-900/80 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
@@ -2335,7 +2342,7 @@
     }
 
     // Team Kế hoạch: biển số KHÔNG bắt buộc (10/11). Các phân vùng khác vẫn bắt buộc.
-    function plateOptional(role) { return role === 'plan'; }
+    function plateOptional(role) { return isPlanRole(role); }
     async function submitBatch(role) {
       if (!loggedInUser) return;
       const plateOpt = plateOptional(loggedInUser.role);
@@ -2611,6 +2618,22 @@
             <div class="flex flex-wrap gap-2 pt-2" id="planpayment-tag-list"></div>
           </div>
 
+          <!-- MỤC 4.2: QUẢN LÝ HÌNH THỨC THANH TOÁN TEAM KẾ HOẠCH 2 -->
+          <div class="bg-white rounded-3xl shadow-md border border-slate-200 p-4 sm:p-5 space-y-3">
+            <h4 class="text-xs font-extrabold text-pink-900 uppercase">📋 QUẢN LÝ HÌNH THỨC THANH TOÁN Team kế hoạch 2</h4>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+              <div class="space-y-2">
+                <input type="text" id="new-plan2payment-name" autocomplete="off" placeholder="Thêm 1 hình thức cho Team Kế Hoạch 2..." class="w-full p-2.5 bg-slate-50 border rounded-xl font-bold">
+                <button onclick="addNewPlanPayment('plan2')" class="w-full py-2 bg-pink-600 hover:bg-pink-700 text-white rounded-xl font-bold">+ Thêm Một Hình Thức</button>
+              </div>
+              <div class="space-y-2">
+                <textarea id="bulk-plan2payment-text" placeholder="Dán danh sách dạng cột vào đây..." class="w-full p-2 bg-slate-50 border rounded-xl font-bold h-16 text-xs"></textarea>
+                <button onclick="addBulkPlanPayment('plan2')" class="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold">📥 Thêm Hàng Loạt Từ Cột</button>
+              </div>
+            </div>
+            <div class="flex flex-wrap gap-2 pt-2" id="plan2payment-tag-list"></div>
+          </div>
+
           <!-- MỤC 5: QUẢN LÝ TÀI KHOẢN (Firebase Authentication) -->
           <div class="bg-white rounded-3xl shadow-md border border-slate-200 p-4 sm:p-5 space-y-3">
             <h4 class="text-xs font-extrabold text-blue-900 uppercase">🔑 Cấp Phát Tài Khoản & Mật Khẩu (Bảo Mật Firebase)</h4>
@@ -2622,6 +2645,7 @@
                 <option value="pos">Bán Vé (Quầy)</option>
                 <option value="driver">Cổng Chủ Xe</option>
                 <option value="plan">Team Kế Hoạch</option>
+                <option value="plan2">Team Kế Hoạch 2</option>
                 <option value="manager">Quản Lý</option>
               </select>
               <button onclick="saveAccount()" class="p-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold shadow-sm" id="btn-save-acc">+ Thêm Tài Khoản</button>
@@ -2674,6 +2698,7 @@
                   <option value="pos">🚖 Chỉ Bán Vé</option>
                   <option value="driver">🚗 Chỉ Tài Xế</option>
                   <option value="plan">📋 Team Kế Hoạch</option>
+                  <option value="plan2">📋 Team Kế Hoạch 2</option>
                 </select>
 
                 <select id="audit-match-status-filter" class="px-3 py-1.5 bg-slate-50 border rounded-xl font-bold text-xs text-slate-800" onchange="updateManagerAuditTable()">
@@ -2744,47 +2769,58 @@
       renderPriceSetSwitch();
     }
 
-    function renderPlanPaymentsTable() {
-      const container = document.getElementById('planpayment-tag-list');
+    // Hình thức thanh toán Team Kế Hoạch ('plan', settings/planPayments) và Team Kế Hoạch 2 ('plan2', settings/plan2Payments)
+    function planPayCfg(role) {
+      return role === 'plan2'
+        ? { key: 'plan2Payments', get: () => plan2PaymentOptions, pre: 'plan2payment', tag: 'bg-pink-50 text-pink-900 border-pink-200' }
+        : { key: 'planPayments', get: () => planPaymentOptions, pre: 'planpayment', tag: 'bg-purple-50 text-purple-900 border-purple-200' };
+    }
+    function renderPlanPaymentsTable(role) {
+      if (role === undefined) renderPlanPaymentsTable('plan2');
+      const c = planPayCfg(role);
+      const container = document.getElementById(`${c.pre}-tag-list`);
       if (!container) return;
-      container.innerHTML = planPaymentOptions.map((pt, idx) => `
-        <span class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-purple-50 text-purple-900 rounded-xl font-bold text-xs border border-purple-200">
-          💳 ${pt}
-          <button onclick="deletePlanPayment(${idx})" class="text-rose-500 hover:text-rose-700 font-extrabold ml-1">×</button>
+      container.innerHTML = c.get().map((pt, idx) => `
+        <span class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-bold text-xs border ${c.tag}">
+          💳 ${escHtml(pt)}
+          <button onclick="deletePlanPayment(${idx}, '${role === 'plan2' ? 'plan2' : 'plan'}')" class="text-rose-500 hover:text-rose-700 font-extrabold ml-1">×</button>
         </span>
       `).join('');
     }
 
-    function addNewPlanPayment() {
-      const input = document.getElementById('new-planpayment-name');
+    function addNewPlanPayment(role) {
+      const c = planPayCfg(role), list = c.get();
+      const input = document.getElementById(`new-${c.pre}-name`);
       const val = input ? input.value.trim() : '';
       if (!val) { alert("Vui lòng nhập hình thức thanh toán!"); return; }
-      if (planPaymentOptions.includes(val)) { alert("Hình thức này đã tồn tại!"); return; }
-      planPaymentOptions.push(val);
-      dbRef('settings/planPayments').set(planPaymentOptions).then(() => { input.value = ''; renderPlanPaymentsTable(); });
+      if (list.includes(val)) { alert("Hình thức này đã tồn tại!"); return; }
+      list.push(val);
+      dbRef('settings/' + c.key).set(list).then(() => { input.value = ''; renderPlanPaymentsTable(role); });
     }
 
-    function addBulkPlanPayment() {
-      const textarea = document.getElementById('bulk-planpayment-text');
+    function addBulkPlanPayment(role) {
+      const c = planPayCfg(role), list = c.get();
+      const textarea = document.getElementById(`bulk-${c.pre}-text`);
       const raw = textarea ? textarea.value.trim() : '';
       if (!raw) { alert("Vui lòng dán danh sách vào ô!"); return; }
       const lines = raw.split('\n').map(l => l.trim()).filter(Boolean);
       let added = 0;
       lines.forEach(pt => {
-        if (!planPaymentOptions.includes(pt)) { planPaymentOptions.push(pt); added++; }
+        if (!list.includes(pt)) { list.push(pt); added++; }
       });
-      dbRef('settings/planPayments').set(planPaymentOptions).then(() => {
+      dbRef('settings/' + c.key).set(list).then(() => {
         textarea.value = '';
-        renderPlanPaymentsTable();
+        renderPlanPaymentsTable(role);
         alert(`Đã thêm thành công ${added} hình thức mới!`);
       });
     }
 
-    function deletePlanPayment(idx) {
-      if (planPaymentOptions.length <= 1) { alert("Cần giữ lại ít nhất 1 hình thức thanh toán!"); return; }
-      if (confirm(`Bạn có chắc muốn xóa hình thức "${planPaymentOptions[idx]}" không?`)) {
-        planPaymentOptions.splice(idx, 1);
-        dbRef('settings/planPayments').set(planPaymentOptions).then(() => { renderPlanPaymentsTable(); });
+    function deletePlanPayment(idx, role) {
+      const c = planPayCfg(role), list = c.get();
+      if (list.length <= 1) { alert("Cần giữ lại ít nhất 1 hình thức thanh toán!"); return; }
+      if (confirm(`Bạn có chắc muốn xóa hình thức "${list[idx]}" không?`)) {
+        list.splice(idx, 1);
+        dbRef('settings/' + c.key).set(list).then(() => { renderPlanPaymentsTable(role); });
       }
     }
 
@@ -2832,7 +2868,7 @@
         const m = t.paymentMethod || '(Chưa ghi)';
         methodSums[m] = (methodSums[m] || 0) + (Number(t.totalFare) || 0);
       });
-      const order = [...paymentOptions, ...planPaymentOptions.filter(p => !paymentOptions.includes(p))];
+      const order = [...paymentOptions, ...[...planPaymentOptions, ...plan2PaymentOptions].filter((p, i, a) => !paymentOptions.includes(p) && a.indexOf(p) === i)];
       const methods = [...order.filter(m => methodSums[m] !== undefined || paymentOptions.includes(m)), ...Object.keys(methodSums).filter(m => !order.includes(m))];
 
       let cardsHtml = `
@@ -3178,7 +3214,7 @@
     // Thông tin chi tiết: bên nào còn thiếu, đã quá hạn chưa
     function auditDetail(trips, status, dateKey) {
       if (status !== 'unmatched') return { missing: null, overdue: false };
-      const hasPos = trips.some(t => t.role === 'pos' || t.role === 'plan');
+      const hasPos = trips.some(t => isSellRole(t.role));
       const missing = hasPos ? 'driver' : 'pos';
       const dl = reportDeadline(dateKey);
       return { missing, overdue: !!(dl && Date.now() >= dl.getTime()) };
@@ -3198,7 +3234,7 @@
     //  FREE = Free nội bộ (khớp với mọi hình thức), NVQ = Nhân viên quầy thu, THE = Thẻ, TXT = Tài xế thu, KH = Kế hoạch / Công nợ / đối tác.
     //  Đơn của Team Kế Hoạch luôn là KH. Đơn cũ không ghi thanh toán -> lấy theo nguồn đơn (đối tác = KH), nếu không thì là "chưa ghi".
     function paymentCategory(t) {
-      if (t.role === 'plan') return 'KH';
+      if (isPlanRole(t.role)) return 'KH';
       const raw = String(t.paymentMethod || '').trim().toLowerCase();
       if (!raw) {
         const src = String(t.source || '').toLowerCase();
@@ -3215,7 +3251,7 @@
 
     // Trả về '' nếu khớp, ngược lại là lý do lệch (để hiện cho người xem)
     function getMismatchReason(group) {
-      const posTrips = group.filter(x => x.role === 'pos' || x.role === 'plan');
+      const posTrips = group.filter(x => isSellRole(x.role));
       const driverTrips = group.filter(x => x.role === 'driver');
       const sumPos = posTrips.reduce((acc, x) => acc + Number(x.totalFare || 0), 0);
       const sumDriver = driverTrips.reduce((acc, x) => acc + Number(x.totalFare || 0), 0);
@@ -3228,18 +3264,18 @@
       // Nhưng đã chọn Free thì tiền phải là 0đ
       const freeWithMoney = group.filter(t => paymentCategory(t) === 'FREE' && Number(t.totalFare || 0) > 0);
       if (freeWithMoney.length) {
-        const who = [...new Set(freeWithMoney.map(t => t.role === 'driver' ? 'Tài xế' : (t.role === 'plan' ? 'Kế hoạch' : 'Bán vé')))].join(', ');
+        const who = [...new Set(freeWithMoney.map(t => t.role === 'driver' ? 'Tài xế' : (t.role === 'plan2' ? 'Kế hoạch 2' : (t.role === 'plan' ? 'Kế hoạch' : 'Bán vé'))))].join(', ');
         reasons.push(`${who} chọn Free nhưng có nhập tiền`);
       }
       if (!hasFree && !(catsPos.length === 1 && catsDrv.length === 1 && catsPos[0] === catsDrv[0])) {
-        const lb = trips => [...new Set(trips.map(t => t.role === 'plan' && !t.paymentMethod ? 'Kế Hoạch' : (t.paymentMethod || '(chưa ghi)')))].join('/');
+        const lb = trips => [...new Set(trips.map(t => isPlanRole(t.role) && !t.paymentMethod ? 'Kế Hoạch' : (t.paymentMethod || '(chưa ghi)')))].join('/');
         reasons.push(`Khác thanh toán: ${lb(posTrips)} ≠ ${lb(driverTrips)}`);
       }
       return reasons.join('; ');
     }
 
     function getAuditStatus(group) {
-      const hasPos = group.some(x => x.role === 'pos' || x.role === 'plan');
+      const hasPos = group.some(x => isSellRole(x.role));
       const hasDrv = group.some(x => x.role === 'driver');
       if (!hasPos || !hasDrv) return 'unmatched';
       return getMismatchReason(group) ? 'mismatch' : 'match';
@@ -3301,7 +3337,7 @@
       // GHÉP LỆCH NGÀY (11/11): số phiếu không bao giờ trùng -> nhóm chỉ có bên Bán vé/KH và nhóm chỉ có bên Tài xế,
       // cùng số phiếu + biển số (hoặc bên bán không ghi biển số), ngày cách nhau đúng 1 ngày, và chỉ có đúng 1 cặp như vậy -> ghép lại.
       // KHÔNG sửa dữ liệu; quản lý bấm nút "Sửa ngày theo bên bán" nếu muốn sửa.
-      const isSell = t => t.role === 'pos' || t.role === 'plan';
+      const isSell = t => isSellRole(t.role);
       const entries = Object.entries(pairMap).filter(([k]) => !k.startsWith('single_')).map(([k, trips]) => {
         const sides = new Set(trips.map(t => isSell(t) ? 'S' : 'D'));
         const dk = tripDateKey(trips[0]);
@@ -3327,7 +3363,7 @@
         const sellTrips = pairMap[sk];
         pairMap[sk] = sellTrips.concat(pairMap[dg.k]);
         delete pairMap[dg.k];
-        dateOffOf[sk] = { sell: sg.dk, drv: dg.dk, sellLabel: sellTrips.some(t => t.role === 'pos') ? 'Bán vé' : 'Kế hoạch' };
+        dateOffOf[sk] = { sell: sg.dk, drv: dg.dk, sellLabel: sellTrips.some(t => t.role === 'pos') ? 'Bán vé' : (sellTrips.some(t => t.role === 'plan2') ? 'Kế hoạch 2' : 'Kế hoạch') };
       });
 
       const defaultPay = paymentOptions[0] || 'Nhân Viên Quầy Thu';
@@ -3335,7 +3371,7 @@
       Object.entries(pairMap).forEach(([gKey, trips]) => {
         // Nhóm chỉ thuộc ngày lấy thêm -> bỏ. Nhóm lệch ngày tính theo NGÀY BÊN BÁN (để xuất Excel/MISA từng ngày không bị trùng doanh thu)
         if ((f.startDateVal || f.endDateVal) && (dateOffOf[gKey] ? !inRange(trips.find(isSell)) : !trips.some(inRange))) return;
-        trips.sort((a, b) => ((a.role === 'pos' || a.role === 'plan') ? 0 : 1) - ((b.role === 'pos' || b.role === 'plan') ? 0 : 1) || (a.timestamp || 0) - (b.timestamp || 0));
+        trips.sort((a, b) => (isSellRole(a.role) ? 0 : 1) - (isSellRole(b.role) ? 0 : 1) || (a.timestamp || 0) - (b.timestamp || 0));
         const dateOff = dateOffOf[gKey] || null;
         let status = getAuditStatus(trips);
         if (dateOff && status === 'match') status = 'dateoff';
@@ -3418,21 +3454,23 @@
         }
         group.forEach((t, idx) => {
           const isPos = t.role === 'pos';
-          const isPlan = t.role === 'plan';
-          const roleBadge = isPlan 
+          const isPlan = isPlanRole(t.role);
+          const roleBadge = t.role === 'plan2'
+            ? `<span class="px-2 py-0.5 bg-pink-100 text-pink-800 rounded-md font-extrabold text-[10px]">📋 Kế Hoạch 2</span>`
+            : isPlan
             ? `<span class="px-2 py-0.5 bg-purple-100 text-purple-800 rounded-md font-extrabold text-[10px]">📋 Kế Hoạch</span>`
             : (isPos 
               ? `<span class="px-2 py-0.5 bg-blue-100 text-blue-800 rounded-md font-extrabold text-[10px]">🚖 Bán Vé</span>` 
               : `<span class="px-2 py-0.5 bg-amber-100 text-amber-800 rounded-md font-extrabold text-[10px]">🚗 Tài Xế</span>`);
           
-          const rowBg = isPlan ? 'bg-purple-50/30' : (isPos ? 'bg-blue-50/30' : 'bg-amber-50/30');
+          const rowBg = t.role === 'plan2' ? 'bg-pink-50/30' : isPlan ? 'bg-purple-50/30' : (isPos ? 'bg-blue-50/30' : 'bg-amber-50/30');
 
           const checkboxHtml = `<input type="checkbox" class="manager-trip-checkbox" value="${t.id}">`;
           const deleteBtn = `<button onclick="adminDeleteTrip('${t.id}', '${escHtml(t.createdBy)}')" class="px-2 py-0.5 bg-rose-50 hover:bg-rose-100 text-rose-600 font-bold rounded-md text-[10px]">🗑️ Xóa</button>`;
           const auditCell = (idx === 0) ? `<td class="p-3 text-center align-middle" rowspan="${group.length}">${statusHtml}</td>` : '';
           const borderClass = (idx === group.length - 1) ? 'border-b-2 border-slate-300' : 'border-b';
 
-          const basePayList = isPlan ? planPaymentOptions : paymentOptions;
+          const basePayList = payListFor(t.role);
           const currentPaymentsList = (t.paymentMethod && !basePayList.includes(t.paymentMethod)) ? [t.paymentMethod, ...basePayList] : basePayList;
           const payOptionsHtml = (t.paymentMethod ? '' : `<option value="" selected>⚠️ Chưa ghi</option>`) +
             currentPaymentsList.map(opt => `<option value="${escHtml(opt)}" ${escHtml(t.paymentMethod === opt ? 'selected' : '')}>${escHtml(opt)}</option>`).join('');
@@ -3518,7 +3556,7 @@
           const plate = list[0].trips[0].plateNumber || '';
           const rows = list.map(g => {
             const t = g.trips[0];
-            const who = t.role === 'plan' ? 'kế hoạch' : 'bán vé';
+            const who = t.role === 'plan2' ? 'kế hoạch 2' : (t.role === 'plan' ? 'kế hoạch' : 'bán vé');
             return `<button type="button" ${jump(g)} class="${lineCls}">🚗 <b>${plate ? 'Xe ' + escHtml(plate) : '(chưa ghi biển số)'} – Phiếu ${escHtml(tk(g))}</b>${one ? '' : ` <span class="text-slate-500">(${ddmm(g.dateKey)})</span>`}`
               + ` <span class="text-slate-600">– ${escHtml(fullStaffName(g.trips))} (${who}) đã nhập${t.destination ? ', đi ' + escHtml(t.destination) : ''}, ${fare(g)}</span></button>`;
           }).join('');
@@ -3881,6 +3919,7 @@
       role: {
         pos: { label: 'Bán Vé (Quầy)', color: 'FF1D4ED8' },
         plan: { label: 'Team Kế Hoạch', color: 'FF7E22CE' },
+        plan2: { label: 'Team Kế Hoạch 2', color: 'FFDB2777' },
         driver: { label: 'Cổng Chủ Xe', color: 'FFB45309' }
       },
       money: '#,##0'
@@ -3889,7 +3928,7 @@
     function xlFont(cell, opts) { cell.font = Object.assign({ name: XL.font, size: 10 }, opts || {}); }
 
     function filterDescription(f) {
-      const roleTxt = { all: 'Tất cả', pos: 'Bán vé', driver: 'Tài xế', plan: 'Kế hoạch' }[f.roleFilter] || f.roleFilter;
+      const roleTxt = { all: 'Tất cả', pos: 'Bán vé', driver: 'Tài xế', plan: 'Kế hoạch', plan2: 'Kế hoạch 2' }[f.roleFilter] || f.roleFilter;
       const stTxt = { all: 'Tất cả', match: 'Trùng khớp', dateoff: 'Lệch ngày', overdiscount: 'Giảm giá quá mức', mismatch: 'Đơn lệch', unmatched: 'Chưa khớp', overdue: 'Quá hạn chưa báo cáo', overdue_driver: 'Tài xế chưa báo cáo', overdue_pos: 'Bán vé/KH chưa báo cáo' }[f.matchStatusFilter] || f.matchStatusFilter;
       return `Phân vùng: ${roleTxt}  •  Trạng thái: ${stTxt}` + (f.keyword ? `  •  Từ khóa: "${f.keyword}"` : '');
     }
@@ -4389,7 +4428,7 @@
       for (const a of pending) {
         const u = String(a.user).trim().toUpperCase();
         const p = String(a.pass == null ? '' : a.pass).trim();
-        const role = ['pos', 'driver', 'plan', 'manager'].includes(a.role) ? a.role : 'pos';
+        const role = ['pos', 'driver', 'plan', 'plan2', 'manager'].includes(a.role) ? a.role : 'pos';
         try {
           if (!p) throw new Error('không có mật khẩu');
           if (accountsMap[u]) { ok.push(u); continue; }
@@ -4524,7 +4563,7 @@
         const trips = (await secDb.ref('trips').once('value')).val() || {};
         const users = new Set(Object.values(trips).map(t => t && t.createdBy).filter(Boolean));
         const updates = {};
-        for (const k of ['sources', 'staff', 'carTypes', 'payments', 'planPayments', 'lockHour']) {
+        for (const k of ['sources', 'staff', 'carTypes', 'payments', 'planPayments', 'plan2Payments', 'lockHour']) {
           const v = (await secDb.ref('settings/' + k).once('value')).val();
           if (v !== null && v !== undefined) updates['settings/' + k] = v;
         }

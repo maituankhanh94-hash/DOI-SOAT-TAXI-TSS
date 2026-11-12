@@ -12,6 +12,13 @@
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap');
     body { font-family: 'Plus Jakarta Sans', sans-serif; touch-action: pan-x pan-y; }
+    /* (13/11) Bảng nhập hàng loạt trên điện thoại: chỉ cuộn NGANG (lên xuống theo cả trang) để iPhone không giật khi bàn phím mở */
+    #batch-table td.bstt { position: sticky; left: 0; z-index: 5; background: #fff; box-shadow: 2px 0 4px -2px rgba(15,23,42,.25); }
+    #batch-table th.bstt { position: sticky; left: 0; z-index: 25; }
+    @media (max-width: 767px) {
+      #batch-wrap { max-height: none !important; overflow-y: hidden !important; }
+      #batch-table thead { position: static !important; }
+    }
     .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
     .custom-scrollbar::-webkit-scrollbar-track { background: #f1f5f9; }
     .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
@@ -581,6 +588,7 @@
       staffRef = q;
       staffCb = s => {
         personalTrips = s.val() ? Object.values(s.val()) : [];
+        applyHabitsToBatch();
         updatePersonalSummary(staffRole);
         renderActiveWorksheetTrips(staffRole);
         const snapModal = document.getElementById('snapshot-report-modal');
@@ -1412,11 +1420,11 @@
               <button onclick="submitBatch('${role}')" class="px-5 py-2.5 ${btnThemeClass} text-white font-extrabold text-xs rounded-xl shadow-lg transition-all">🚀 Lưu Đơn Lên Cloud</button>
             </div>
             ${PRICE_ROLES.includes(role) ? `<div class="text-[11px] sm:text-xs bg-amber-50 border border-amber-300 text-amber-900 rounded-xl p-2.5 font-semibold">📌 <b>QUY ƯỚC Ô ĐIỂM ĐẾN:</b> ${escHtml(DEST_RULE_TEXT)}</div>` : ''}
-            <div class="overflow-x-auto custom-scrollbar max-h-[450px]">
-              <table class="w-full text-left border-collapse min-w-[1700px]">
+            <div id="batch-wrap" class="overflow-x-auto custom-scrollbar max-h-[450px]">
+              <table id="batch-table" class="w-full text-left border-collapse min-w-[1700px]">
                 <thead class="sticky top-0 z-20 shadow-md">
                   <tr class="bg-slate-900 text-white text-[11px] font-bold">
-                    <th class="p-3 text-center w-10 bg-slate-900">STT</th>
+                    <th class="p-3 text-center w-14 bg-slate-900 bstt">STT</th>
                     <th class="p-3 w-32 bg-slate-900">Ngày Tháng</th>
                     <th class="p-3 w-40 bg-slate-900 relative">Tên Nhân Sự (Gõ mới đề xuất)</th>
                     <th class="p-3 w-28 bg-slate-900">Số Phiếu (Tự nhảy)</th>
@@ -1431,7 +1439,7 @@
                     <th class="p-3 min-w-[180px] bg-slate-900">Ghi Chú</th>
                   </tr>
                 </thead>
-                <tbody id="tbody-batch" class="divide-y divide-slate-200 text-xs"></tbody>
+                <tbody id="tbody-batch" class="divide-y divide-slate-200 text-xs" oninput="onBatchRowInput(event)" onchange="onBatchRowInput(event)" onkeydown="onBatchKeydown(event)"></tbody>
               </table>
             </div>
           </div>
@@ -1472,8 +1480,8 @@
         const dateInputHandler = (i === 0) ? `oninput="syncBatchDates(this.value)"` : ``;
         html += `
           <tr>
-            <td class="p-2.5 text-center font-bold">${i+1}</td>
-            <td class="p-2.5"><input type="text" id="date-${i}" autocomplete="off" value="${defaultDate}" ${dateInputHandler} class="w-full p-2 bg-slate-50 border rounded-xl font-mono text-xs"></td>
+            <td class="p-2 text-center font-bold bstt"><div>${i+1}</div><div id="stt-t-${i}" class="text-[9px] font-mono font-bold text-blue-700 leading-tight break-all"></div></td>
+            <td class="p-2.5"><input type="date" id="date-${i}" value="${localDateKey(now)}" ${dateInputHandler} class="w-full p-2 bg-slate-50 border rounded-xl font-mono text-xs cursor-pointer" onclick="try{this.showPicker()}catch(e){}"></td>
             <td class="p-2.5 relative">
               <input type="text" id="staff-${i}" autocomplete="off" value="" placeholder="Gõ tên để đề xuất..." class="w-full p-2 bg-slate-50 border rounded-xl font-bold text-xs" oninput="showStaffSuggestions(this, 'staff-drop-${i}')" onfocus="showStaffSuggestions(this, 'staff-drop-${i}')" onkeydown="suggestKeydown(event, 'staff-drop-${i}')" onblur="hideSuggestLater('staff-drop-${i}')">
               <div id="staff-drop-${i}"></div>
@@ -1513,8 +1521,81 @@
         `;
       }
       tb.innerHTML = html;
+      tb.querySelectorAll('input').forEach(e => e.setAttribute('enterkeyhint', 'next'));
+      applyHabitsToBatch();
     }
 
+    // ===== HỌC THÓI QUEN NHẬP (13/11) =====
+    // Từ các đơn GẦN NHẤT của chính tài khoản này (personalTrips, đã tải sẵn): giá trị nào dùng nhiều nhất (từ 2 lần trở lên)
+    // thì điền sẵn: Tên nhân sự, Loại xe, Nguồn đơn, Điểm đón, Thanh toán; riêng TÀI XẾ điền sẵn cả Biển số (xe cố định).
+    // Bán vé / Kế hoạch: biển số + số phiếu đổi theo từng đơn nên KHÔNG điền sẵn. Vẫn sửa tay thoải mái; ô đã sửa thì không bị ghi đè.
+    function learnHabits(role) {
+      const recent = [...personalTrips].sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0)).slice(0, 40);
+      const pick = (getter, allowed) => {
+        const cnt = new Map();
+        recent.forEach((t, idx) => {
+          const v = String(getter(t) == null ? '' : getter(t)).trim();
+          if (!v || (allowed && !allowed.includes(v))) return;
+          const c = cnt.get(v) || { n: 0, last: idx };
+          c.n++; cnt.set(v, c);
+        });
+        let best = '', bn = 0, bl = 1e9;
+        cnt.forEach((c, v) => { if (c.n > bn || (c.n === bn && c.last < bl)) { best = v; bn = c.n; bl = c.last; } });
+        return bn >= 2 ? best : '';
+      };
+      return {
+        staff: pick(t => t.staff),
+        c: pick(t => t.carType, carTypeOptions),
+        src: pick(t => t.source, sourceOptions),
+        pick: pick(t => t.pickup, TERMINAL_OPTIONS),
+        m: pick(t => t.paymentMethod, payListFor(role)),
+        p: role === 'driver' ? pick(t => String(t.plateNumber || '').toUpperCase()) : ''
+      };
+    }
+    function applyHabitsToBatch() {
+      const tb = document.getElementById('tbody-batch');
+      if (!tb || !loggedInUser || !personalTrips.length) return;
+      const h = learnHabits(loggedInUser.role);
+      for (let i = 0; i < 20; i++) {
+        const t = document.getElementById(`t-${i}`), d = document.getElementById(`d-${i}`);
+        if (!t || t.value.trim() || (d && d.value.trim())) continue;   // dòng đang nhập dở -> không đụng
+        ['c', 'src', 'pick', 'm'].forEach(k => {
+          const el = document.getElementById(`${k}-${i}`);
+          if (el && h[k] && el.dataset.touched !== '1' && [...el.options].some(o => o.value === h[k])) el.value = h[k];
+        });
+        ['staff', 'p'].forEach(k => {
+          const el = document.getElementById(`${k}-${i}`);
+          if (el && h[k] && el.dataset.touched !== '1' && !el.value.trim()) { el.value = h[k]; el.dataset.habit = '1'; }
+        });
+      }
+    }
+
+    // (13/11) Nhập trên điện thoại cho mượt:
+    //  - gõ vào 1 dòng mới mà ô Tên nhân sự còn trống -> tự điền tên theo dòng trên
+    //  - cột STT đứng yên bên trái và hiện số phiếu của dòng để biết đang nhập dòng nào
+    //  - phím Enter / "Tiếp" trên bàn phím -> sang ô kế tiếp theo đúng thứ tự (hết dòng thì sang dòng sau)
+    function onBatchRowInput(ev) {
+      const el = ev && ev.target; if (!el || !el.id) return;
+      const m = /^([a-z]+)-(\d+)$/.exec(el.id); if (!m) return;
+      const k = m[1], i = Number(m[2]);
+      el.dataset.touched = '1';
+      if (k === 't') { const s = document.getElementById(`stt-t-${i}`); if (s) s.textContent = el.value.trim(); }
+      if (['t', 'p', 'd', 'f', 'sf', 'note'].includes(k) && el.value.trim() && i > 0) {
+        const st = document.getElementById(`staff-${i}`);
+        if (st && !st.value.trim()) {
+          for (let j = i - 1; j >= 0; j--) { const v = (document.getElementById(`staff-${j}`) || {}).value; if (v && v.trim()) { st.value = v.trim(); break; } }
+        }
+      }
+    }
+    function batchFields() { return [...document.querySelectorAll('#tbody-batch input, #tbody-batch select')].filter(e => !e.disabled && e.type !== 'hidden'); }
+    function onBatchKeydown(ev) {
+      if (ev.key !== 'Enter' || ev.defaultPrevented || ev.isComposing) return;
+      const list = batchFields(), idx = list.indexOf(ev.target);
+      if (idx < 0) return;
+      ev.preventDefault();
+      const next = list[idx + 1];
+      if (next) { next.focus(); try { next.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } catch (e) {} }
+    }
     function syncBatchDates(val) {
       for (let i = 1; i < 20; i++) {
         const inp = document.getElementById(`date-${i}`);

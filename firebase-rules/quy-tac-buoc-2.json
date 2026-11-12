@@ -39,6 +39,9 @@
       "planPayments": {
         ".read": "(auth != null && root.child('roles/'+auth.uid+'/active').val() === true)"
       },
+      "plan2Payments": {
+        ".read": "(auth != null && root.child('roles/'+auth.uid+'/active').val() === true)"
+      },
       "lockHour": {
         ".read": "(auth != null && root.child('roles/'+auth.uid+'/active').val() === true)"
       }
@@ -137,6 +140,9 @@
           ".read": "(auth != null && root.child('test_env/roles/'+auth.uid+'/active').val() === true)"
         },
         "planPayments": {
+          ".read": "(auth != null && root.child('test_env/roles/'+auth.uid+'/active').val() === true)"
+        },
+        "plan2Payments": {
           ".read": "(auth != null && root.child('test_env/roles/'+auth.uid+'/active').val() === true)"
         },
         "lockHour": {

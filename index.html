@@ -4143,7 +4143,7 @@
       return d ? Number(d.slice(-3)) : '';
     }
     // Trang "Dữ Liệu MISA" (10/11): cột A→R ĐÚNG THỨ TỰ mẫu nạp MISA của kế toán (file đẩy, trang MISA) -> copy dán thẳng.
-    // Cột không có dữ liệu trong app thì để trống (Mã khách hàng). Sau 1 cột trống là các cột tham khảo thêm.
+    // Cột F Mã khách hàng = 3 số cuối biển số xe (13/11).
     // Tiền là SỐ có phân cách hàng nghìn (#,##0), ngày là kiểu Ngày, mã TK/ĐVT là chữ.
     function buildFlatSheet(wb, groups) {
       const ws = wb.addWorksheet('Dữ Liệu MISA', { views: [{ state: 'frozen', ySplit: 1 }] });
@@ -4169,9 +4169,10 @@
       groups.forEach(g => {
         // Mỗi cuốc chỉ ghi 1 lần: có bên Bán vé/Kế hoạch thì lấy bên đó; chỉ có bên Chủ xe thì mới lấy bên Chủ xe (tránh trùng doanh thu)
         const sale = g.trips.filter(t => t.role !== 'driver');
-        // (13/11) Cột F "Mã khách hàng" = tên TÀI XẾ của đúng cuốc này (bên chủ xe trong cùng nhóm đối soát);
-        //         cột O "Mã nhân viên bán hàng" = tên nhân viên BÁN VÉ / KẾ HOẠCH (đơn chỉ có bên tài xế thì để trống)
-        const driverName = [...new Set(g.trips.filter(t => t.role === 'driver').map(t => clean(t.staff) || clean(t.createdBy)).filter(Boolean))].join(' + ');
+        // (13/11) Cột F "Mã khách hàng" = 3 SỐ CUỐI BIỂN SỐ xe của đúng cuốc này (lấy theo bên tài xế trong cùng nhóm đối soát;
+        //         tài xế chưa báo thì lấy biển số bên bán), ghi kiểu SỐ như công thức file đẩy MISA.
+        //         Cột O "Mã nhân viên bán hàng" = tên nhân viên BÁN VÉ / KẾ HOẠCH (đơn chỉ có bên tài xế thì để trống)
+        const drvPlate = (g.trips.find(t => t.role === 'driver' && plate3Num(t.plateNumber) !== '') || {}).plateNumber;
         (sale.length ? sale : g.trips).forEach(t => {
           const dk = tripDateKey(t);
           const p = dk ? dk.split('-').map(Number) : null;
@@ -4179,14 +4180,16 @@
           const dateVal = p ? new Date(Date.UTC(p[0], p[1] - 1, p[2])) : clean(t.dateStr);
           const ticket = formatDisplayTicket(clean(t.ticketNumber));
           const fare = Number(t.totalFare || 0);
+          const custCode = plate3Num(drvPlate != null ? drvPlate : t.plateNumber);
           const row = ws.addRow([
             'Chưa thu tiền', dateVal, dateVal, ticket, ticket,
-            driverName, 'VC', '131', '5113', 'Chuyến', 1,
+            custCode, 'VC', '131', '5113', 'Chuyến', 1,
             fare, fare, clean(t.source), t.role === 'driver' ? '' : clean(t.staff),
             clean(t.paymentMethod), t.pickup ? 'Ga ' + clean(t.pickup) : '', clean(t.destination)
           ]);
           if (p) { row.getCell(2).numFmt = 'dd/mm/yyyy'; row.getCell(3).numFmt = 'dd/mm/yyyy'; }
-          [4, 5, 6, 8, 9, 10, 14, 15, 16, 17, 18].forEach(i => { row.getCell(i).numFmt = '@'; });
+          [4, 5, 8, 9, 10, 14, 15, 16, 17, 18].forEach(i => { row.getCell(i).numFmt = '@'; });
+          row.getCell(6).numFmt = '0';
           row.getCell(11).numFmt = '0';
           row.getCell(12).numFmt = MONEY; row.getCell(13).numFmt = MONEY;
         });

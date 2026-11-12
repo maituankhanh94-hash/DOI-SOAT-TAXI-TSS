@@ -2402,7 +2402,7 @@
       ['t', /\b(so phieu|phieu|sp)\s*[:.]?/], ['p', /\b(bien so|bs|xe)\s*[:.]/], ['d', /\b(diem den|den|dd)\s*[:.]/],
       ['f', /\b(tien|so tien|gia)\s*[:.]/], ['m', /\b(thanh toan|tt|httt)\s*[:.]/], ['pick', /\b(ga|don)\s*[:.]/], ['c', /\b(loai xe|loai)\s*[:.]/], ['note', /\b(ghi chu|gc)\s*[:.]/]
     ];
-    const SCAN_SKIP = /^(tong|tdt|tong cong|cong|tong tien|ky ten|xac nhan|stt|so phieu\s+bien so)/;
+    const SCAN_SKIP = /^(tong|tdt|tong cong|cong|tong tien|ky ten|xac nhan|stt|so hd|so phieu\s+bien so)/;
     function parseScanText(text, role, lists) {
       lists = lists || {};
       const isDriver = role === 'driver';
@@ -2412,7 +2412,10 @@
       // Dòng đầu trang có nhiều nhãn ("TÊN: An   NGÀY: 12/11") -> tách thành nhiều dòng
       const HL = /\b(ten|ho ten|nhan vien|ngay|nguon|loai xe|diem don|bien so|bsx)\s*:/g;
       const lines = [];
-      lines0.forEach(l => {
+      lines0.forEach(l0 => {
+        // Số phiếu viết tách "113 944" -> "113944"; số thứ tự không dấu "1 113944" -> bỏ
+        const l = l0.replace(/^(\s*\d{1,2}\s*[.,)\-:]?\s+)?(\d{2,3})\s+(\d{3})(?=\s|$)/, (m, a, x, y) => (a || '') + x + y)
+          .replace(/^\s*\d{1,2}\s+(?=[A-Za-z]{0,3}\d{5,}\b)/, '');
         const n = scanNorm(l).toLowerCase();
         if (/\d{5,}/.test(n)) { lines.push(l); return; }
         const pos = []; let x; while ((x = HL.exec(n))) pos.push(x.index);
@@ -2552,11 +2555,24 @@
               <div>Rồi giữ tay vào ô dưới → <b>Dán</b> → bấm <b>Đọc & điền vào bảng</b>. Kiểm tra lại các ô <span class="px-1 bg-amber-200 rounded font-bold">tô vàng</span> rồi bấm Lưu như thường.</div>
             </div>
             <textarea id="scan-text" rows="8" placeholder="Dán chữ đã chép từ ảnh vào đây..." class="w-full p-3 border-2 border-slate-300 rounded-xl text-sm font-mono min-h-[160px]"></textarea>
+            <button type="button" onclick="pasteScanText()" class="w-full py-2.5 bg-white border-2 border-blue-400 text-blue-700 font-extrabold text-sm rounded-xl">📋 Dán chữ đã chép</button>
             <div id="scan-result" class="text-xs"></div>
             </div>
             <button onclick="runScanFill('${role}')" class="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-black text-base rounded-xl shadow-lg">🔎 Đọc & điền vào bảng</button>
           </div>
         </div>`);
+    }
+    async function pasteScanText() {
+      const ta = document.getElementById('scan-text'), res = document.getElementById('scan-result');
+      try {
+        const t = await navigator.clipboard.readText();
+        if (!t || !t.trim()) throw new Error('trống');
+        ta.value = (ta.value.trim() ? ta.value.trim() + '\n' : '') + t;
+        if (res) res.innerHTML = `<div class="p-2 bg-emerald-50 border border-emerald-300 text-emerald-800 rounded-xl font-bold">Đã dán ${t.split(/\n/).filter(x => x.trim()).length} dòng chữ. Bấm "Đọc & điền vào bảng".</div>`;
+      } catch (e) {
+        ta.focus();
+        if (res) res.innerHTML = `<div class="p-2 bg-amber-50 border border-amber-300 text-amber-900 rounded-xl font-bold">Chưa lấy được chữ đã chép. Giữ tay vào ô chữ ở trên → chọn <b>Dán</b>.</div>`;
+      }
     }
     // Hiện ảnh đã chọn ngay trong app (ảnh ở lại trên máy, KHÔNG gửi đi đâu) để dùng Live Text / Google Lens trên ảnh
     function showScanImages(files, append) {
@@ -2575,6 +2591,10 @@
     function runScanFill(role) {
       const text = (document.getElementById('scan-text') || {}).value || '';
       const res = document.getElementById('scan-result');
+      if (!text.trim()) {
+        if (res) res.innerHTML = `<div class="p-3 bg-amber-50 border border-amber-300 text-amber-900 rounded-xl font-bold">Ô chữ đang TRỐNG — chưa có chữ nào được dán. Hãy chép chữ từ ảnh trước (giữ tay lên chữ trong ảnh → Chọn tất cả → Sao chép), rồi bấm nút 📋 Dán bên dưới.</div>`;
+        return;
+      }
       const parsed = parseScanText(text, role, { staff: staffOptions, sources: sourceOptions });
       if (!parsed.rows.length) {
         if (res) res.innerHTML = `<div class="p-3 bg-rose-50 border border-rose-300 text-rose-800 rounded-xl font-bold">Không tìm thấy đơn nào (mỗi đơn cần có SỐ PHIẾU từ 5 chữ số). Kiểm tra lại chữ đã dán.</div>`;

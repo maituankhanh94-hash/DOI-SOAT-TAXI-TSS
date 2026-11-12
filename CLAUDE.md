@@ -56,14 +56,14 @@
 - Hiện: lịch sử nhân viên (dưới tiền), thẻ "Bảng Đón (công nợ đối tác)" ở tổng ngày nhân viên KH2 và doanh thu ngày Quản lý (ghi rõ không cộng vào doanh thu cuốc), Excel Đối Soát ghi "Bảng đón: X" ở cột Ghi chú, nhật ký sửa có "Bảng đón".
 - CHƯA đưa vào trang Dữ Liệu MISA — chờ người dùng/kế toán chọn cách ghi (dòng riêng hay cột riêng, mã dịch vụ).
 
-## Nhập hàng loạt mượt trên điện thoại (13/11, nhánh `nhap-muot`, BẢN THỬ)
+## Nhập hàng loạt mượt trên điện thoại (13/11, ĐÃ LÊN MAIN; nhánh `nhap-muot`)
 - Video người dùng: iPhone kéo ngang bảng nhập khi bàn phím mở → bảng giật (khung cuộn lồng max-h 450px cuộn 2 chiều + iOS tự kéo về ô đang gõ). Vẫn GIỮ bảng (người dùng không muốn kiểu thẻ).
 - `#batch-wrap`/`#batch-table`: điện thoại (<768px) bỏ max-height, overflow-y hidden → chỉ cuộn ngang, lên xuống theo trang; thead không sticky trên điện thoại.
 - Cột STT (`.bstt`) sticky trái + hiện số phiếu của dòng (`stt-t-i`).
 - `onBatchKeydown`: Enter / "Tiếp" → ô kế tiếp theo thứ tự DOM trong tbody (bỏ qua nếu ô gợi ý đã xử lý Enter: `defaultPrevented`); inputs có `enterkeyhint="next"`.
 - `onBatchRowInput`: gõ vào phiếu/biển số/điểm đến/tiền/bảng đón/ghi chú của dòng mới mà Tên trống → chép tên từ dòng trên gần nhất.
 
-## Lịch chọn ngày + học thói quen nhập (13/11, nhánh `lich-va-thoi-quen`, tách từ `nhap-muot`, BẢN THỬ)
+## Lịch chọn ngày + học thói quen nhập (13/11, ĐÃ LÊN MAIN; nhánh `lich-va-thoi-quen`)
 - Ô Ngày bảng nhập hàng loạt = `<input type="date">` (giá trị yyyy-mm-dd, mặc định `localDateKey(now)`, bấm mở lịch `showPicker`). submitBatch dùng `normalizeDateInput` → dd/mm/yyyy như cũ. (Nhánh `quet-giay`: `applyScanToBatch` đang set ngày dd/mm/yyyy → khi gộp phải đổi sang yyyy-mm-dd.)
 - `learnHabits(role)`: 40 đơn gần nhất của chính tài khoản (personalTrips) → giá trị dùng nhiều nhất (≥2 lần, hòa thì lấy gần nhất): Tên, Loại xe, Nguồn, Điểm đón, Thanh toán; TÀI XẾ thêm Biển số. Bán vé/KH không điền sẵn biển số/phiếu. `applyHabitsToBatch` chạy sau `renderBatchRows` và mỗi lần personalTrips tải xong; bỏ qua dòng đang nhập dở và ô người dùng đã sửa (`dataset.touched`, đặt trong `onBatchRowInput`, tbody nghe cả input + change). Không lưu gì thêm (tính từ lịch sử đơn).
 

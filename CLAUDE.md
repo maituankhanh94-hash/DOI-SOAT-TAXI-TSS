@@ -83,7 +83,7 @@
 
 - (11/11, LÊN MAIN) File Excel KHÔNG còn icon: `xlStripIcons(wb)` chạy ngay trước `writeBuffer` ở cả 2 nơi xuất (Báo cáo đối soát + Nhắc báo cáo), xóa emoji/ký hiệu (`XL_ICON_RE`, gồm cả dấu × dính vào tên nguồn do copy từ thẻ danh mục) trong mọi ô chữ. Giữ mũi tên → (vd "T2→T1"). Trên màn hình app vẫn giữ icon.
 
-- (13/11, LÊN MAIN) Trang Dữ Liệu MISA: cột F "Mã khách hàng" = TÊN TÀI XẾ của đúng cuốc (staff bên chủ xe trong cùng nhóm đối soát, thiếu tên thì lấy tài khoản; nhiều thì nối " + "; chưa có bên tài xế thì trống). Cột O "Mã nhân viên bán hàng" = chỉ tên nhân viên Bán vé/Kế hoạch (dòng chỉ có bên tài xế → trống). Thay cho ghi chú cũ "F để trống".
+- (13/11, LÊN MAIN, người dùng đổi ý) Trang Dữ Liệu MISA: cột F "Mã khách hàng" = 3 SỐ CUỐI BIỂN SỐ (kiểu SỐ, `plate3Num`) của đúng cuốc — lấy biển số bên tài xế trong cùng nhóm đối soát, chưa có tài xế thì lấy biển số bên bán (KH không biển số → trống). KHÔNG ghi tên tài xế. Cột O "Mã nhân viên bán hàng" = chỉ tên nhân viên Bán vé/Kế hoạch (dòng chỉ có bên tài xế → trống).
 
 ## Bảng giá công ty (nhánh `bang-gia`, 09/11 — ĐÃ LÊN MAIN 09/11 (commit 9ac73e8 + ghi chú); nhánh `sao-luu-thung-rac` vẫn CHƯA lên main)
 - Nguồn: `bang-gia/BANG_GIA_XE.xlsx` (trang "DON SB" = sân bay đi quận/phường TP.HCM, giá xe 4/7/16; trang "TOUR" = đi tỉnh, xe 7/16, 1 chiều/2 chiều; City tour 4h/8h). Chuyển sang `bang-gia.json` bằng `node bang-gia/tao-bang-gia.js bang-gia/BANG_GIA_XE.xlsx bang-gia.json` (cần exceljs). App tải file tĩnh này (`loadPriceList`), không lưu trong Firebase → đổi giá = gửi file Excel mới, chạy lại script, push.

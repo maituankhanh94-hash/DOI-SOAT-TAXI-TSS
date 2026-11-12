@@ -147,6 +147,10 @@
     // Team Kế Hoạch 2 ('plan2') chạy giống Team Kế Hoạch ('plan'): bên bán khi đối soát, biển số không bắt buộc, thanh toán nhóm KH
     function isPlanRole(r) { return r === 'plan' || r === 'plan2'; }
     function isSellRole(r) { return r === 'pos' || r === 'plan' || r === 'plan2'; }
+    // (13/11) BẢNG ĐÓN (chỉ Team Kế Hoạch 2): tiền đối tác trả cho công ty vì cầm bảng đón khách. Lưu riêng `signFee`
+    // (không cộng vào totalFare, KHÔNG đưa vào so tiền đối soát với tài xế), coi là CÔNG NỢ của đối tác.
+    function hasSignFee(role) { return role === 'plan2'; }
+    function signFeeOf(t) { return Number(t && t.signFee) || 0; }
     function payListFor(role) { return role === 'plan2' ? plan2PaymentOptions : (role === 'plan' ? planPaymentOptions : paymentOptions); }
     
     let lockHourSetting = 8; 
@@ -1422,6 +1426,7 @@
                     <th class="p-3 w-28 bg-slate-900">Điểm Đón</th>
                     <th class="p-3 min-w-[220px] bg-slate-900">Điểm Đến</th>
                     <th class="p-3 w-36 text-right bg-slate-900">Tổng Tiền</th>
+                    ${hasSignFee(role) ? '<th class="p-3 w-36 text-right bg-pink-800">🪧 Bảng Đón (công nợ ĐT)</th>' : ''}
                     <th class="p-3 w-32 bg-slate-900">Thanh Toán</th>
                     <th class="p-3 min-w-[180px] bg-slate-900">Ghi Chú</th>
                   </tr>
@@ -1495,6 +1500,7 @@
               <div id="dest-drop-${i}"></div>
             </td>
             <td class="p-2.5"><input type="text" id="f-${i}" autocomplete="off" placeholder="Số tiền..." oninput="onRowFareInput(${i})" onblur="formatCurrSmartInput(this); updateRowPriceHint(${i})" class="w-full p-2 bg-emerald-50 border border-emerald-300 rounded-xl font-extrabold text-emerald-800 text-right text-xs"><div id="fh-${i}" class="text-[10px] leading-tight mt-0.5 text-right"></div></td>
+            ${hasSignFee(role) ? `<td class="p-2.5"><input type="text" id="sf-${i}" inputmode="numeric" autocomplete="off" placeholder="Tiền bảng đón..." onblur="formatCurrSmartInput(this)" class="w-full p-2 bg-pink-50 border border-pink-300 rounded-xl font-extrabold text-pink-800 text-right text-xs"></td>` : ''}
             <td class="p-2.5">
               <select id="m-${i}" class="w-full p-2 bg-slate-50 border rounded-xl font-bold text-xs" onchange="updateRowPriceHint(${i})">
                 ${activePayments.map(opt => `<option value="${escHtml(opt)}">${escHtml(opt)}</option>`).join('')}
@@ -1788,6 +1794,15 @@
           <div id="personal-count" class="text-[11px] text-slate-500 mt-0.5">${billCountText(selectedItems)}</div>
         </div>
       `;
+      if (hasSignFee(role)) {
+        const sfSum = selectedItems.reduce((a, t) => a + signFeeOf(t), 0);
+        cardsHtml += `
+        <div class="bg-pink-50 border border-pink-200 p-3.5 rounded-2xl shadow-sm">
+          <div class="text-[10px] font-bold uppercase text-pink-700">🪧 Bảng Đón (công nợ đối tác)</div>
+          <div class="text-lg font-extrabold text-pink-800 mt-1">${sfSum.toLocaleString('vi-VN')} ₫</div>
+          <div class="text-[11px] text-slate-500 mt-0.5">${countBills(selectedItems.filter(t => signFeeOf(t)))} đơn có bảng đón</div>
+        </div>`;
+      }
 
       const colors = ['bg-blue-50 border-blue-200 text-blue-800', 'bg-indigo-50 border-indigo-200 text-indigo-800', 'bg-amber-50 border-amber-200 text-amber-800', 'bg-purple-50 border-purple-200 text-purple-800', 'bg-rose-50 border-rose-200 text-rose-800'];
       activePayments.forEach((opt, idx) => {
@@ -1892,7 +1907,7 @@
             <td class="p-2.5">${escHtml(t.destination)}</td>
             <td class="p-2.5 font-bold text-slate-700">${escHtml(t.paymentMethod || activePayments[0])}</td>
             <td class="p-2.5 text-slate-600">${escHtml(t.note || '--')}</td>
-            <td class="p-2.5 text-right font-bold text-emerald-600">${Number(t.totalFare || 0).toLocaleString('vi-VN')} ₫</td>
+            <td class="p-2.5 text-right font-bold text-emerald-600">${Number(t.totalFare || 0).toLocaleString('vi-VN')} ₫${signFeeOf(t) ? `<div class="text-[10px] font-extrabold text-pink-700 whitespace-nowrap">🪧 Bảng đón ${signFeeOf(t).toLocaleString('vi-VN')} ₫</div>` : ''}</td>
             <td class="p-2.5 text-center whitespace-nowrap">${editBtn} ${deleteBtn}</td>
           </tr>
         `;
@@ -1983,6 +1998,10 @@
                   </select>
                 </div>
               </div>
+              ${hasSignFee(role) ? `<div>
+                <label class="font-bold text-pink-700">🪧 Bảng Đón (công nợ đối tác):</label>
+                <input type="text" id="edit-modal-signfee" inputmode="numeric" value="${signFeeOf(trip) ? signFeeOf(trip).toLocaleString('vi-VN') : ''}" placeholder="Không có thì để trống" onblur="formatCurrSmartInput(this)" class="w-full mt-1 p-2.5 bg-pink-50 border border-pink-300 rounded-xl font-extrabold text-pink-800 text-right">
+              </div>` : ''}
               <div>
                 <label class="font-bold text-slate-600">Ghi Chú:</label>
                 <input type="text" id="edit-modal-note" value="${escHtml(trip.note || '')}" class="w-full mt-1 p-2.5 bg-slate-50 border rounded-xl">
@@ -2043,6 +2062,11 @@
       trip.totalFare = totalFare;
       trip.paymentMethod = paymentMethod;
       trip.note = note;
+      const sfInp = document.getElementById('edit-modal-signfee');
+      if (sfInp) {
+        const sf = parseFloat(sfInp.value.replace(/[^0-9]/g, '')) || 0;
+        if (sf > 0) trip.signFee = sf; else { delete trip.signFee; delete trip.originalSignFee; }
+      }
       // Giá bảng theo điểm đến + loại xe hiện tại (Bán vé / Kế hoạch)
       if (usesPriceList()) {
         const dEl = document.getElementById('edit-modal-dest');
@@ -2136,9 +2160,9 @@
       dbRoot().update(upd).catch(e => console.warn('trip_log', e && e.message));
     }
     // Mô tả thay đổi: "Ngày: 10/11/2026 → 11/11/2026; Tiền: 300.000 → 350.000"
-    const LOG_FIELDS = { dateStr: 'Ngày', timeStr: 'Giờ', ticketNumber: 'Số phiếu', plateNumber: 'Biển số', staff: 'Nhân sự', carType: 'Loại xe', source: 'Nguồn', pickup: 'Điểm đón', destination: 'Điểm đến', paymentMethod: 'Thanh toán', note: 'Ghi chú', totalFare: 'Tiền' };
+    const LOG_FIELDS = { dateStr: 'Ngày', timeStr: 'Giờ', ticketNumber: 'Số phiếu', plateNumber: 'Biển số', staff: 'Nhân sự', carType: 'Loại xe', source: 'Nguồn', pickup: 'Điểm đón', destination: 'Điểm đến', paymentMethod: 'Thanh toán', note: 'Ghi chú', totalFare: 'Tiền', signFee: 'Bảng đón' };
     function changeText(before, after) {
-      const fmt = (k, v) => k === 'totalFare' ? Number(v || 0).toLocaleString('vi-VN') : String(v == null || v === '' ? '(trống)' : v);
+      const fmt = (k, v) => (k === 'totalFare' || k === 'signFee') ? Number(v || 0).toLocaleString('vi-VN') : String(v == null || v === '' ? '(trống)' : v);
       return Object.keys(LOG_FIELDS).filter(k => k in after && String(before[k] == null ? '' : before[k]) !== String(after[k] == null ? '' : after[k]))
         .map(k => `${LOG_FIELDS[k]}: ${fmt(k, before[k])} → ${fmt(k, after[k])}`).join('; ');
     }
@@ -2406,6 +2430,8 @@
         const pickup = document.getElementById(`pick-${i}`).value;
         const pay = document.getElementById(`m-${i}`).value;
         const note = document.getElementById(`note-${i}`).value.trim();
+        const sfEl = document.getElementById(`sf-${i}`);
+        const signFee = sfEl ? (parseFloat(sfEl.value.replace(/[^0-9]/g, '')) || 0) : 0;
 
         if (rawStaff && ticket && (plate || plateOpt) && dest && !isValidDateStr(formattedDate)) {
           invalidDateRows.push(`Dòng ${i+1} ("${rawDate}")`);
@@ -2455,6 +2481,7 @@
           const staffNames = rawStaff.split(/[+,]+/).map(s => s.trim()).filter(Boolean);
           const splitCount = staffNames.length > 1 ? staffNames.length : 1;
           const splitFare = Math.round(totalFare / splitCount);
+          const splitSign = Math.round(signFee / splitCount);   // bảng đón chia đều như tiền cuốc
 
           staffNames.forEach((staffName, sIdx) => {
             const subId = 'X' + baseTimestamp + '_' + sIdx;
@@ -2464,6 +2491,7 @@
               id: subId, dateStr: formattedDate, timeStr, ticketNumber: subTicket, originalTicket: ticket, plateNumber: plate,
               carType, source, pickup, destination: dest, totalFare: splitFare, originalTotalFare: totalFare, paymentMethod: pay,
               note: note, staff: staffName, role: loggedInUser.role, createdBy: loggedInUser.user, timestamp: baseTimestamp + sIdx,
+              ...(signFee > 0 ? { signFee: splitSign, originalSignFee: signFee } : {}),
               dateKey: tripDateKey({ dateStr: formattedDate })
             };
             Object.assign(tripData, priceFields);
@@ -2878,6 +2906,13 @@
           <div class="text-[11px] text-slate-500 mt-0.5">${billCountText(posTrips)} bán • Chủ xe báo: ${countBills(drvTrips)} đơn / ${sum(drvTrips).toLocaleString('vi-VN')} ₫</div>
         </div>
       `;
+      const sfSum = dayTrips.reduce((a, t) => a + signFeeOf(t), 0);
+      if (sfSum > 0 || dayTrips.some(t => t.role === 'plan2')) cardsHtml += `
+        <div class="bg-pink-50 border border-pink-200 p-3.5 rounded-2xl shadow-sm">
+          <div class="text-[10px] font-bold uppercase text-pink-700">🪧 Bảng Đón (công nợ đối tác)</div>
+          <div class="text-base font-extrabold text-pink-800 mt-1">${sfSum.toLocaleString('vi-VN')} ₫</div>
+          <div class="text-[10px] text-slate-500">Không cộng vào doanh thu cuốc ở trên</div>
+        </div>`;
       const colors = ['bg-blue-50 border-blue-200 text-blue-800', 'bg-indigo-50 border-indigo-200 text-indigo-800', 'bg-amber-50 border-amber-200 text-amber-800', 'bg-purple-50 border-purple-200 text-purple-800', 'bg-rose-50 border-rose-200 text-rose-800', 'bg-teal-50 border-teal-200 text-teal-800'];
       methods.forEach((opt, idx) => {
         cardsHtml += `
@@ -2959,7 +2994,7 @@
     function updateInlineTripField(tripId, field, value) {
       const trip = allCompanyTrips.find(x => x.id === tripId);
       if (!trip) return;
-      if (field === 'totalFare') value = parseFloat(String(value).replace(/[^0-9]/g, '')) || 0;
+      if (field === 'totalFare' || field === 'signFee') value = parseFloat(String(value).replace(/[^0-9]/g, '')) || 0;
       else if (field === 'plateNumber') value = String(value).trim().toUpperCase();
       else if (field === 'dateStr') {
         // Sửa ngày (10/11): tự sửa dạng gõ thiếu (vd 9/11 -> 09/11/2026), ngày sai thì chặn
@@ -2972,7 +3007,7 @@
         }
       }
       else value = String(value).trim();
-      const oldVal = field === 'totalFare' ? Number(trip[field] || 0) : String(trip[field] == null ? '' : trip[field]);
+      const oldVal = (field === 'totalFare' || field === 'signFee') ? Number(trip[field] || 0) : String(trip[field] == null ? '' : trip[field]);
       if (value === oldVal) return;
       if ((field === 'ticketNumber' || (field === 'plateNumber' && !plateOptional(trip.role))) && !value) {
         alert('Số phiếu và biển số không được để trống!');
@@ -3502,7 +3537,7 @@
                 </select>
               </td>
               <td class="p-2.5"><input type="text" value="${escHtml(t.note || '')}" class="inline-edit-input w-32" onblur="updateInlineTripField('${t.id}', 'note', this.value)"></td>
-              <td class="p-2.5 text-right"><input type="text" value="${Number(t.totalFare || 0).toLocaleString('vi-VN')}" class="inline-edit-input w-28 text-right font-extrabold text-emerald-700" onblur="updateInlineTripField('${t.id}', 'totalFare', this.value)">${priceNoteHtml(t)}</td>
+              <td class="p-2.5 text-right"><input type="text" value="${Number(t.totalFare || 0).toLocaleString('vi-VN')}" class="inline-edit-input w-28 text-right font-extrabold text-emerald-700" onblur="updateInlineTripField('${t.id}', 'totalFare', this.value)">${priceNoteHtml(t)}${hasSignFee(t.role) ? `<div class="mt-1 flex items-center justify-end gap-1 text-[10px] font-extrabold text-pink-700" title="Bảng đón (công nợ đối tác)">🪧<input type="text" value="${signFeeOf(t) ? signFeeOf(t).toLocaleString('vi-VN') : ''}" placeholder="Bảng đón" class="inline-edit-input w-24 text-right font-extrabold text-pink-700" onblur="updateInlineTripField('${t.id}', 'signFee', this.value)"></div>` : ''}</td>
               <td class="p-2.5 text-center align-middle">${deleteBtn}</td>
             </tr>
           `;
@@ -4111,7 +4146,7 @@
             const role = XL.role[t.role] || { label: t.role || '', color: 'FF334155' };
             const vals = [stt, normalizeDateInput(t.dateStr) || '',t.timeStr || '', role.label, t.staff || '', formatDisplayTicket(t.ticketNumber), plateCell(t.plateNumber),
               t.carType || '', t.source || '', t.pickup ? 'Ga ' + t.pickup : '', t.destination || '', t.paymentMethod || '(Chưa ghi)',
-              [t.note || '', (di => di && di.over ? `💸 ${discountText(di)}` : '')(discountInfo(t))].filter(Boolean).join(' | '),
+              [t.note || '', signFeeOf(t) ? `Bảng đón: ${signFeeOf(t).toLocaleString('vi-VN')}` : '', (di => di && di.over ? `💸 ${discountText(di)}` : '')(discountInfo(t))].filter(Boolean).join(' | '),
               Number(t.totalFare || 0), auditStatusText(g)];
             const row = ws.getRow(r);
             vals.forEach((v, i) => {

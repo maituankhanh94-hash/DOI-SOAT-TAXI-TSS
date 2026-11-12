@@ -49,6 +49,13 @@
 - Quy tắc: `settings/plan2Payments` cho nhân viên đọc (`sinh-quy-tac.js` → sinh lại 2 file). Người dùng PHẢI dán `quy-tac-buoc-2.json` mới vào Firebase (chưa dán thì nhân viên KH2 thấy danh sách mặc định).
 - Đã thử emulator: đăng nhập KH2 thấy đúng danh sách thanh toán riêng, lưu đơn không biển số, Quản lý thêm hình thức KH2 (ghi đúng plan2Payments, không đụng planPayments), đối soát ghép KH2 với tài xế, lọc phân vùng KH2.
 
+## Bảng đón – Team Kế Hoạch 2 (13/11, nhánh `bang-don`, BẢN THỬ)
+- Bảng đón = đối tác trả phí cho công ty vì cầm bảng đón khách → coi là CÔNG NỢ của đối tác. Chỉ phân vùng `plan2` (`hasSignFee`).
+- Trường đơn mới `signFee` (+ `originalSignFee` khi chia nhân sự "A + B": chia đều như tiền cuốc). KHÔNG cộng vào totalFare, KHÔNG so khi đối soát với tài xế.
+- Nhập: cột "🪧 Bảng Đón (công nợ ĐT)" `sf-i` trong bảng nhập hàng loạt (chỉ KH2); modal sửa `edit-modal-signfee`; Quản lý sửa tại chỗ dưới ô Tổng Tiền (`updateInlineTripField` field signFee).
+- Hiện: lịch sử nhân viên (dưới tiền), thẻ "Bảng Đón (công nợ đối tác)" ở tổng ngày nhân viên KH2 và doanh thu ngày Quản lý (ghi rõ không cộng vào doanh thu cuốc), Excel Đối Soát ghi "Bảng đón: X" ở cột Ghi chú, nhật ký sửa có "Bảng đón".
+- CHƯA đưa vào trang Dữ Liệu MISA — chờ người dùng/kế toán chọn cách ghi (dòng riêng hay cột riêng, mã dịch vụ).
+
 ## Nhật ký & Thùng rác (11/11, ĐÃ LÊN MAIN; nhánh `nhat-ky-thung-rac`; người dùng đã dán quy tắc mới có trash + trip_log)
 - Sự cố: đơn xe 298 ngày 10/11 (8 đơn, 3.050.000đ) đã hiện trên máy tài xế lúc 03:51 rồi biến mất; app không có dấu vết ai xóa. Rà code: chỉ chủ tài khoản (trước lockHour hôm sau) hoặc quản lý xóa được; không có đoạn tự xóa.
 - `trip_log/<pushId>` = {at (ServerValue), by, action create|edit|delete|restore, tripId, owner, ticket, plate, dateStr, fare, detail}. CHỈ THÊM: quy tắc `!data.exists()` + `by === chính mình`; chỉ quản lý đọc. Ghi ở: submitBatch (create, mỗi đơn 1 dòng), saveEditedTrip (edit, `changeText(before, after)`), updateInlineTripField, fixDateOffGroup, restoreDeletedTrips, restoreFromTrash.

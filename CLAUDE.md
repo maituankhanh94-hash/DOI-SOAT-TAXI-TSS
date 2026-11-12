@@ -49,7 +49,7 @@
 - Quy tắc: `settings/plan2Payments` cho nhân viên đọc (`sinh-quy-tac.js` → sinh lại 2 file). Người dùng PHẢI dán `quy-tac-buoc-2.json` mới vào Firebase (chưa dán thì nhân viên KH2 thấy danh sách mặc định).
 - Đã thử emulator: đăng nhập KH2 thấy đúng danh sách thanh toán riêng, lưu đơn không biển số, Quản lý thêm hình thức KH2 (ghi đúng plan2Payments, không đụng planPayments), đối soát ghép KH2 với tài xế, lọc phân vùng KH2.
 
-## Bảng đón – Team Kế Hoạch 2 (13/11, nhánh `bang-don`, BẢN THỬ)
+## Bảng đón – Team Kế Hoạch 2 (13/11, ĐÃ LÊN MAIN; nhánh `bang-don`)
 - Bảng đón = đối tác trả phí cho công ty vì cầm bảng đón khách → coi là CÔNG NỢ của đối tác. Chỉ phân vùng `plan2` (`hasSignFee`).
 - Trường đơn mới `signFee` (+ `originalSignFee` khi chia nhân sự "A + B": chia đều như tiền cuốc). KHÔNG cộng vào totalFare, KHÔNG so khi đối soát với tài xế.
 - Nhập: cột "🪧 Bảng Đón (công nợ ĐT)" `sf-i` trong bảng nhập hàng loạt (chỉ KH2); modal sửa `edit-modal-signfee`; Quản lý sửa tại chỗ dưới ô Tổng Tiền (`updateInlineTripField` field signFee).

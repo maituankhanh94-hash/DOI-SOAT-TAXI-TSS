@@ -1,0 +1,9 @@
+{
+  "name": "doi-soat-taxi-tss",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@google/genai": "3.2.0",
+    "jose": "6.2.17"
+  }
+}

@@ -42,7 +42,7 @@
 
 - (11/11, LÊN MAIN) Khung Nhắc Báo Cáo – "Tài xế chưa báo": mỗi phiếu 1 dòng "Xe 489 – Phiếu 113379 – họ tên (TK) (bán vé/kế hoạch) đã nhập, đi …, tiền", xếp liền theo xe (xe ≥2 phiếu có vạch cam). Bấm 1 dòng (cả mục Bán vé chưa nhập) → `jumpToAuditTicket(ticket)`: Bảng Đối Soát lọc khoảng ngày nhắc + từ khóa = số phiếu, cuộn xuống.
 
-## Team Kế Hoạch 2 (13/11, nhánh `team-ke-hoach-2`, BẢN THỬ)
+## Team Kế Hoạch 2 (13/11, ĐÃ LÊN MAIN; nhánh `team-ke-hoach-2`)
 - Phân vùng mới `plan2` ("Team Kế Hoạch 2", màu hồng/pink). Chạy GIỐNG `plan`: bên bán khi đối soát (`isSellRole`), biển số không bắt buộc (`plateOptional` → `isPlanRole`), thanh toán luôn nhóm KH (`paymentCategory`), áp quy ước điểm đến + bảng giá (`PRICE_ROLES`).
 - Danh sách thanh toán RIÊNG: `settings/plan2Payments` (`plan2PaymentOptions`, `payListFor(role)`). Trang Quản lý: khung "QUẢN LÝ HÌNH THỨC THANH TOÁN TEAM KẾ HOẠCH 2" (`planPayCfg`, `renderPlanPaymentsTable/addNewPlanPayment/addBulkPlanPayment/deletePlanPayment(…, role)` dùng chung cho plan & plan2).
 - Thêm ở: nút trang chủ, tiêu đề đăng nhập, ROLE_LABELS (chọn khi tạo/sửa tài khoản), lọc phân vùng ở Bảng Đối Soát, nhãn bảng/Excel (XL.role plan2), doanh thu theo hình thức, chép dữ liệu thật vào bản thử.

@@ -4820,7 +4820,8 @@
           // Dùng giờ UTC để Excel không lệch sang ngày hôm trước
           const dateVal = p ? new Date(Date.UTC(p[0], p[1] - 1, p[2])) : clean(t.dateStr);
           const ticket = formatDisplayTicket(clean(t.ticketNumber));
-          const fare = Number(t.totalFare || 0);
+          // (13/11) Không có cột/dòng bảng đón riêng, nhưng số tiền = TOTAL (giá xe + bảng đón) để khớp bảng kê đối tác
+          const fare = Number(t.totalFare || 0) + signFeeOf(t);
           const custCode = plate3Num(drvPlate != null ? drvPlate : t.plateNumber);
           const row = ws.addRow([
             'Chưa thu tiền', dateVal, dateVal, ticket, ticket,

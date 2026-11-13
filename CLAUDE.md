@@ -78,6 +78,8 @@
 - Cách dự phòng (mục gập "Cách khác"): chép chữ bằng Live Text / Google Lens rồi dán → `parseScanText` (nhãn hoặc đoán: phiếu ≥5 chữ số, "113 944" tự ghép, biển số sau phiếu, tiền số cuối 350/450k/1tr2, ga đầu tiên = điểm đón, viết tắt `SCAN_PAY`, dấu " / nt, bỏ dòng tổng).
 - Đã thử: parser bằng node; emulator với /api/scan giả lập (điền đúng, ô vàng, thử lại khi 429, ghi log); handler 503/401/405. CHƯA gọi Gemini thật (sandbox không ra được Google).
 
+- (13/11, LÊN MAIN) Đơn Team Kế Hoạch / KH2 KHÔNG rà soát giảm giá vượt mức (giá kế hoạch đã được công ty duyệt): `discountInfo` trả null khi `isPlanRole(role)` → không vào lọc 💸, khung nhắc, Excel giảm giá. Vẫn áp quy ước điểm đến + tự điền giá bảng.
+
 ## Nhật ký & Thùng rác (11/11, ĐÃ LÊN MAIN; nhánh `nhat-ky-thung-rac`; người dùng đã dán quy tắc mới có trash + trip_log)
 - Sự cố: đơn xe 298 ngày 10/11 (8 đơn, 3.050.000đ) đã hiện trên máy tài xế lúc 03:51 rồi biến mất; app không có dấu vết ai xóa. Rà code: chỉ chủ tài khoản (trước lockHour hôm sau) hoặc quản lý xóa được; không có đoạn tự xóa.
 - `trip_log/<pushId>` = {at (ServerValue), by, action create|edit|delete|restore, tripId, owner, ticket, plate, dateStr, fare, detail}. CHỈ THÊM: quy tắc `!data.exists()` + `by === chính mình`; chỉ quản lý đọc. Ghi ở: submitBatch (create, mỗi đơn 1 dòng), saveEditedTrip (edit, `changeText(before, after)`), updateInlineTripField, fixDateOffGroup, restoreDeletedTrips, restoreFromTrash.

@@ -1079,6 +1079,8 @@
       return res;
     }
     function discountInfo(t0) {
+      // (13/11) Team Kế Hoạch / Kế Hoạch 2: giá đã được công ty duyệt -> KHÔNG rà soát giảm giá vượt mức
+      if (!t0 || isPlanRole(t0.role)) return null;
       let t = t0;
       if (!Number(t.listPrice || 0) && PRICE_ROLES.includes(t.role)) {
         const inf = inferListPrice(t);

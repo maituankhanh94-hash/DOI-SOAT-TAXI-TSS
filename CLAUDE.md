@@ -23,6 +23,12 @@
   - Trường đơn: dateStr (dd/mm/yyyy), timeStr, ticketNumber, originalTicket, plateNumber, carType, source, pickup (T1/T2/T3), destination, totalFare, originalTotalFare, paymentMethod, note, staff, role, createdBy, timestamp.
 - 4 phân vùng: `pos` Bán vé (quầy), `driver` Cổng chủ xe, `plan` Team kế hoạch, `manager` Quản lý.
 
+## THÔNG TIN KINH DOANH CẦN NHỚ (người dùng dặn 13/11 — KHÔNG hiển thị trong app, chỉ để Claude biết khi làm báo cáo/hiệu quả kinh doanh)
+- Chia tiền 1 cuốc xe: **66% tài xế**, **34% công ty**.
+- Trong phần 34% của công ty, hoa hồng nhân viên: **Bán vé 7%**, **Nhân viên KIOT 3%**, **CTV 15%**, **Kế hoạch 7%**.
+- CHƯA RÕ: 7% / 3% / 15% tính trên TỔNG tiền cuốc hay trên phần 34% — đã hỏi người dùng (13/11), cập nhật khi có trả lời.
+- Khác với nhánh thử `hieu-qua-kinh-doanh` (đang để % tài xế 64%, nhóm QT/QN 3% 160k, C10/T1/T3/KH 7% 320k, CTV 15% 0đ, KIOT 3% 160k) → khi làm tiếp nhánh đó phải sửa theo số mới (tài xế 66%).
+
 ## Đăng nhập & bảo mật (lên main 07/11/2026; nhánh thử `bao-mat-dang-nhap`)
 - Firebase Auth Email/Password. Tài khoản app `TSS01` ↔ email nội bộ `tss01@taxi-tss.local` (bản thử: `@test.taxi-tss.local`); đặt lại MK lần n → `tss01.vN@…`. Mật khẩu Firebase = `'tss-pw:' + mật khẩu app` (để MK cũ ngắn như "123" vẫn dùng được).
 - Dữ liệu tài khoản: `login_index/<USER>={ver}` (công khai, để biết email khi đăng nhập), `accounts/<USER>={role,active,uid,ver}` (quản lý đọc), `roles/<uid>={user,role,active}` (quy tắc dựa vào đây).

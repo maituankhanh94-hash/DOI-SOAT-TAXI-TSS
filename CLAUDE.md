@@ -55,6 +55,7 @@
 - Nhập: cột "🪧 Bảng Đón (công nợ ĐT)" `sf-i` trong bảng nhập hàng loạt (chỉ KH2); modal sửa `edit-modal-signfee`; Quản lý sửa tại chỗ dưới ô Tổng Tiền (`updateInlineTripField` field signFee).
 - Hiện: lịch sử nhân viên (dưới tiền), thẻ "Bảng Đón (công nợ đối tác)" ở tổng ngày nhân viên KH2 và doanh thu ngày Quản lý (ghi rõ không cộng vào doanh thu cuốc), Excel Đối Soát ghi "Bảng đón: X" ở cột Ghi chú, nhật ký sửa có "Bảng đón".
 - (13/11, LÊN MAIN) File Excel: trang Đối Soát có CỘT RIÊNG "Bảng Đón" (cột 15, sau Tổng Tiền; Trạng Thái dời sang 16; `C_FARE/C_SIGN/C_STATUS`), dòng cộng ngày / tổng cộng có tổng bảng đón, ô tổng hợp đầu trang "Bảng đón (công nợ ĐT)"; `sideSums` trả thêm `sf`, `sfN`. Trang Tổng Hợp có mục "4. Bảng đón (công nợ đối tác)" theo nguồn đơn. Người dùng yêu cầu CHỈ 2 trang này — KHÔNG đưa vào Dữ Liệu MISA.
+- (13/11, LÊN MAIN) Ghi nhận như bảng kê đối tác (ảnh người dùng: GIÁ XE | BẢNG ĐÓN | TOTAL): trang Đối Soát cột "Giá Xe" (đổi tên từ Tổng Tiền), "Bảng Đón", "TOTAL" = giá xe + bảng đón (`C_FARE=14, C_SIGN=15, C_TOTAL=16, C_STATUS=17`), dòng cộng ngày/tổng có cả 3. Tổng Hợp mục 4 "Theo đối tác: Giá xe + Bảng đón" (mọi nguồn đơn bên bán, hiện khi có bảng đón). KHÔNG đổi bố cục file theo mẫu đối tác.
 
 ## Nhập hàng loạt mượt trên điện thoại (13/11, ĐÃ LÊN MAIN; nhánh `nhap-muot`)
 - Video người dùng: iPhone kéo ngang bảng nhập khi bàn phím mở → bảng giật (khung cuộn lồng max-h 450px cuộn 2 chiều + iOS tự kéo về ô đang gõ). Vẫn GIỮ bảng (người dùng không muốn kiểu thẻ).

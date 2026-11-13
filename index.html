@@ -4597,9 +4597,10 @@
       });
       const cols = [
         ['STT', 6], ['Ngày', 11], ['Giờ Nộp', 8], ['Phân Vùng', 15], ['Nhân Sự', 24], ['Số Phiếu', 12], ['Biển Số', 11],
-        ['Loại Xe', 11], ['Nguồn Đơn', 14], ['Điểm Đón', 9], ['Điểm Đến', 26], ['Thanh Toán', 18], ['Ghi Chú', 20], ['Tổng Tiền', 14], ['Bảng Đón', 12], ['Trạng Thái', 24]
+        ['Loại Xe', 11], ['Nguồn Đơn', 14], ['Điểm Đón', 9], ['Điểm Đến', 26], ['Thanh Toán', 18], ['Ghi Chú', 20], ['Giá Xe', 13], ['Bảng Đón', 12], ['TOTAL', 14], ['Trạng Thái', 24]
       ];
-      const C_FARE = 14, C_SIGN = 15, C_STATUS = 16;   // (13/11) cột Bảng Đón (công nợ đối tác, KH2) nằm sau Tổng Tiền
+      // (13/11) Ghi nhận như bảng kê đối tác: GIÁ XE | BẢNG ĐÓN | TOTAL (= giá xe + bảng đón)
+      const C_FARE = 14, C_SIGN = 15, C_TOTAL = 16, C_STATUS = 17;
       const N = cols.length;
       ws.columns = cols.map(([, w]) => ({ width: w }));
       xlTitle(ws, N, f, 'BÁO CÁO ĐỐI SOÁT ĐƠN HÀNG');
@@ -4614,7 +4615,7 @@
         [7, 9, `Chưa khớp: ${cnt.unmatched} nhóm`, 'unmatched'],
         [10, 12, `Tiền Quầy + Kế hoạch: ${totPos.toLocaleString('vi-VN')}`, null],
         [13, 14, `Tiền Chủ xe báo: ${totDrv.toLocaleString('vi-VN')}`, null],
-        [15, 16, `Bảng đón (công nợ ĐT): ${totSign.toLocaleString('vi-VN')}`, 'sign']
+        [15, 17, `Bảng đón: ${totSign.toLocaleString('vi-VN')} • TOTAL: ${(totPos + totSign).toLocaleString('vi-VN')}`, 'sign']
       ];
       ws.getRow(6).height = 24;
       boxes.forEach(([c1, c2, text, st]) => {
@@ -4663,6 +4664,10 @@
         sg.value = sums.sf || 0;
         sg.numFmt = XL.money;
         xlFont(sg, { bold: true, color: { argb: 'FF9D174D' } });
+        const tt = ws.getCell(r, C_TOTAL);
+        tt.value = (driverView ? sums.drv : sums.pos) + (sums.sf || 0);
+        tt.numFmt = XL.money;
+        xlFont(tt, { bold: true, color: { argb: 'FF1E3A8A' } });
         const d = ws.getCell(r, C_STATUS);
         d.value = driverView ? sums.pos : sums.drv;
         d.numFmt = driverView ? '"Quầy+KH: "#,##0' : '"Chủ xe: "#,##0';
@@ -4704,7 +4709,7 @@
             const vals = [stt, normalizeDateInput(t.dateStr) || '',t.timeStr || '', role.label, t.staff || '', formatDisplayTicket(t.ticketNumber), plateCell(t.plateNumber),
               t.carType || '', t.source || '', t.pickup ? 'Ga ' + t.pickup : '', t.destination || '', t.paymentMethod || '(Chưa ghi)',
               [t.note || '', (di => di && di.over ? `💸 ${discountText(di)}` : '')(discountInfo(t))].filter(Boolean).join(' | '),
-              Number(t.totalFare || 0), signFeeOf(t) || '', auditStatusText(g)];
+              Number(t.totalFare || 0), signFeeOf(t) || '', Number(t.totalFare || 0) + signFeeOf(t), auditStatusText(g)];
             const row = ws.getRow(r);
             vals.forEach((v, i) => {
               const c = row.getCell(i + 1);
@@ -4720,6 +4725,8 @@
             xlFont(row.getCell(C_FARE), { bold: true });
             row.getCell(C_SIGN).numFmt = XL.money;
             xlFont(row.getCell(C_SIGN), { bold: true, color: { argb: 'FF9D174D' } });
+            row.getCell(C_TOTAL).numFmt = XL.money;
+            xlFont(row.getCell(C_TOTAL), { bold: true, color: { argb: 'FF1E3A8A' } });
             [1, 2, 3, 6, 7, 10].forEach(i => { row.getCell(i).alignment = { horizontal: 'center', vertical: 'middle' }; });
             r++;
           });
@@ -4749,12 +4756,13 @@
       const totLabel = ws.getCell(r - 1, 1);
       xlFont(totLabel, { bold: true, size: 12, color: { argb: 'FF7C2D12' } });
       xlFont(ws.getCell(r - 1, C_FARE), { bold: true, size: 12, color: { argb: 'FF065F46' } });
+      xlFont(ws.getCell(r - 1, C_TOTAL), { bold: true, size: 12, color: { argb: 'FF1E3A8A' } });
 
       // Ghi chú cách đọc
       r++;
       ws.mergeCells(r, 1, r, N);
       const note = ws.getCell(r, 1);
-      note.value = 'Ghi chú: Tiền "Quầy + Kế hoạch" là doanh thu bán vé; tiền "Chủ xe" là số chủ xe/tài xế báo lại để đối chiếu (không cộng dồn hai bên). Màu xanh lá = trùng khớp, xanh dương = khớp nhưng tài xế ghi lệch 1 ngày, đỏ = lệch, vàng = chưa đủ 2 bên. Cột "Bảng Đón" là tiền đối tác trả cho bảng đón khách (công nợ đối tác, Team Kế Hoạch 2), không cộng vào Tổng Tiền.';
+      note.value = 'Ghi chú: Tiền "Quầy + Kế hoạch" là doanh thu bán vé; tiền "Chủ xe" là số chủ xe/tài xế báo lại để đối chiếu (không cộng dồn hai bên). Màu xanh lá = trùng khớp, xanh dương = khớp nhưng tài xế ghi lệch 1 ngày, đỏ = lệch, vàng = chưa đủ 2 bên. Giá Xe = tiền cuốc; Bảng Đón = tiền đối tác trả cho bảng đón khách (công nợ đối tác, Team Kế Hoạch 2); TOTAL = Giá Xe + Bảng Đón.';
       xlFont(note, { italic: true, size: 9, color: { argb: 'FF475569' } });
       note.alignment = { wrapText: true, vertical: 'top' };
       ws.getRow(r).height = 28;
@@ -4921,22 +4929,24 @@
         moneyCols(r - 1, [4]);
       });
 
-      // 4. Bảng đón (công nợ đối tác, Team Kế Hoạch 2) — theo nguồn đơn / đối tác
-      const sfTrips = allTrips.filter(t => t.role !== 'driver' && signFeeOf(t) > 0);
-      if (sfTrips.length) {
+      // 4. Theo đối tác (nguồn đơn): GIÁ XE | BẢNG ĐÓN | TOTAL — ghi nhận như bảng kê gửi đối tác (13/11). Chỉ bên Bán vé / Kế hoạch.
+      const saleTrips = allTrips.filter(t => t.role !== 'driver');
+      if (saleTrips.some(t => signFeeOf(t) > 0)) {
         r++;
-        section('4. Bảng đón (công nợ đối tác)');
-        header(['Nguồn đơn / Đối tác', 'Số đơn', 'Tiền bảng đón', '', '', '']);
-        const sfMap = {};
-        sfTrips.forEach(t => { const k = t.source || '(Chưa ghi nguồn)'; (sfMap[k] = sfMap[k] || []).push(t); });
-        let sfTot = 0;
-        Object.keys(sfMap).sort().forEach(k => {
-          const v = sfMap[k].reduce((a, t) => a + signFeeOf(t), 0); sfTot += v;
-          line([k, countBills(sfMap[k]), v, '', '', ''], 'FFFCE7F3');
-          moneyCols(r - 1, [3]);
+        section('4. Theo đối tác: Giá xe + Bảng đón');
+        header(['Nguồn đơn / Đối tác', 'Số đơn', 'Giá xe', 'Bảng đón', 'TOTAL', '']);
+        const pm = {};
+        saleTrips.forEach(t => { const k = t.source || '(Chưa ghi nguồn)'; (pm[k] = pm[k] || []).push(t); });
+        const tot4 = { n: 0, fare: 0, sf: 0 };
+        Object.keys(pm).sort().forEach(k => {
+          const list = pm[k];
+          const fare = list.reduce((a, t) => a + Number(t.totalFare || 0), 0), sf = list.reduce((a, t) => a + signFeeOf(t), 0), n = countBills(list);
+          tot4.n += n; tot4.fare += fare; tot4.sf += sf;
+          line([k, n, fare, sf, fare + sf, ''], sf ? 'FFFCE7F3' : null);
+          moneyCols(r - 1, [3, 4, 5]);
         });
-        line(['TỔNG BẢNG ĐÓN', countBills(sfTrips), sfTot, '', '', ''], 'FFFDE68A', true);
-        moneyCols(r - 1, [3]);
+        line(['TỔNG CỘNG', tot4.n, tot4.fare, tot4.sf, tot4.fare + tot4.sf, ''], 'FFFDE68A', true);
+        moneyCols(r - 1, [3, 4, 5]);
       }
       xlSignature(ws, r + 2, 6);
     }

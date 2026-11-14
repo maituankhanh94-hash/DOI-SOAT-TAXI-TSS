@@ -2283,7 +2283,8 @@
       delete: ['🗑️ Xóa', 'bg-rose-100 text-rose-800'],
       restore: ['♻️ Khôi phục', 'bg-purple-100 text-purple-800'],
       scan: ['📷 Quét giấy', 'bg-amber-100 text-amber-800'],
-      scan_fail: ['📷 Quét lỗi', 'bg-orange-200 text-orange-900']
+      scan_fail: ['📷 Quét lỗi', 'bg-orange-200 text-orange-900'],
+      baby_car: ['🤖 Hỏi Baby Car', 'bg-indigo-100 text-indigo-800']
     };
     // Khóa push của Firebase bắt đầu bằng thời điểm tạo -> lấy được mọi dòng nhật ký từ 1 thời điểm mà không cần .indexOn
     function pushKeyAt(ms) {
@@ -3090,11 +3091,13 @@
 
     function renderManagerDashboard() {
       document.getElementById('main-container').innerHTML = `
+        <button onclick="openBabyCar()" title="Hỏi Baby Car" class="fixed z-[60] right-4 bottom-4 w-14 h-14 rounded-full bg-indigo-600 hover:bg-indigo-700 text-white text-2xl shadow-xl border-4 border-white" style="bottom:max(1rem, env(safe-area-inset-bottom))">🤖</button>
         <div class="space-y-6 pb-24 w-full">
           <div class="bg-white p-4 sm:p-5 rounded-3xl shadow-md border border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-3">
             <h3 class="text-xs sm:text-sm font-extrabold text-slate-900 uppercase">📊 Quản Lý Hệ Thống & Cấu Hình</h3>
             <div class="flex flex-wrap gap-2 justify-center">
               ${IS_TEST_ENV ? `<button onclick="copyRealDataToTest()" class="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-slate-900 rounded-xl text-xs font-extrabold shadow-sm">🧪 Chép Dữ Liệu Thật Vào Bản Thử</button>` : ''}
+              <button onclick="openBabyCar()" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-extrabold shadow-sm">🤖 Hỏi Baby Car</button>
               <button id="btn-export-excel" onclick="exportCustomExcel()" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-sm">📥 Xuất Excel Đối Soát (Có Màu, Kẻ Ô)</button>
             </div>
           </div>
@@ -5208,6 +5211,695 @@
         try { await secAuth.signOut(); } catch (e2) {}
         setModalBusy('copy-modal', false, e && e.code === 'app/no-account' ? 'Tài khoản không có ở bản chính!' : authErrorText(e));
       }
+    }
+
+    // ===================== BABY CAR – trợ lý hỏi đáp (Claude) cho Quản Lý (14/11) =====================
+    // Máy chủ /api/chat chỉ chuyển lời tới Claude (khóa cất ở Vercel). Các công cụ tra dữ liệu chạy NGAY TẠI ĐÂY,
+    // dùng đúng hàm đối soát của app (computeAuditGroups...), CHỈ ĐỌC, không ghi gì vào đơn hàng.
+    let bcMessages = [];          // lịch sử gửi Claude
+    let bcImages = [];            // ảnh người dùng đã gửi (dataURL JPEG) – [Ảnh n] = bcImages[n-1]
+    let bcPending = [];           // ảnh đã chọn, chưa gửi
+    let bcBusy = false;
+    let bcTripCache = {};         // 'from|to' -> đơn (trong 1 cuộc trò chuyện)
+    let bcLogCache = null;
+    let bcFigN = 0;
+    let bcTurnCost = 0;
+    const BC_MAX_IMAGES = 8;
+    const BC_USD_VND = 26000;
+
+    function openBabyCar() {
+      if (!isManager()) return;
+      let m = document.getElementById('bc-modal');
+      if (!m) {
+        document.body.insertAdjacentHTML('beforeend', `
+        <div id="bc-modal" class="fixed inset-0 z-[70] bg-slate-900/60 flex items-stretch sm:items-center justify-center sm:p-4">
+          <div class="bg-white w-full sm:max-w-3xl sm:rounded-3xl shadow-2xl flex flex-col h-full sm:h-[92vh] overflow-hidden">
+            <div class="flex items-center gap-2 px-3 py-2.5 bg-gradient-to-r from-indigo-600 to-blue-600 text-white">
+              <div class="text-2xl">🤖</div>
+              <div class="flex-1 min-w-0">
+                <div class="font-extrabold text-sm sm:text-base leading-tight">Baby Car</div>
+                <div class="text-[11px] opacity-90 leading-tight">Gửi ảnh + câu hỏi, Baby Car tra dữ liệu thật và giải thích</div>
+              </div>
+              <button onclick="bcNewChat()" class="px-2.5 py-1.5 bg-white/15 hover:bg-white/25 rounded-xl text-[11px] font-bold">🆕 Trò chuyện mới</button>
+              <button onclick="closeBabyCar()" class="px-3 py-1.5 bg-white/15 hover:bg-white/25 rounded-xl text-sm font-extrabold">✕</button>
+            </div>
+            <div id="bc-log" class="flex-1 overflow-y-auto p-3 space-y-3 bg-slate-50"></div>
+            <div class="border-t bg-white p-2 space-y-2" style="padding-bottom:max(0.5rem, env(safe-area-inset-bottom))">
+              <div id="bc-pend" class="flex flex-wrap gap-2"></div>
+              <div class="flex items-end gap-2">
+                <label class="shrink-0 w-11 h-11 flex items-center justify-center bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded-2xl text-xl cursor-pointer" title="Chọn / chụp ảnh">
+                  📎<input id="bc-file" type="file" accept="image/*" multiple class="hidden" onchange="bcAddFiles(this.files); this.value=''">
+                </label>
+                <textarea id="bc-input" rows="2" placeholder="Hỏi Baby Car... (có thể dán ảnh chụp màn hình vào đây)" class="flex-1 min-w-0 px-3 py-2 border border-slate-300 rounded-2xl text-sm resize-none focus:outline-none focus:ring-2 focus:ring-indigo-400" style="font-size:16px"></textarea>
+                <button id="bc-send" onclick="bcSend()" class="shrink-0 h-11 px-4 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-400 text-white rounded-2xl font-extrabold text-sm">Gửi ➤</button>
+              </div>
+            </div>
+          </div>
+        </div>`);
+        m = document.getElementById('bc-modal');
+        const inp = document.getElementById('bc-input');
+        inp.addEventListener('keydown', e => {
+          if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && window.matchMedia('(pointer:fine)').matches) { e.preventDefault(); bcSend(); }
+        });
+        inp.addEventListener('paste', e => {
+          const files = [...(e.clipboardData && e.clipboardData.files || [])].filter(f => /^image\//.test(f.type));
+          if (files.length) { e.preventDefault(); bcAddFiles(files); }
+        });
+        bcRenderWelcome();
+      }
+      m.classList.remove('hidden');
+      document.body.style.overflow = 'hidden';
+      setTimeout(() => { const i = document.getElementById('bc-input'); if (i && window.matchMedia('(pointer:fine)').matches) i.focus(); }, 50);
+    }
+    function closeBabyCar() {
+      const m = document.getElementById('bc-modal');
+      if (m) m.classList.add('hidden');
+      document.body.style.overflow = '';
+    }
+    function bcNewChat() {
+      if (bcBusy) return;
+      if (bcMessages.length && !confirm('Bắt đầu cuộc trò chuyện mới? (Cuộc trò chuyện hiện tại sẽ bị xóa khỏi màn hình)')) return;
+      bcMessages = []; bcImages = []; bcPending = []; bcTripCache = {}; bcLogCache = null;
+      bcRenderPending();
+      bcRenderWelcome();
+    }
+    function bcRenderWelcome() {
+      const log = document.getElementById('bc-log');
+      if (!log) return;
+      log.innerHTML = `
+        <div class="bg-white border border-indigo-200 rounded-2xl p-3 text-sm text-slate-700 space-y-2">
+          <div class="font-extrabold text-indigo-700">👋 Chào anh/chị, em là Baby Car.</div>
+          <div>Anh/chị chụp màn hình chỗ thắc mắc (app, tin nhắn Zalo của sếp…) bấm 📎 gửi kèm câu hỏi. Em sẽ <b>tra dữ liệu thật</b>, tìm nguyên nhân, giải thích và làm <b>ảnh minh họa</b> để anh/chị tải về gửi sếp. Nếu là <b>lỗi của app</b>, em sẽ báo rõ.</div>
+          <div class="text-xs text-slate-500">Ví dụ: "Sao xe 354 phiếu 116864 tài xế báo rồi mà app vẫn ghi chưa báo?" • "Đơn lệch phiếu 113974 vì sao?" • "Hôm qua ai xóa đơn xe 298?"</div>
+          <div class="text-[11px] text-slate-400">Em chỉ đọc dữ liệu, không sửa đơn. Mỗi câu hỏi tốn một ít phí Claude (hiện ở cuối câu trả lời).</div>
+        </div>`;
+    }
+    async function bcAddFiles(files) {
+      const list = [...(files || [])].filter(f => /^image\//.test(f.type) || /\.(heic|heif|jpe?g|png|webp)$/i.test(f.name || ''));
+      for (const f of list) {
+        if (bcImages.length + bcPending.length >= BC_MAX_IMAGES) { alert(`Mỗi cuộc trò chuyện tối đa ${BC_MAX_IMAGES} ảnh. Bấm "🆕 Trò chuyện mới" để gửi thêm.`); break; }
+        try { bcPending.push(await shrinkImage(f, 1568)); } catch (e) { alert(e.message || 'Không mở được ảnh'); }
+      }
+      bcRenderPending();
+    }
+    function bcRenderPending() {
+      const box = document.getElementById('bc-pend');
+      if (!box) return;
+      box.innerHTML = bcPending.map((src, i) => `
+        <div class="relative">
+          <img src="${src}" class="w-16 h-16 object-cover rounded-xl border border-slate-300">
+          <button onclick="bcPending.splice(${i},1); bcRenderPending()" class="absolute -top-1.5 -right-1.5 w-6 h-6 bg-rose-600 text-white rounded-full text-xs font-bold">✕</button>
+        </div>`).join('');
+    }
+    function bcScroll() { const log = document.getElementById('bc-log'); if (log) log.scrollTop = log.scrollHeight; }
+
+    // Chữ trả lời: **đậm**, dòng "- " = gạch đầu dòng, dòng "⚠️ CÓ THỂ LÀ LỖI APP" tô đỏ
+    function bcFormat(text) {
+      const lines = String(text || '').split('\n');
+      let html = '', inList = false;
+      lines.forEach(line => {
+        let s = escHtml(line).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/^#{1,4}\s*(.+)$/, '<b>$1</b>');
+        const li = /^\s*[-•*]\s+(.*)$/.exec(s);
+        if (li) {
+          if (!inList) { html += '<ul class="list-disc pl-5 space-y-0.5">'; inList = true; }
+          html += `<li>${li[1]}</li>`;
+          return;
+        }
+        if (inList) { html += '</ul>'; inList = false; }
+        if (!s.trim()) { html += '<div class="h-2"></div>'; return; }
+        if (/LỖI APP/i.test(line)) html += `<div class="bg-rose-50 border border-rose-300 text-rose-800 rounded-xl px-2 py-1 font-bold">${s}</div>`;
+        else html += `<div>${s}</div>`;
+      });
+      if (inList) html += '</ul>';
+      return html;
+    }
+    function bcStripMd(text) { return String(text || '').replace(/\*\*(.+?)\*\*/g, '$1').replace(/^#{1,4}\s*/gm, '').replace(/^\s*[-*]\s+/gm, '• '); }
+
+    function bcAddUserBubble(text, imgs, firstNo) {
+      const log = document.getElementById('bc-log');
+      const thumbs = imgs.map((src, i) => `<div class="relative inline-block"><img src="${src}" class="max-h-40 rounded-xl border border-white/40"><span class="absolute top-1 left-1 bg-black/60 text-white text-[10px] font-bold px-1.5 rounded">Ảnh ${firstNo + i}</span></div>`).join(' ');
+      log.insertAdjacentHTML('beforeend', `
+        <div class="flex justify-end"><div class="max-w-[85%] bg-indigo-600 text-white rounded-2xl rounded-br-md px-3 py-2 text-sm space-y-1.5">
+          ${thumbs ? `<div class="flex flex-wrap gap-1">${thumbs}</div>` : ''}
+          ${text ? `<div class="whitespace-pre-wrap break-words">${escHtml(text)}</div>` : ''}
+        </div></div>`);
+      bcScroll();
+    }
+    function bcNewBotBubble() {
+      const id = 'bc-b' + Date.now();
+      document.getElementById('bc-log').insertAdjacentHTML('beforeend', `
+        <div class="flex justify-start"><div id="${id}" class="max-w-[92%] bg-white border border-slate-200 rounded-2xl rounded-bl-md px-3 py-2 text-sm text-slate-800 space-y-2 shadow-sm">
+          <div class="bc-text space-y-1"></div>
+          <div class="bc-figs space-y-3"></div>
+          <div class="bc-status text-xs font-bold text-indigo-600 flex items-center gap-2"><span class="animate-pulse">●●●</span> <span class="bc-st">Baby Car đang đọc câu hỏi...</span></div>
+          <div class="bc-foot"></div>
+        </div></div>`);
+      bcScroll();
+      const el = document.getElementById(id);
+      el._texts = []; el._figs = [];
+      return el;
+    }
+    function bcSetStatus(b, s) { const st = b.querySelector('.bc-st'); if (st) st.textContent = s; }
+
+    async function bcSend() {
+      if (bcBusy) return;
+      const inp = document.getElementById('bc-input');
+      const text = (inp.value || '').trim();
+      if (!text && !bcPending.length) { inp.focus(); return; }
+      if (!fbAuth.currentUser) { alert('Phiên đăng nhập đã hết, vui lòng đăng nhập lại.'); return; }
+      const imgs = bcPending.splice(0);
+      const firstNo = bcImages.length + 1;
+      const content = [];
+      imgs.forEach((src, i) => {
+        bcImages.push(src);
+        content.push({ type: 'text', text: `[Ảnh ${firstNo + i}]` });
+        content.push({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: src.replace(/^data:[^,]+,/, '') } });
+      });
+      content.push({ type: 'text', text: text || 'Xem ảnh, tra dữ liệu và giải thích giúp tôi.' });
+      bcMessages.push({ role: 'user', content });
+      inp.value = '';
+      bcRenderPending();
+      bcAddUserBubble(text, imgs, firstNo);
+      await bcRun(text || '(chỉ gửi ảnh)');
+    }
+
+    const BC_TOOL_LABEL = {
+      doi_soat: i => `🔎 Đang đối soát${i.so_phieu ? ' phiếu ' + i.so_phieu : ''}${i.bien_so ? ' xe ' + i.bien_so : ''} (${i.tu_ngay} → ${i.den_ngay})...`,
+      nhac_bao_cao: i => `📋 Đang tính khung Nhắc báo cáo ${i.tu_ngay} → ${i.den_ngay}...`,
+      tim_don: i => `🔎 Đang tìm đơn${i.so_phieu ? ' phiếu ' + i.so_phieu : ''}${i.bien_so ? ' xe ' + i.bien_so : ''}${i.tai_khoan ? ' TK ' + i.tai_khoan : ''}...`,
+      so_sanh_ban_sao: i => `🧪 Đang so 2 bản lưu của TK ${i.tai_khoan}...`,
+      nhat_ky: () => '🗂️ Đang xem nhật ký & thùng rác...',
+      cai_dat: () => '⚙️ Đang xem cài đặt...',
+      ve_bang_minh_hoa: () => '🖼️ Đang vẽ ảnh minh họa...',
+      cat_anh: () => '✂️ Đang cắt ảnh minh họa...'
+    };
+
+    async function bcCallServer() {
+      const body = JSON.stringify({ env: IS_TEST_ENV ? 'test' : 'main', today: bcTodayText(), messages: bcMessages });
+      if (body.length > 3900000) throw new Error('Cuộc trò chuyện quá nặng (nhiều ảnh). Bấm "🆕 Trò chuyện mới" rồi hỏi lại.');
+      let r = null, data = null;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const token = await fbAuth.currentUser.getIdToken();
+        r = await fetch('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token }, body });
+        data = null; try { data = await r.json(); } catch (e) {}
+        if (r.status !== 429 || attempt === 1) break;
+        await new Promise(res => setTimeout(res, 20000));
+      }
+      if (!r.ok) {
+        const msg = (data && data.error) || (r.status === 404 ? 'Chưa có máy chủ Baby Car (chỉ chạy trên link Vercel)' : `Lỗi máy chủ (${r.status})`);
+        throw new Error(msg);
+      }
+      return data;
+    }
+    function bcTodayText() {
+      const d = new Date(), p = n => String(n).padStart(2, '0');
+      const wd = ['Chủ nhật', 'Thứ 2', 'Thứ 3', 'Thứ 4', 'Thứ 5', 'Thứ 6', 'Thứ 7'][d.getDay()];
+      return `${wd}, ${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()} lúc ${p(d.getHours())}:${p(d.getMinutes())}`;
+    }
+    function bcCostUsd(u) {
+      if (!u) return 0;
+      return ((u.input_tokens || 0) * 4 + (u.output_tokens || 0) * 20 + (u.cache_read_input_tokens || 0) * 0.2 + (u.cache_creation_input_tokens || 0) * 5) / 1e6;
+    }
+
+    async function bcRun(question) {
+      bcBusy = true;
+      const sendBtn = document.getElementById('bc-send');
+      if (sendBtn) sendBtn.disabled = true;
+      const b = bcNewBotBubble();
+      let cost = 0, steps = 0, err = null;
+      try {
+        for (steps = 0; steps < 14; steps++) {
+          const data = await bcCallServer();
+          cost += bcCostUsd(data.usage);
+          const content = Array.isArray(data.content) ? data.content : [];
+          bcMessages.push({ role: 'assistant', content });
+          content.filter(c => c.type === 'text' && c.text && c.text.trim()).forEach(c => {
+            b._texts.push(c.text);
+            b.querySelector('.bc-text').insertAdjacentHTML('beforeend', `<div class="space-y-1">${bcFormat(c.text)}</div>`);
+          });
+          bcScroll();
+          const uses = content.filter(c => c.type === 'tool_use');
+          if (data.stop_reason !== 'tool_use' || !uses.length) {
+            if (data.stop_reason === 'max_tokens') b.querySelector('.bc-text').insertAdjacentHTML('beforeend', '<div class="text-amber-700 font-bold">(Câu trả lời bị cắt vì quá dài – hỏi tiếp "nói tiếp" nhé.)</div>');
+            break;
+          }
+          const results = [];
+          for (const u of uses) {
+            const input = u.input || {};
+            bcSetStatus(b, (BC_TOOL_LABEL[u.name] || (() => '⏳ Đang tra...'))(input));
+            try {
+              const fn = BC_TOOLS[u.name];
+              if (!fn) throw new Error('Không có công cụ ' + u.name);
+              const out = await fn(input, b);
+              let s = JSON.stringify(out);
+              if (s.length > 60000) s = s.slice(0, 60000) + ' …(đã cắt bớt, hãy lọc hẹp hơn)';
+              results.push({ type: 'tool_result', tool_use_id: u.id, content: s });
+            } catch (e) {
+              results.push({ type: 'tool_result', tool_use_id: u.id, content: 'LỖI: ' + (e && e.message || String(e)), is_error: true });
+            }
+          }
+          bcMessages.push({ role: 'user', content: results });
+          bcSetStatus(b, '💭 Baby Car đang suy nghĩ...');
+        }
+      } catch (e) {
+        err = e;
+      }
+      const st = b.querySelector('.bc-status'); if (st) st.remove();
+      const foot = b.querySelector('.bc-foot');
+      if (err) {
+        foot.innerHTML = `<div class="bg-rose-50 border border-rose-300 text-rose-800 rounded-xl px-2 py-1.5 font-bold text-xs">⚠️ ${escHtml(err.message || String(err))}</div>
+          <button onclick="this.closest('.flex').remove(); bcRetry()" class="mt-1.5 px-3 py-1.5 bg-slate-800 text-white rounded-xl text-xs font-bold">↻ Thử lại</button>`;
+      } else {
+        const vnd = Math.round(cost * BC_USD_VND / 100) * 100;
+        foot.innerHTML = `<div class="flex flex-wrap items-center gap-2 pt-1 border-t border-slate-100">
+            ${b._texts.length ? `<button onclick="bcAnswerImage('${b.id}')" class="px-2.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 border border-indigo-300 text-indigo-700 rounded-xl text-xs font-extrabold">📸 Lưu cả câu trả lời thành ảnh</button>` : ''}
+            <span class="text-[10px] text-slate-400">Phí ước tính ≈ ${vnd.toLocaleString('vi-VN')}đ</span>
+          </div>`;
+        bcLogUse(question, cost, steps + 1);
+      }
+      bcScroll();
+      bcBusy = false;
+      if (sendBtn) sendBtn.disabled = false;
+    }
+    function bcRetry() {
+      if (bcBusy || !bcMessages.length) return;
+      // Bỏ các phần trả lời dở dang của lần lỗi (giữ câu hỏi + kết quả tra cuối cùng phải là của người dùng)
+      while (bcMessages.length && bcMessages[bcMessages.length - 1].role === 'assistant') bcMessages.pop();
+      bcRun('(thử lại)');
+    }
+    // Ghi nhật ký 1 dòng/câu hỏi để quản lý theo dõi số lượt và phí. Lỗi thì bỏ qua.
+    function bcLogUse(question, cost, rounds) {
+      if (!loggedInUser) return;
+      const now = new Date(), p = n => String(n).padStart(2, '0');
+      dbRef('trip_log').push({ at: firebase.database.ServerValue.TIMESTAMP, by: loggedInUser.user, action: 'baby_car', tripId: '', owner: loggedInUser.user,
+        ticket: '', plate: '', dateStr: `${p(now.getDate())}/${p(now.getMonth() + 1)}/${now.getFullYear()}`, fare: 0,
+        detail: `${String(question).slice(0, 160)} • ${rounds} lượt • ≈ ${Math.round(cost * BC_USD_VND).toLocaleString('vi-VN')}đ` }).catch(() => {});
+    }
+
+    // ---------- Công cụ tra dữ liệu (chỉ đọc) ----------
+    function bcKey(s) {
+      s = String(s || '').trim();
+      if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+      const m = /^(\d{1,2})[\/.\-](\d{1,2})(?:[\/.\-](\d{2,4}))?$/.exec(s);
+      if (!m) throw new Error('Ngày không hợp lệ: ' + s);
+      let y = m[3] ? Number(m[3]) : new Date().getFullYear();
+      if (y < 100) y += 2000;
+      return `${y}-${String(m[2]).padStart(2, '0')}-${String(m[1]).padStart(2, '0')}`;
+    }
+    function bcRange(a, b) {
+      let from = bcKey(a), to = bcKey(b || a);
+      if (to < from) [from, to] = [to, from];
+      const days = (Date.UTC(...to.split('-').map((x, i) => i === 1 ? x - 1 : +x)) - Date.UTC(...from.split('-').map((x, i) => i === 1 ? x - 1 : +x))) / 86400000;
+      if (days > 62) throw new Error('Khoảng ngày tối đa 62 ngày');
+      return [from, to];
+    }
+    async function bcLoadTrips(from, to) {
+      const k = from + '|' + to;
+      if (bcTripCache[k]) return bcTripCache[k];
+      const s = await dbRef('trips').orderByChild('dateKey').startAt(from).endAt(to).once('value');
+      const v = s.val() || {};
+      const list = Object.entries(v).map(([id, t]) => Object.assign({ id }, t));
+      bcTripCache[k] = list;
+      return list;
+    }
+    function bcRoleName(r) { return ({ pos: 'Bán vé', plan: 'Kế hoạch', plan2: 'Kế hoạch 2', driver: 'Tài xế', manager: 'Quản lý' })[r] || r || '?'; }
+    function bcTime(ms) {
+      if (!ms) return '';
+      const d = new Date(Number(ms)), p = n => String(n).padStart(2, '0');
+      return `${p(d.getHours())}:${p(d.getMinutes())} ${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()}`;
+    }
+    function bcTrip(t) {
+      const o = {
+        id: t.id, ngay: t.dateStr, gio: t.timeStr || '', phieu: t.ticketNumber, phieu_goc: t.originalTicket || baseTicketOf(t.ticketNumber),
+        bien_so: t.plateNumber || '', phan_vung: bcRoleName(t.role), tai_khoan: t.createdBy || '', nhan_su: t.staff || '',
+        nguon: t.source || '', loai_xe: t.carType || '', don: t.pickup || '', den: t.destination || '',
+        tien: Number(t.totalFare || 0), thanh_toan: t.paymentMethod || '(chưa ghi)', nhom_tt: paymentCategory(t), luu_luc: bcTime(t.timestamp)
+      };
+      if (t.originalTotalFare && Number(t.originalTotalFare) !== Number(t.totalFare)) o.tien_ca_don_truoc_chia = Number(t.originalTotalFare);
+      if (t.note) o.ghi_chu = t.note;
+      if (Number(t.signFee || 0)) o.bang_don = Number(t.signFee);
+      if (!t.dateKey) o.canh_bao = 'đơn thiếu dateKey';
+      try { const d = discountInfo(t); if (d) o.gia_bang = { gia: d.list, giam_pct: Math.round((d.pct || 0) * 1000) / 10, vuot_muc: !!d.over }; } catch (e) {}
+      return o;
+    }
+    const bcNorm = s => String(s || '').replace(/\s+/g, '').toUpperCase();
+    function bcTicketOf(t) { return bcNorm(t.originalTicket || baseTicketOf(t.ticketNumber)); }
+    function bcLev(a, b) {
+      if (Math.abs(a.length - b.length) > 2) return 9;
+      const d = Array.from({ length: a.length + 1 }, (_, i) => [i]);
+      for (let j = 1; j <= b.length; j++) d[0][j] = j;
+      for (let i = 1; i <= a.length; i++) for (let j = 1; j <= b.length; j++)
+        d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1),
+          i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1] ? d[i - 2][j - 2] + 1 : 99);
+      return d[a.length][b.length];
+    }
+    function bcWithTrips(list, fn) {
+      const saved = allCompanyTrips;
+      allCompanyTrips = list;
+      try { return fn(); } finally { allCompanyTrips = saved; }
+    }
+    function bcGroupOut(g) {
+      const o = { trang_thai: g.status, hien_thi_trong_app: auditStatusText(g), ngay_nhom: g.dateKey,
+        ben_ban: g.trips.filter(t => isSellRole(t.role)).map(bcTrip), ben_tai_xe: g.trips.filter(t => t.role === 'driver').map(bcTrip) };
+      if (g.status === 'mismatch') o.ly_do_lech = getMismatchReason(g.trips);
+      if (g.dateOff) o.lech_ngay = dateOffText(g);
+      if (g.status === 'unmatched') { o.ben_thieu = g.missing === 'driver' ? 'Tài xế' : 'Bán vé/Kế hoạch'; o.qua_han = g.overdue; }
+      return o;
+    }
+
+    const BC_TOOLS = {
+      async doi_soat(i) {
+        const [from, to] = bcRange(i.tu_ngay, i.den_ngay);
+        const wide = await bcLoadTrips(shiftDateKey(from, -3), shiftDateKey(to, 3));
+        const groups = bcWithTrips(wide, () => computeAuditGroups({ startDateVal: from, endDateVal: to, roleFilter: 'all', matchStatusFilter: 'all', keyword: '' }));
+        // Trạng thái của từng đơn trong khoảng rộng (để biết ứng viên đã khớp với nhóm khác chưa)
+        const wideGroups = bcWithTrips(wide, () => computeAuditGroups({ startDateVal: shiftDateKey(from, -2), endDateVal: shiftDateKey(to, 2), roleFilter: 'all', matchStatusFilter: 'all', keyword: '' }));
+        const statusOf = {};
+        wideGroups.forEach(g => g.trips.forEach(t => { statusOf[t.id] = auditStatusText(g); }));
+        const qT = bcNorm(i.so_phieu), qP = normalizePlate(i.bien_so), sf = i.trang_thai || 'all';
+        let list = groups.filter(g => {
+          if (qT && !g.trips.some(t => bcNorm(t.ticketNumber).includes(qT) || bcTicketOf(t).includes(qT))) return false;
+          if (qP && !g.trips.some(t => normalizePlate(t.plateNumber).includes(qP))) return false;
+          if (sf === 'overdue') return g.overdue;
+          if (sf === 'dateoff') return !!g.dateOff;
+          if (sf !== 'all' && g.status !== sf) return false;
+          return true;
+        });
+        const count = {};
+        list.forEach(g => { count[g.status] = (count[g.status] || 0) + 1; });
+        list.sort((a, b) => (a.dateKey || '').localeCompare(b.dateKey || ''));
+        const total = list.length;
+        list = list.slice(0, 40);
+        const out = list.map(bcGroupOut);
+        // Gợi ý: đơn bên kia có thể là cùng cuốc nhưng gõ lệch
+        if (list.length <= 15) list.forEach((g, gi) => {
+          if (g.status !== 'unmatched') return;
+          const mine = g.trips[0], mineSell = isSellRole(mine.role);
+          const tk = bcTicketOf(mine), pl = normalizePlate(mine.plateNumber), dk = tripDateKey(mine);
+          const fare = g.trips.reduce((a, t) => a + Number(t.totalFare || 0), 0);
+          const cands = [];
+          wide.forEach(t => {
+            if (isSellRole(t.role) === mineSell || g.trips.includes(t)) return;
+            const tk2 = bcTicketOf(t), pl2 = normalizePlate(t.plateNumber), dk2 = tripDateKey(t);
+            const sameDay = dk2 === dk, near = dk2 && dk && Math.abs((new Date(dk2) - new Date(dk)) / 86400000) <= 3;
+            const plateSame = pl && pl2 && (pl === pl2 || pl.slice(-3) === pl2.slice(-3));
+            const why = [];
+            if (tk && tk2 === tk) why.push('CÙNG số phiếu' + (pl2 !== pl ? `, khác biển số (${t.plateNumber || 'trống'} ≠ ${mine.plateNumber || 'trống'})` : '') + (dk2 !== dk ? `, khác ngày (${t.dateStr} ≠ ${mine.dateStr})` : ''));
+            else if (plateSame && near && tk && tk2 && bcLev(tk, tk2) <= 2) why.push(`số phiếu GẦN GIỐNG (${t.ticketNumber} ~ ${mine.ticketNumber}), cùng xe${sameDay ? ', cùng ngày' : ', ngày ' + t.dateStr}`);
+            else if (plateSame && sameDay && Math.abs(Number(t.totalFare || 0) - fare) < 1000 && fare > 0) why.push(`cùng xe, cùng ngày, cùng tiền nhưng số phiếu khác (${t.ticketNumber} ≠ ${mine.ticketNumber})`);
+            if (why.length) cands.push(Object.assign({ vi_sao: why.join('; '), trang_thai_cua_don_nay: statusOf[t.id] || '' }, bcTrip(t)));
+          });
+          if (cands.length) out[gi].ung_vien_gan_giong = cands.slice(0, 6);
+          else out[gi].ung_vien_gan_giong = `Không thấy đơn bên ${mineSell ? 'tài xế' : 'bán vé/kế hoạch'} nào gần giống trong ${ddmm(shiftDateKey(from, -3))}–${ddmm(shiftDateKey(to, 3))} (bản trips).`;
+        });
+        return { khoang: `${from} → ${to}`, so_nhom: total, dem_theo_trang_thai: count, gio_khoa_han_bao_cao: lockHourSetting, nhom: out, ghi_chu: total > 40 ? 'Chỉ hiện 40 nhóm đầu, hãy lọc hẹp hơn' : undefined };
+      },
+      async nhac_bao_cao(i) {
+        const [from, to] = bcRange(i.tu_ngay, i.den_ngay);
+        const wide = await bcLoadTrips(shiftDateKey(from, -1), shiftDateKey(to, 1));
+        const gs = bcWithTrips(wide, () => computeAuditGroups({ startDateVal: from, endDateVal: to, roleFilter: 'all', matchStatusFilter: 'unmatched', keyword: '' }));
+        const line = g => {
+          const t = g.trips[0];
+          return { xe: t.plateNumber || '', phieu: t.originalTicket || baseTicketOf(t.ticketNumber), ngay: t.dateStr, nguoi_nhap: bcWithTrips(wide, () => fullStaffName(g.trips)),
+            phan_vung: bcRoleName(t.role), den: t.destination || '', tien: g.trips.reduce((a, x) => a + Number(x.totalFare || 0), 0), qua_han: g.overdue };
+        };
+        const dl = reportDeadline(to);
+        return { khoang: `${from} → ${to}`, han_bao_cao_ngay_cuoi: dl ? bcTime(dl.getTime()) : '',
+          tai_xe_chua_bao: gs.filter(g => g.missing === 'driver').map(line).slice(0, 150),
+          ban_ve_ke_hoach_chua_nhap: gs.filter(g => g.missing === 'pos').map(line).slice(0, 150) };
+      },
+      async tim_don(i) {
+        const [from, to] = bcRange(i.tu_ngay, i.den_ngay);
+        const list = await bcLoadTrips(from, to);
+        const qT = bcNorm(i.so_phieu), qP = normalizePlate(i.bien_so), qU = bcNorm(i.tai_khoan), kw = removeAccents(i.tu_khoa || '').trim();
+        const hit = list.filter(t => {
+          if (qT && !bcNorm(t.ticketNumber).includes(qT) && !bcTicketOf(t).includes(qT)) return false;
+          if (qP && !normalizePlate(t.plateNumber).includes(qP)) return false;
+          if (qU && bcNorm(t.createdBy) !== qU) return false;
+          if (i.phan_vung && t.role !== i.phan_vung) return false;
+          if (kw && !removeAccents(`${t.staff} ${t.destination} ${t.source} ${t.note} ${t.paymentMethod}`).includes(kw)) return false;
+          return true;
+        }).sort((a, b) => (tripDateKey(a) || '').localeCompare(tripDateKey(b) || '') || (a.timestamp || 0) - (b.timestamp || 0));
+        return { khoang: `${from} → ${to}`, tong_so: hit.length, don: hit.slice(0, 80).map(bcTrip), ghi_chu: hit.length > 80 ? 'Chỉ hiện 80 đơn đầu' : undefined };
+      },
+      async so_sanh_ban_sao(i) {
+        const [from, to] = bcRange(i.tu_ngay, i.den_ngay);
+        const U = String(i.tai_khoan || '').trim().toUpperCase();
+        if (!U) throw new Error('Thiếu tài khoản');
+        const s = await dbRef(`users_trips/${U}`).orderByChild('dateKey').startAt(from).endAt(to).once('value');
+        const mine = Object.entries(s.val() || {}).map(([id, t]) => Object.assign({ id }, t));
+        const comp = (await bcLoadTrips(from, to)).filter(t => bcNorm(t.createdBy) === U);
+        const byId = {}; comp.forEach(t => { byId[t.id] = t; });
+        const mineIds = new Set(mine.map(t => t.id));
+        const F = ['ticketNumber', 'plateNumber', 'dateStr', 'totalFare', 'paymentMethod', 'destination', 'role', 'staff'];
+        const khac = [];
+        mine.forEach(t => {
+          const c = byId[t.id];
+          if (!c) return;
+          const d = F.filter(f => String(t[f] == null ? '' : t[f]) !== String(c[f] == null ? '' : c[f])).map(f => `${f}: riêng="${t[f] == null ? '' : t[f]}" / công ty="${c[f] == null ? '' : c[f]}"`);
+          if (d.length) khac.push({ id: t.id, phieu: t.ticketNumber, khac_nhau: d });
+        });
+        return { tai_khoan: U, khoang: `${from} → ${to}`, so_don_ban_rieng: mine.length, so_don_ban_cong_ty: comp.length,
+          chi_co_o_ban_rieng_thieu_o_cong_ty: mine.filter(t => !byId[t.id]).map(bcTrip),
+          chi_co_o_ban_cong_ty_thieu_o_ban_rieng: comp.filter(t => !mineIds.has(t.id)).map(bcTrip),
+          khac_noi_dung: khac,
+          giai_thich: 'Bảng Đối Soát chỉ dùng bản công ty. Đơn chỉ có ở bản riêng = tài xế/nhân viên thấy trong Lịch sử nhưng app đối soát KHÔNG thấy.' };
+      },
+      async nhat_ky(i) {
+        if (!bcLogCache || Date.now() - bcLogCache.at > 120000) {
+          const [l, tr] = await Promise.all([
+            dbRef('trip_log').orderByKey().limitToLast(3000).once('value'),
+            dbRef('trash').orderByChild('deletedAt').startAt(Date.now() - 90 * 86400000).once('value')
+          ]);
+          bcLogCache = { at: Date.now(), log: Object.values(l.val() || {}), trash: Object.values(tr.val() || {}) };
+        }
+        const qT = bcNorm(i.so_phieu), qP = normalizePlate(i.bien_so), qU = bcNorm(i.tai_khoan);
+        const from = i.tu_ngay ? bcKey(i.tu_ngay) : '', to = i.den_ngay ? bcKey(i.den_ngay) : (from || '');
+        const inDate = ds => { if (!from) return true; const k = tripDateKey({ dateStr: ds }); return !k || (k >= from && k <= to); };
+        const okT = (tk) => !qT || bcNorm(tk).includes(qT);
+        const okP = (p) => !qP || normalizePlate(p).includes(qP);
+        const log = bcLogCache.log.filter(e => e && e.action !== 'baby_car' && okT(e.ticket) && okP(e.plate) && (!qU || bcNorm(e.by) === qU || bcNorm(e.owner) === qU) && inDate(e.dateStr))
+          .sort((a, b) => (a.at || 0) - (b.at || 0)).slice(-60)
+          .map(e => ({ luc: bcTime(e.at), nguoi_lam: e.by, thao_tac: ({ create: 'nhập mới', edit: 'sửa', delete: 'xóa', restore: 'khôi phục', scan: 'quét giấy', scan_fail: 'quét giấy lỗi' })[e.action] || e.action,
+            chu_don: e.owner || '', phieu: e.ticket || '', xe: e.plate || '', ngay_don: e.dateStr || '', tien: e.fare || 0, chi_tiet: e.detail || '' }));
+        const trash = bcLogCache.trash.filter(t => t && okT(t.ticketNumber) && okP(t.plateNumber) && (!qU || bcNorm(t.createdBy) === qU || bcNorm(t.deletedBy) === qU) && inDate(t.dateStr))
+          .slice(-30).map(t => Object.assign({ xoa_luc: bcTime(t.deletedAt), xoa_boi: t.deletedBy || '' }, bcTrip(t)));
+        return { nhat_ky: log, thung_rac: trash, ghi_chu: 'Nhật ký có từ 11/11/2026 (trước đó app chưa ghi). Chỉ xét ~3000 thao tác gần nhất.' };
+      },
+      async cai_dat() {
+        let acc = [];
+        try { const s = await dbRef('accounts').once('value'); acc = Object.entries(s.val() || {}).map(([u, a]) => ({ tk: u, phan_vung: bcRoleName(a && a.role), hoat_dong: !!(a && a.active !== false) })); } catch (e) { acc = 'không đọc được'; }
+        return { hom_nay: bcTodayText(), moi_truong: IS_TEST_ENV ? 'bản thử' : 'bản chính', gio_khoa_sua_va_han_bao_cao: `${lockHourSetting}:00 ngày hôm sau (sau ngày của đơn)`,
+          bang_gia_dang_ap_dung: activePriceSet === 'cu' ? 'Giá CŨ' : 'Giá MỚI', giam_toi_da: { noi_thanh_pct: Math.round(DISCOUNT_LIMIT.noi * 100), ngoai_thanh_pct: Math.round(DISCOUNT_LIMIT.ngoai * 100) },
+          thanh_toan: { ban_ve: paymentOptions, ke_hoach: planPaymentOptions, ke_hoach_2: plan2PaymentOptions }, tai_khoan: acc };
+      },
+      async ve_bang_minh_hoa(i, b) {
+        const url = bcDrawTable(i);
+        bcShowFig(b, url, i.tieu_de || 'Minh họa');
+        return { ok: true, ghi_chu: 'Đã hiện ảnh trong khung chat (có nút tải về). Không cần mô tả lại ảnh.' };
+      },
+      async cat_anh(i, b) {
+        const src = bcImages[(Number(i.anh_so) || 0) - 1];
+        if (!src) throw new Error('Không có Ảnh ' + i.anh_so);
+        const url = await bcCropImage(src, i);
+        bcShowFig(b, url, i.ghi_chu || 'Ảnh cắt');
+        return { ok: true, ghi_chu: 'Đã hiện ảnh cắt trong khung chat.' };
+      }
+    };
+
+    // ---------- Ảnh minh họa ----------
+    function bcWrap(ctx, text, maxW) {
+      const out = [];
+      String(text == null ? '' : text).split('\n').forEach(par => {
+        const words = par.split(/\s+/);
+        let line = '';
+        words.forEach(w => {
+          const test = line ? line + ' ' + w : w;
+          if (ctx.measureText(test).width <= maxW || !line) {
+            if (ctx.measureText(test).width > maxW && !line) {   // 1 từ quá dài -> cắt ký tự
+              let part = '';
+              [...w].forEach(ch => { if (ctx.measureText(part + ch).width > maxW) { out.push(part); part = ch; } else part += ch; });
+              line = part;
+            } else line = test;
+          } else { out.push(line); line = w; }
+        });
+        out.push(line);
+      });
+      return out;
+    }
+    const BC_FONT = '"Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
+    function bcStamp() { return `Baby Car – App Đối Soát TSS • ${bcTodayText()}`; }
+    function bcDrawTable(i) {
+      const cols = (i.cot || []).map(String).slice(0, 8);
+      const rows = (i.dong || []).slice(0, 20).map(r => cols.map((_, ci) => String((r || [])[ci] == null ? '' : r[ci])));
+      const red = new Set((i.o_do || []).map(x => x.join(','))), green = new Set((i.o_xanh || []).map(x => x.join(',')));
+      const S = 2, pad = 10, lh = 20, colMax = 230;
+      const c = document.createElement('canvas'), ctx = c.getContext('2d');
+      ctx.font = `bold 14px ${BC_FONT}`;
+      const widths = cols.map((h, ci) => {
+        let w = ctx.measureText(h).width;
+        rows.forEach(r => { ctx.font = `14px ${BC_FONT}`; w = Math.max(w, ctx.measureText(r[ci]).width); ctx.font = `bold 14px ${BC_FONT}`; });
+        return Math.max(50, Math.min(colMax, Math.ceil(w))) + pad * 2;
+      });
+      const tableW = widths.reduce((a, b) => a + b, 0);
+      const W = Math.max(560, tableW + 40);
+      ctx.font = `bold 14px ${BC_FONT}`;
+      const headLines = cols.map((h, ci) => bcWrap(ctx, h, widths[ci] - pad * 2));
+      const headH = Math.max(...headLines.map(l => l.length), 1) * lh + pad * 2;
+      const cellLines = rows.map((r, ri) => r.map((v, ci) => { ctx.font = `${red.has(ri + ',' + ci) ? 'bold ' : ''}14px ${BC_FONT}`; return bcWrap(ctx, v, widths[ci] - pad * 2); }));
+      const rowH = cellLines.map(r => Math.max(...r.map(l => l.length), 1) * lh + pad * 2);
+      ctx.font = `bold 20px ${BC_FONT}`;
+      const titleLines = bcWrap(ctx, i.tieu_de || '', W - 40);
+      ctx.font = `bold 15px ${BC_FONT}`;
+      const concl = bcWrap(ctx, i.ket_luan || '', W - 60);
+      const H = 20 + titleLines.length * 28 + 10 + headH + rowH.reduce((a, b) => a + b, 0) + (concl.length ? 20 + concl.length * 22 + 24 : 0) + 40;
+      c.width = W * S; c.height = H * S;
+      ctx.scale(S, S);
+      ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, W, H);
+      ctx.textBaseline = 'top';
+      let y = 20;
+      ctx.fillStyle = '#1e1b4b'; ctx.font = `bold 20px ${BC_FONT}`;
+      titleLines.forEach(l => { ctx.fillText(l, 20, y); y += 28; });
+      y += 10;
+      const x0 = (W - tableW) / 2;
+      // tiêu đề cột
+      ctx.fillStyle = '#1e293b'; ctx.fillRect(x0, y, tableW, headH);
+      let x = x0;
+      cols.forEach((h, ci) => {
+        ctx.fillStyle = '#ffffff'; ctx.font = `bold 14px ${BC_FONT}`;
+        headLines[ci].forEach((l, li) => ctx.fillText(l, x + pad, y + pad + li * lh));
+        x += widths[ci];
+      });
+      y += headH;
+      rows.forEach((r, ri) => {
+        x = x0;
+        r.forEach((v, ci) => {
+          const k = ri + ',' + ci, isR = red.has(k), isG = green.has(k);
+          ctx.fillStyle = isR ? '#fee2e2' : isG ? '#dcfce7' : (ri % 2 ? '#f8fafc' : '#ffffff');
+          ctx.fillRect(x, y, widths[ci], rowH[ri]);
+          ctx.strokeStyle = '#cbd5e1'; ctx.lineWidth = 1; ctx.strokeRect(x + 0.5, y + 0.5, widths[ci] - 1, rowH[ri] - 1);
+          if (isR) { ctx.strokeStyle = '#dc2626'; ctx.lineWidth = 3; ctx.strokeRect(x + 1.5, y + 1.5, widths[ci] - 3, rowH[ri] - 3); }
+          ctx.fillStyle = isR ? '#b91c1c' : isG ? '#166534' : '#0f172a';
+          ctx.font = `${isR || isG ? 'bold ' : ''}14px ${BC_FONT}`;
+          cellLines[ri][ci].forEach((l, li) => ctx.fillText(l, x + pad, y + pad + li * lh));
+          x += widths[ci];
+        });
+        y += rowH[ri];
+      });
+      if (concl.length) {
+        y += 20;
+        const bh = concl.length * 22 + 16;
+        ctx.fillStyle = '#eef2ff'; ctx.fillRect(20, y - 8, W - 40, bh);
+        ctx.fillStyle = '#4338ca'; ctx.fillRect(20, y - 8, 5, bh);
+        ctx.fillStyle = '#1e1b4b'; ctx.font = `bold 15px ${BC_FONT}`;
+        concl.forEach(l => { ctx.fillText(l, 34, y); y += 22; });
+        y += 16;
+      }
+      ctx.fillStyle = '#94a3b8'; ctx.font = `12px ${BC_FONT}`;
+      ctx.fillText(bcStamp(), 20, H - 26);
+      return c.toDataURL('image/png');
+    }
+    function bcLoadImg(src) {
+      return new Promise((res, rej) => { const im = new Image(); im.onload = () => res(im); im.onerror = () => rej(new Error('Không mở được ảnh')); im.src = src; });
+    }
+    async function bcCropImage(src, i) {
+      const im = await bcLoadImg(src);
+      const iw = im.naturalWidth, ih = im.naturalHeight;
+      const cl = v => Math.max(0, Math.min(1, Number(v) || 0));
+      const v = i.vung || {};
+      let sx = cl(v.x) * iw, sy = cl(v.y) * ih;
+      let sw = Math.max(20, cl(v.rong) * iw), sh = Math.max(20, cl(v.cao) * ih);
+      sw = Math.min(sw, iw - sx); sh = Math.min(sh, ih - sy);
+      const k = Math.min(3, Math.max(1, 700 / sw));
+      const W = Math.round(sw * k);
+      const c = document.createElement('canvas'), ctx = c.getContext('2d');
+      ctx.font = `bold 16px ${BC_FONT}`;
+      const note = bcWrap(ctx, i.ghi_chu || '', W - 24);
+      const H = Math.round(sh * k) + note.length * 22 + 50;
+      c.width = W; c.height = H;
+      ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, W, H);
+      ctx.drawImage(im, sx, sy, sw, sh, 0, 0, W, Math.round(sh * k));
+      ctx.strokeStyle = '#dc2626'; ctx.lineWidth = 4;
+      (i.khung_do || []).forEach(r => {
+        const rx = (cl(r.x) * iw - sx) * k, ry = (cl(r.y) * ih - sy) * k, rw = cl(r.rong) * iw * k, rh = cl(r.cao) * ih * k;
+        ctx.strokeRect(rx, ry, rw, rh);
+      });
+      let y = Math.round(sh * k) + 12;
+      ctx.textBaseline = 'top';
+      ctx.fillStyle = '#b91c1c'; ctx.font = `bold 16px ${BC_FONT}`;
+      note.forEach(l => { ctx.fillText(l, 12, y); y += 22; });
+      ctx.fillStyle = '#94a3b8'; ctx.font = `11px ${BC_FONT}`;
+      ctx.fillText(bcStamp(), 12, H - 20);
+      return c.toDataURL('image/png');
+    }
+    function bcShowFig(b, url, caption) {
+      const id = 'bc-fig' + (++bcFigN);
+      b._figs.push(url);
+      b.querySelector('.bc-figs').insertAdjacentHTML('beforeend', `
+        <div class="border border-slate-200 rounded-xl overflow-hidden bg-slate-50">
+          <img id="${id}" src="${url}" class="w-full block" alt="${escHtml(caption)}">
+          <div class="flex flex-wrap gap-2 p-2">
+            <button onclick="bcDownload('${id}')" class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-extrabold">📥 Tải ảnh</button>
+            ${navigator.share ? `<button onclick="bcShare('${id}')" class="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-extrabold">📤 Gửi (Zalo...)</button>` : ''}
+            <span class="text-[10px] text-slate-500 self-center">Điện thoại: giữ ngón tay trên ảnh → Lưu vào Ảnh</span>
+          </div>
+        </div>`);
+      bcScroll();
+    }
+    function bcFileName() { const d = new Date(), p = n => String(n).padStart(2, '0'); return `BabyCar_${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}.png`; }
+    function bcDownloadUrl(url) {
+      const a = document.createElement('a');
+      a.href = url; a.download = bcFileName();
+      document.body.appendChild(a); a.click(); a.remove();
+    }
+    function bcDownload(id) { const im = document.getElementById(id); if (im) bcDownloadUrl(im.src); }
+    async function bcShare(id) {
+      const im = document.getElementById(id);
+      if (!im) return;
+      try {
+        const blob = await (await fetch(im.src)).blob();
+        const file = new File([blob], bcFileName(), { type: 'image/png' });
+        if (navigator.canShare && !navigator.canShare({ files: [file] })) return bcDownloadUrl(im.src);
+        await navigator.share({ files: [file] });
+      } catch (e) { if (e && e.name !== 'AbortError') bcDownloadUrl(im.src); }
+    }
+    // Cả câu trả lời (chữ + ảnh minh họa) thành 1 ảnh dọc để gửi sếp
+    async function bcAnswerImage(bid) {
+      const b = document.getElementById(bid);
+      if (!b) return;
+      const W = 760, S = 2;
+      const c = document.createElement('canvas'), ctx = c.getContext('2d');
+      ctx.font = `15px ${BC_FONT}`;
+      const lines = bcWrap(ctx, bcStripMd(b._texts.join('\n\n')).replace(/\n{3,}/g, '\n\n'), W - 60);
+      const figs = [];
+      for (const u of b._figs) figs.push(await bcLoadImg(u));
+      const figH = figs.reduce((a, im) => a + Math.round(im.naturalHeight * (W - 40) / im.naturalWidth) + 16, 0);
+      const H = 70 + lines.length * 23 + 20 + figH + 40;
+      c.width = W * S; c.height = H * S;
+      ctx.scale(S, S);
+      ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = '#4338ca'; ctx.fillRect(0, 0, W, 50);
+      ctx.textBaseline = 'top';
+      ctx.fillStyle = '#ffffff'; ctx.font = `bold 20px ${BC_FONT}`;
+      ctx.fillText('🤖 Baby Car – Giải thích', 20, 14);
+      let y = 70;
+      ctx.fillStyle = '#0f172a'; ctx.font = `15px ${BC_FONT}`;
+      lines.forEach(l => {
+        ctx.font = `${/LỖI APP/i.test(l) ? 'bold ' : ''}15px ${BC_FONT}`;
+        ctx.fillStyle = /LỖI APP/i.test(l) ? '#b91c1c' : '#0f172a';
+        ctx.fillText(l, 30, y); y += 23;
+      });
+      y += 20;
+      figs.forEach(im => {
+        const h = Math.round(im.naturalHeight * (W - 40) / im.naturalWidth);
+        ctx.drawImage(im, 20, y, W - 40, h);
+        ctx.strokeStyle = '#cbd5e1'; ctx.lineWidth = 1; ctx.strokeRect(20, y, W - 40, h);
+        y += h + 16;
+      });
+      ctx.fillStyle = '#94a3b8'; ctx.font = `12px ${BC_FONT}`;
+      ctx.fillText(bcStamp(), 20, H - 26);
+      bcShowFig(b, c.toDataURL('image/png'), 'Câu trả lời');
+      b._figs.pop();   // ảnh tổng không gộp lại lần sau
     }
   </script>
 </body>

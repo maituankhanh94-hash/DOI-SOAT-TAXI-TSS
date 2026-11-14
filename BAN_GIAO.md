@@ -1,4 +1,4 @@
-# BÀN GIAO KỸ THUẬT — App Đối Soát Bill Taxi TSS (11/11/2026)
+# BÀN GIAO KỸ THUẬT — App Đối Soát Bill Taxi TSS (cập nhật 14/11/2026)
 
 > Gửi Claude ở phiên mới. Bạn đang tiếp nhận một app đang chạy THẬT, có dữ liệu thật của công ty.
 > Hãy đọc hết tài liệu này, đọc thêm `CLAUDE.md` trong repo, rồi mới sửa code.
@@ -95,12 +95,14 @@ Có 4 phân vùng: `pos`, `driver`, `plan`, `manager` (Quản lý).
 |---|---|---|
 | `trips/<id>` | Mọi đơn của công ty. id = `X<timestamp>_<i>` | QL đọc/ghi; NV ghi đơn của mình |
 | `users_trips/<USER>/<id>` | Bản sao đơn theo tài khoản | QL + chính chủ |
-| `settings/sources, staff, carTypes, payments, planPayments, lockHour` | Danh mục (mảng, chỉ QL ghi) | NV đọc từng mục |
+| `settings/sources, staff, carTypes, payments, planPayments, plan2Payments, lockHour` | Danh mục (mảng, chỉ QL ghi) | NV đọc từng mục |
 | `login_index/<USER>={ver}` | Để biết email khi đăng nhập | công khai |
 | `accounts/<USER>={role,active,uid,ver}` | Danh sách tài khoản | QL |
 | `roles/<uid>={user,role,active}` | Quy tắc dựa vào đây | |
 | `places/<slug>={name,n}` | Gợi ý địa chỉ | NV đang hoạt động |
 | `meta/` | `dateKeyV1`, `priceSet`, `discountLimit`, (bản thử: `biz`) | đọc: NV; ghi: QL |
+| `trash/<id>_<ms>` | Thùng rác: bản sao đơn bị xóa + deletedAt, deletedBy | QL đọc/xóa; NV chỉ thêm đơn của mình |
+| `trip_log/<pushId>` | Nhật ký: create/edit/delete/restore/scan/scan_fail (chỉ thêm, không sửa/xóa) | QL đọc; ai cũng chỉ ghi `by` = chính mình |
 | `test_env/…` | Toàn bộ dữ liệu bản thử (link có `-git-`) | khóa chặt |
 
 - **Trường của 1 đơn**: id, dateStr (dd/mm/yyyy), dateKey (yyyy-mm-dd), timeStr, ticketNumber, originalTicket, plateNumber, carType, source, pickup (T1/T2/T3), destination, totalFare, originalTotalFare, paymentMethod, note, staff, role, createdBy, timestamp. Có thể có thêm: priceId, priceLabel, listPrice, priceZone, priceSet.
@@ -146,6 +148,19 @@ Có 4 phân vùng: `pos`, `driver`, `plan`, `manager` (Quản lý).
 - Kế hoạch không bắt buộc biển số.
 - Sửa ngày tại chỗ trong bảng đối soát.
 
+### Đã làm thêm 11–14/11 (đều ĐÃ LÊN MAIN — chi tiết từng phần trong CLAUDE.md)
+- Excel: bỏ mọi icon/emoji (`xlStripIcons`).
+- Đối soát ghép đơn tài xế ghi lệch 1 ngày → trạng thái "🔵 Khớp – Lệch ngày" + nút "Sửa ngày theo bán vé" (số phiếu không bao giờ trùng).
+- Nhật ký đơn hàng (ai nhập/sửa/xóa) + Thùng rác 90 ngày có Khôi phục (nút 🗂️ ở bảng đối soát). Quy tắc Firebase đã dán.
+- Nhắc báo cáo: "Tài xế chưa báo" hiện từng phiếu (xe, phiếu, người bán, điểm đến, tiền), bấm để lọc.
+- Dữ Liệu MISA: cột F = 3 số cuối biển số (kiểu số), cột O = chỉ nhân viên bán vé/KH, Đơn giá/Thành tiền = TOTAL (giá xe + bảng đón).
+- Phân vùng **Team Kế Hoạch 2** (`plan2`, hồng): chạy như Kế hoạch, danh sách thanh toán riêng `settings/plan2Payments`.
+- **Bảng đón** (chỉ KH2, `signFee`, công nợ đối tác, không so với tài xế). Excel Đối Soát: cột Giá Xe | Bảng Đón | TOTAL; Tổng Hợp mục 4 theo đối tác.
+- Đơn Kế hoạch / KH2 KHÔNG rà soát giảm giá vượt mức (giá đã duyệt).
+- Bảng nhập trên điện thoại hết giật (chỉ cuộn ngang), cột STT đứng yên + số phiếu, Enter/"Tiếp" sang ô kế, tự chép tên dòng trên; ô Ngày là lịch (`type=date`); app học thói quen nhập (tên, loại xe, nguồn, ga, thanh toán; tài xế thêm biển số).
+- **Quét giấy**: in mẫu giấy + chụp/chọn ảnh → Google Gemini gói miễn phí đọc (`api/scan.js` trên Vercel, khóa `GEMINI_API_KEY` trên Vercel) → điền bảng, ô vàng = chưa chắc; tự thử lại khi hết lượt/phút; đếm lượt quét ở Nhật ký. Cách dự phòng: chép chữ Live Text/Lens rồi dán.
+- Người dùng KHÔNG muốn nhập kiểu thẻ trên điện thoại (nhánh `nhap-don-nhanh` bỏ).
+
 ## 6. TUYỆT ĐỐI KHÔNG lặp lại
 1. **Không chạy thử app nối vào Firebase thật.** Chỉ dùng Firebase Emulator (xem `CLAUDE.md` mục "Cách thử") hoặc vùng `test_env`. Không ghi dữ liệu thật khi người dùng chưa đồng ý.
 2. **Không tự đổi giá hay dữ liệu đơn cũ.** Bảng giá chỉ để lọc. Số phiếu `-1/1` chỉ đổi lúc hiển thị và xuất file.
@@ -180,11 +195,13 @@ Có 4 phân vùng: `pos`, `driver`, `plan`, `manager` (Quản lý).
 ## 8. Việc đang dở / tiếp theo
 | Việc | Nhánh | Trạng thái |
 |---|---|---|
-| Hiệu Quả Kinh Doanh: lời/lỗ, lợi nhuận từng nhân viên, hòa vốn, cài % tài xế 64%, % hoa hồng và lương theo nhóm QT/QN 3% 160k, C10/T1/T3/KH 7% 320k, CTV 15% 0đ, KIOT 3% 160k (lưu `meta/biz`), xuất Excel | `hieu-qua-kinh-doanh` | Bản thử. **Chờ người dùng xác nhận**: % hoa hồng của T1/T3/KH/KIOT; lương tính theo "ngày có bán"; có tính đơn Kế hoạch không |
-| Giữ dòng chưa lưu khi nhập hàng loạt + lưu tạm trên máy + khôi phục sau F5 | `giu-dong-chua-luu` | Bản thử, đã thử chạy. Chờ "đưa lên bản chính" (chạy lại thử trước) |
-| Sao lưu, thùng rác, chặn bản app cũ | `sao-luu-thung-rac` | Chưa lên main. Khác main nhiều, có thể phải sửa lại theo main mới |
-| Cột F "Mã khách hàng" của MISA | — | App chưa có mã chủ xe theo biển số. Có thể làm bảng tra biển số → mã KH (Quản lý nhập) |
-| Thông báo điện thoại, ô gõ địa chỉ có bản đồ (Goong, trả phí) | — | Người dùng chưa quyết |
-| Chuyển repo sang **Private** | — | Nhắc người dùng (repo đang công khai) |
+| Quét giấy Gemini — CHƯA từng gọi thật thành công (sandbox không ra được Google/Vercel) | main | Chờ người dùng quét thử tờ giấy thật, gửi lỗi nếu có. Khóa Gemini đã LỘ trong ảnh chat (bắt đầu "AQ.") → nhắc tạo khóa mới, sửa trên Vercel, Redeploy |
+| Hỏi người dùng: hoa hồng 7%/3%/15% tính trên tổng tiền cuốc hay trên phần 34% công ty | — | Đã hỏi 13/11, chưa trả lời (xem CLAUDE.md "THÔNG TIN KINH DOANH CẦN NHỚ") |
+| Hiệu Quả Kinh Doanh (lời/lỗ, lợi nhuận từng NV, hòa vốn) | `hieu-qua-kinh-doanh` | Bản thử cũ, dùng tài xế 64% → phải đổi theo số mới (tài xế 66%, BV 7%, KH 7%, KIOT 3%, CTV 15%) và gộp với main mới |
+| Giữ dòng chưa lưu + lưu tạm trên máy | `giu-dong-chua-luu` | Chưa lên main (main vẫn xóa cả bảng sau khi lưu). Phải gộp lại với main mới (bảng nhập đã đổi nhiều) |
+| Sao lưu, chặn bản app cũ | `sao-luu-thung-rac` | Phần thùng rác đã làm lại ở main; phần sao lưu JSON / chặn bản cũ chưa làm |
+| Thông báo điện thoại, ô địa chỉ có bản đồ | — | Người dùng chưa quyết |
+| Chuyển repo sang **Private** | — | Nhắc người dùng (repo công khai; Vercel Hobby vẫn deploy được repo private) |
 
-Các nhánh thử đều tách ra từ main cũ. Khi đưa lên, nhớ gộp với main mới nhất và chạy thử lại.
+Khi người dùng nói "đưa lên bản chính": gộp nhánh vào main (FORCE_TEST_ENV = false), kiểm tra cú pháp, push, chờ Vercel "Deployment has completed", cập nhật CLAUDE.md/BAN_GIAO.md.
+Mở cuộc trò chuyện mới: cập nhật file này + CLAUDE.md, push main, rồi tạo phiên mới trỏ vào repo với lời dặn "Đọc BAN_GIAO.md và CLAUDE.md…".

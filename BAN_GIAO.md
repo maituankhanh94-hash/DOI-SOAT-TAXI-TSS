@@ -160,6 +160,7 @@ Có 4 phân vùng: `pos`, `driver`, `plan`, `manager` (Quản lý).
 - Bảng nhập trên điện thoại hết giật (chỉ cuộn ngang), cột STT đứng yên + số phiếu, Enter/"Tiếp" sang ô kế, tự chép tên dòng trên; ô Ngày là lịch (`type=date`); app học thói quen nhập (tên, loại xe, nguồn, ga, thanh toán; tài xế thêm biển số).
 - **Quét giấy**: in mẫu giấy + chụp/chọn ảnh → Google Gemini gói miễn phí đọc (`api/scan.js` trên Vercel, khóa `GEMINI_API_KEY` trên Vercel) → điền bảng, ô vàng = chưa chắc; tự thử lại khi hết lượt/phút; đếm lượt quét ở Nhật ký. Cách dự phòng: chép chữ Live Text/Lens rồi dán.
 - Người dùng KHÔNG muốn nhập kiểu thẻ trên điện thoại (nhánh `nhap-don-nhanh` bỏ).
+- **Baby Car** (14/11): trợ lý hỏi đáp Claude ở trang Quản lý (gửi ảnh + câu hỏi → tra dữ liệu thật, giải thích, báo lỗi app, ảnh minh họa tải về). `api/chat.js` + khóa `ANTHROPIC_API_KEY` trên Vercel (khóa "baby-car", hạn 1 năm). Chi tiết trong CLAUDE.md.
 
 ## 6. TUYỆT ĐỐI KHÔNG lặp lại
 1. **Không chạy thử app nối vào Firebase thật.** Chỉ dùng Firebase Emulator (xem `CLAUDE.md` mục "Cách thử") hoặc vùng `test_env`. Không ghi dữ liệu thật khi người dùng chưa đồng ý.

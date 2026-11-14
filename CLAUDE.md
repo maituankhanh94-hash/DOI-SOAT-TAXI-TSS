@@ -69,6 +69,7 @@
 - Cột STT (`.bstt`) sticky trái + hiện số phiếu của dòng (`stt-t-i`).
 - `onBatchKeydown`: Enter / "Tiếp" → ô kế tiếp theo thứ tự DOM trong tbody (bỏ qua nếu ô gợi ý đã xử lý Enter: `defaultPrevented`); inputs có `enterkeyhint="next"`.
 - `onBatchRowInput`: gõ vào phiếu/biển số/điểm đến/tiền/bảng đón/ghi chú của dòng mới mà Tên trống → chép tên từ dòng trên gần nhất.
+- (14/11, LÊN MAIN) Ô Số phiếu tự nhảy số kế tiếp khi bấm vào (`handleSmartTicketFocus`) — TẮT cho TÀI XẾ (`staffRole === 'driver'`), vì tài xế mỗi cuốc 1 phiếu không theo thứ tự. Bán vé / KH / KH2 vẫn giữ.
 
 ## Lịch chọn ngày + học thói quen nhập (13/11, ĐÃ LÊN MAIN; nhánh `lich-va-thoi-quen`)
 - Ô Ngày bảng nhập hàng loạt = `<input type="date">` (giá trị yyyy-mm-dd, mặc định `localDateKey(now)`, bấm mở lịch `showPicker`). submitBatch dùng `normalizeDateInput` → dd/mm/yyyy như cũ. (Nhánh `quet-giay`: `applyScanToBatch` đang set ngày dd/mm/yyyy → khi gộp phải đổi sang yyyy-mm-dd.)

@@ -2459,6 +2459,8 @@
     }
 
     function handleSmartTicketFocus(currentIndex) {
+      // (14/11) Tài xế: mỗi cuốc 1 số phiếu khác nhau, không theo thứ tự -> KHÔNG tự nhảy số, để tài xế tự nhập
+      if (staffRole === 'driver') return;
       const currentInput = document.getElementById(`t-${currentIndex}`);
       if (currentInput && !currentInput.value.trim() && currentIndex > 0) {
         for (let j = currentIndex - 1; j >= 0; j--) {

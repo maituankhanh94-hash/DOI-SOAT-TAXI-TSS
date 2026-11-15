@@ -84,6 +84,11 @@
 - `vercel.json`: Cache-Control no-cache, must-revalidate cho `/` và `/index.html`.
 - Máy đang chạy bản cũ (trước 15/11) chưa có code này → phải tự tải lại / đóng mở lại 1 lần.
 
+## iPhone đời cũ: ô nhập mất hình khi chuyển ô (15/11, LÊN MAIN)
+- Người dùng: máy chưa cập nhật iOS, gõ xong chuyển ô thì CHỮ + KHUNG ô vừa gõ biến mất → nhân viên lo không biết đã ghi nhận chưa. Là lỗi VẼ của WebKit cũ với ô nhập trong khung cuộn ngang (giá trị vẫn còn). Không thử được trên iOS thật trong sandbox.
+- `OLD_IOS` (UA iPhone/iPad OS < 17) → `html.old-ios`: `#batch-wrap` translateZ(0) + -webkit-overflow-scrolling; `onBatchFocusOut` (tbody onfocusout) ép vẽ lại ô vừa rời (`repaintEl`: opacity 0.99 qua 2 khung hình). KHÔNG đặt transform lên từng ô (iOS cũ lệch con trỏ).
+- Xác nhận bằng CHỮ THƯỜNG (không bị lỗi vẽ), mọi máy: ô STT dòng đã gõ chuyển XANH "✓ n" + số phiếu; khung `#batch-preview` DƯỚI bảng "📝 Đã ghi nhận n dòng – CHƯA LƯU" liệt kê từng dòng (tên • phiếu • xe • điểm đến • tiền • TT). Chỉ tính dòng có ô `dataset.touched` (bỏ số phiếu tự nhảy/thói quen). `updateBatchPreview` gọi khi gõ (trễ 250ms), focusout, chọn gợi ý, vẽ lại bảng. Không đặt khung xác nhận TRÊN bảng (đẩy bảng xuống gây chạm nhầm).
+
 ## Lịch chọn ngày + học thói quen nhập (13/11, ĐÃ LÊN MAIN; nhánh `lich-va-thoi-quen`)
 - Ô Ngày bảng nhập hàng loạt = `<input type="date">` (giá trị yyyy-mm-dd, mặc định `localDateKey(now)`, bấm mở lịch `showPicker`). submitBatch dùng `normalizeDateInput` → dd/mm/yyyy như cũ. (Nhánh `quet-giay`: `applyScanToBatch` đang set ngày dd/mm/yyyy → khi gộp phải đổi sang yyyy-mm-dd.)
 - `learnHabits(role)`: 40 đơn gần nhất của chính tài khoản (personalTrips) → giá trị dùng nhiều nhất (≥2 lần, hòa thì lấy gần nhất): Tên, Loại xe, Nguồn, Điểm đón, Thanh toán; TÀI XẾ thêm Biển số. Bán vé/KH không điền sẵn biển số/phiếu. `applyHabitsToBatch` chạy sau `renderBatchRows` và mỗi lần personalTrips tải xong; bỏ qua dòng đang nhập dở và ô người dùng đã sửa (`dataset.touched`, đặt trong `onBatchRowInput`, tbody nghe cả input + change). Không lưu gì thêm (tính từ lịch sử đơn).

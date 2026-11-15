@@ -15,6 +15,8 @@
     /* (13/11) Bảng nhập hàng loạt trên điện thoại: chỉ cuộn NGANG (lên xuống theo cả trang) để iPhone không giật khi bàn phím mở */
     #batch-table td.bstt { position: sticky; left: 0; z-index: 5; background: #fff; box-shadow: 2px 0 4px -2px rgba(15,23,42,.25); }
     #batch-table th.bstt { position: sticky; left: 0; z-index: 25; }
+    /* (15/11) iPhone đời cũ: ô nhập trong khung cuộn ngang bị MẤT HÌNH (chữ + khung) khi chuyển ô -> ép khung thành lớp riêng để máy vẽ lại */
+    html.old-ios #batch-wrap { -webkit-transform: translateZ(0); transform: translateZ(0); -webkit-overflow-scrolling: touch; }
     @media (max-width: 767px) {
       #batch-wrap { max-height: none !important; overflow-y: hidden !important; }
       #batch-table thead { position: static !important; }
@@ -699,6 +701,7 @@
       }
       const drop = document.getElementById(el.dataset.drop);
       if (drop) drop.innerHTML = '';
+      if (typeof updateBatchPreview === 'function') setTimeout(updateBatchPreview, 60);
     }
     function suggestKeydown(e, dropId) {
       const drop = document.getElementById(dropId);
@@ -1488,9 +1491,10 @@
                     <th class="p-3 min-w-[180px] bg-slate-900">Ghi Chú</th>
                   </tr>
                 </thead>
-                <tbody id="tbody-batch" class="divide-y divide-slate-200 text-xs" oninput="onBatchRowInput(event)" onchange="onBatchRowInput(event)" onkeydown="onBatchKeydown(event)"></tbody>
+                <tbody id="tbody-batch" class="divide-y divide-slate-200 text-xs" oninput="onBatchRowInput(event)" onchange="onBatchRowInput(event)" onkeydown="onBatchKeydown(event)" onfocusout="onBatchFocusOut(event)"></tbody>
               </table>
             </div>
+            <div id="batch-preview" class="hidden"></div>
           </div>
         </div>
       `;
@@ -1572,6 +1576,7 @@
       tb.innerHTML = html;
       tb.querySelectorAll('input').forEach(e => e.setAttribute('enterkeyhint', 'next'));
       applyHabitsToBatch();
+      updateBatchPreview();
     }
 
     // ===== HỌC THÓI QUEN NHẬP (13/11) =====
@@ -1628,6 +1633,7 @@
       const m = /^([a-z]+)-(\d+)$/.exec(el.id); if (!m) return;
       const k = m[1], i = Number(m[2]);
       el.dataset.touched = '1';
+      clearTimeout(onBatchRowInput._pv); onBatchRowInput._pv = setTimeout(updateBatchPreview, 250);
       if (k === 't') { const s = document.getElementById(`stt-t-${i}`); if (s) s.textContent = el.value.trim(); }
       if (['t', 'p', 'd', 'f', 'sf', 'note'].includes(k) && el.value.trim() && i > 0) {
         const st = document.getElementById(`staff-${i}`);
@@ -1635,6 +1641,41 @@
           for (let j = i - 1; j >= 0; j--) { const v = (document.getElementById(`staff-${j}`) || {}).value; if (v && v.trim()) { st.value = v.trim(); break; } }
         }
       }
+    }
+    // (15/11) iPhone đời cũ: ô vừa rời đi bị mất hình -> ép vẽ lại; đồng thời cập nhật DÒNG XÁC NHẬN (chữ thường, không bị lỗi vẽ)
+    const OLD_IOS = (() => { const m = /(?:iPhone|iPad|iPod)[^)]*OS (\d+)_/.exec(navigator.userAgent); return !!(m && Number(m[1]) < 17); })();
+    if (OLD_IOS) document.documentElement.classList.add('old-ios');
+    function repaintEl(el) {
+      if (!el || !el.style) return;
+      requestAnimationFrame(() => {
+        el.style.opacity = '0.99';
+        requestAnimationFrame(() => { el.style.opacity = ''; const w = document.getElementById('batch-wrap'); if (w) { w.style.opacity = '0.999'; requestAnimationFrame(() => { w.style.opacity = ''; }); } });
+      });
+    }
+    function onBatchFocusOut(ev) {
+      if (OLD_IOS) repaintEl(ev && ev.target);
+      setTimeout(updateBatchPreview, 60);   // đợi tự điền giá / chọn gợi ý xong
+    }
+    function updateBatchPreview() {
+      const box = document.getElementById('batch-preview');
+      if (!box) return;
+      const v = id => { const e = document.getElementById(id); return e ? String(e.value || '').trim() : ''; };
+      const lines = [];
+      for (let i = 0; i < 20; i++) {
+        const t = v(`t-${i}`), p = v(`p-${i}`), d = v(`d-${i}`), f = v(`f-${i}`), sf = v(`sf-${i}`), note = v(`note-${i}`);
+        // chỉ tính dòng nhân viên THẬT SỰ gõ (bỏ qua số phiếu tự nhảy / thói quen tự điền)
+        const typed = ['t', 'p', 'd', 'f', 'sf', 'note', 'staff'].some(k => { const e = document.getElementById(`${k}-${i}`); return e && e.dataset.touched && String(e.value || '').trim(); });
+        const ok = typed && (t || p || d || f || sf || note);
+        const sttTd = (document.getElementById(`stt-t-${i}`) || {}).parentElement;
+        if (sttTd) { sttTd.style.background = ok ? '#d1fae5' : ''; sttTd.classList.toggle('text-emerald-800', !!ok); const n = sttTd.firstElementChild; if (n) n.textContent = ok ? `✓ ${i + 1}` : `${i + 1}`; }
+        if (!ok) continue;
+        const fare = Number(String(f).replace(/[^0-9]/g, '')) || 0;
+        const parts = [v(`staff-${i}`) || '(chưa có tên)', t ? 'Phiếu ' + t : '(chưa có phiếu)', p ? 'Xe ' + p : '', d, fare ? fare.toLocaleString('vi-VN') + 'đ' : '', v(`m-${i}`)].filter(Boolean);
+        lines.push(`<div class="py-0.5">✅ <b>Dòng ${i + 1}:</b> ${parts.map(escHtml).join(' • ')}</div>`);
+      }
+      if (!lines.length) { box.className = 'hidden'; box.innerHTML = ''; return; }
+      box.className = 'mt-2 bg-emerald-50 border border-emerald-300 rounded-2xl p-3 text-[12px] text-emerald-900 font-semibold';
+      box.innerHTML = `<div class="font-extrabold text-emerald-800 mb-1">📝 Đã ghi nhận ${lines.length} dòng trên máy – <span class="text-rose-700">CHƯA LƯU</span>, kiểm tra rồi bấm "Lưu Đơn Lên Cloud":</div>${lines.join('')}`;
     }
     function batchFields() { return [...document.querySelectorAll('#tbody-batch input, #tbody-batch select')].filter(e => !e.disabled && e.type !== 'hidden'); }
     function onBatchKeydown(ev) {

@@ -116,6 +116,14 @@
 - (15/11, người dùng đính chính) TÍNH CẢ Kế hoạch + Kế hoạch 2 (`isSellRole`) – Bán vé/điều hành/kế hoạch đều là người kiếm khách; CHỈ loại Tài xế. Tiêu đề "Bán Vé & Kế Hoạch". Nhóm mới `KH` "Kế hoạch": 10% DT (file kế toán), lương 320k (sửa được). NV có ≥ nửa số đơn nhập ở trang plan/plan2 → tự nhận KH (`how: 'role'`, ưu tiên trước nguồn đơn). Bảng đón (signFee) KHÔNG cộng vào doanh thu ở khung này.
 - Đã thử: `BIZ_SCHEMES` khớp từng đồng 13 NV trong file kế toán tháng 9 (KIOT, Quầy xe lũy tiến, QN, T1, T3 90tr→9%, C10, CTV); emulator: chia hoa hồng theo ngày khi vượt bậc (39tr→41tr: 90k), lưu lương nhóm, Excel.
 
+## Chúc mừng doanh thu + TOP ngày/tháng (15/11, ĐÃ LÊN MAIN)
+- Popup "VINH DANH XUẤT SẮC" ở máy nhân viên (`updatePersonalSummary` → `showStaffCelebrationModal`): mốc đổi từ 2tr thành TRÊN 3tr (`CELEBRATE_MIN = 3000000`).
+- Thêm dòng "🏅 Đang TOP x/N doanh thu ngày" và "📅 TOP y/M doanh thu tháng (tháng này: …)" – chỉ Bán vé/KH/KH2 (`isSellRole(staffRole)`), tài xế không có.
+- Nhân viên KHÔNG đọc được trips người khác → BẢNG XẾP HẠNG CHUNG `rank/<yyyy-mm-dd>/<TÀI KHOẢN>` = {<placeSlug(tên NV)>: {name, rev}} (chỉ tên + tổng tiền). `publishMyRank()` chạy mỗi lần personalTrips tải (staffCb): ghi cả THÁNG NÀY tới hôm nay (ngày không đơn = null), chỉ ghi khi đổi. `myRankInfo(tên, dk)` đọc `rank` orderByKey từ đầu tháng tới dk, cộng theo slug tên (đơn chia "A + B" gộp đúng người qua các tài khoản), xếp hạng. Lỗi/quy tắc cũ → bỏ qua (popup vẫn hiện, không có dòng TOP).
+- Quy tắc mới: `rank` .read active, `$d/$u` .write mgr hoặc $u === chính mình (`sinh-quy-tac.js`). Package.json "type: module" → chạy script sinh quy tắc bằng cách chép ra `.cjs` (`cp firebase-rules/sinh-quy-tac.js /tmp/x.cjs && node /tmp/x.cjs firebase-rules`). NGƯỜI DÙNG PHẢI DÁN `quy-tac-buoc-2.json` mới.
+- Hạn chế: chỉ có số của tài khoản đã mở app sau bản cập nhật (đơn mới nhập sẽ tự gửi); quản lý sửa đơn của NV thì rank cập nhật khi NV mở app lại. Tên gõ tắt chưa được gộp như khung Lời/Âm.
+- Đã thử emulator: 3,5tr → popup + TOP 2/3 ngày, TOP 3/3 tháng; 2,5tr → không popup; rank ghi đúng.
+
 ## Nhật ký & Thùng rác (11/11, ĐÃ LÊN MAIN; nhánh `nhat-ky-thung-rac`; người dùng đã dán quy tắc mới có trash + trip_log)
 - Sự cố: đơn xe 298 ngày 10/11 (8 đơn, 3.050.000đ) đã hiện trên máy tài xế lúc 03:51 rồi biến mất; app không có dấu vết ai xóa. Rà code: chỉ chủ tài khoản (trước lockHour hôm sau) hoặc quản lý xóa được; không có đoạn tự xóa.
 - `trip_log/<pushId>` = {at (ServerValue), by, action create|edit|delete|restore, tripId, owner, ticket, plate, dateStr, fare, detail}. CHỈ THÊM: quy tắc `!data.exists()` + `by === chính mình`; chỉ quản lý đọc. Ghi ở: submitBatch (create, mỗi đơn 1 dòng), saveEditedTrip (edit, `changeText(before, after)`), updateInlineTripField, fixDateOffGroup, restoreDeletedTrips, restoreFromTrash.

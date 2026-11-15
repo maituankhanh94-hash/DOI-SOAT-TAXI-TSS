@@ -589,6 +589,7 @@
       staffRef = q;
       staffCb = s => {
         personalTrips = s.val() ? Object.values(s.val()) : [];
+        publishMyRank();
         applyHabitsToBatch();
         updatePersonalSummary(staffRole);
         renderActiveWorksheetTrips(staffRole);
@@ -1835,8 +1836,8 @@
 
       const totalSum = selectedItems.reduce((acc, t) => acc + (Number(t.totalFare) || 0), 0);
 
-      // KIỂM TRA MỐC 2.ỆU TRIỆU CHO TỪNG NHÂN SỰ TRONG NGÀY
-      if (targetDateStr && totalSum > 2000000) {
+      // (15/11) KIỂM TRA MỐC TRÊN 3 TRIỆU CHO TỪNG NHÂN SỰ TRONG NGÀY (trước đây 2 triệu)
+      if (targetDateStr && totalSum > CELEBRATE_MIN) {
         // Gom nhóm doanh thu theo từng tên nhân sự đầy đủ xuất hiện trong ngày
         let staffRevenueMap = {};
         selectedItems.forEach(t => {
@@ -1847,7 +1848,7 @@
         });
 
         Object.entries(staffRevenueMap).forEach(([staffName, sTotal]) => {
-          if (sTotal > 2000000) {
+          if (sTotal > CELEBRATE_MIN) {
             const celebKey = `${staffName}_${targetDateStr}`;
             if (!celebratedStaffToday[celebKey]) {
               celebratedStaffToday[celebKey] = true;
@@ -1931,8 +1932,9 @@
             <div class="bg-slate-800/90 border border-slate-700/80 p-4 rounded-2xl space-y-1 shadow-inner">
               <div class="text-[11px] font-semibold text-slate-400">Đã xuất sắc đạt doanh thu ngày ${dateStr}:</div>
               <div class="text-xl sm:text-2xl font-black text-emerald-400">${revenueAmount.toLocaleString('vi-VN')} ₫</div>
-              <div class="text-[10px] font-bold text-amber-300 pt-1">🚀 Vượt mốc 2.000.000 ₫ thành công rực rỡ!</div>
+              <div class="text-[10px] font-bold text-amber-300 pt-1">🚀 Vượt mốc ${CELEBRATE_MIN.toLocaleString('vi-VN')} ₫ thành công rực rỡ!</div>
             </div>
+            <div id="celeb-rank" class="space-y-1.5"></div>
 
             <button onclick="document.getElementById('staff-celebration-popup').remove()" class="w-full py-3 bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-600 hover:to-yellow-600 text-slate-950 font-extrabold text-xs rounded-2xl shadow-lg transition-transform active:scale-95">
               🔥 TUYỆT VỜI QUÁ, TIẾP TỤC PHÁT HUY! 🔥
@@ -1941,6 +1943,61 @@
         </div>
       `;
       document.body.insertAdjacentHTML('beforeend', modalHtml);
+      // Hạng TOP ngày / tháng (đọc bảng xếp hạng chung `rank/`) – chỉ Bán vé / Kế hoạch
+      if (isSellRole(staffRole)) {
+        const p = String(dateStr || '').split('/');
+        const dk = p.length === 3 ? `${p[2]}-${p[1]}-${p[0]}` : '';
+        if (dk) myRankInfo(staffName, dk).then(info => {
+          const box = document.getElementById('celeb-rank');
+          if (!box || !info) return;
+          const line = (icon, label, x) => x ? `<div class="bg-amber-400/15 border border-amber-400/40 rounded-xl px-3 py-2 text-sm font-extrabold text-amber-200">${icon} Đang <span class="text-white text-base">TOP ${x.rank}</span><span class="text-amber-300/80 text-xs font-bold">/${x.total}</span> ${label}</div>` : '';
+          box.innerHTML = line('🏅', `doanh thu ngày ${escHtml(dateStr.slice(0, 5))}`, info.day)
+            + line('📅', `doanh thu tháng ${dk.slice(5, 7)}/${dk.slice(0, 4)}` + (info.monthRev ? ` <span class="block text-[11px] text-amber-300/80 font-bold">(tháng này: ${info.monthRev.toLocaleString('vi-VN')} ₫)</span>` : ''), info.month);
+        });
+      }
+    }
+
+    // ===== BẢNG XẾP HẠNG CHUNG (15/11) =====
+    // Máy nhân viên KHÔNG đọc được đơn người khác -> mỗi tài khoản (Bán vé / KH / KH2) tự gửi tổng doanh thu THEO NGÀY của tháng này
+    // lên rank/<yyyy-mm-dd>/<TÀI KHOẢN> = { <slug tên NV>: { name, rev } } (chỉ tên + số tiền). Mọi tài khoản đọc được để biết mình TOP mấy.
+    const CELEBRATE_MIN = 3000000;   // chúc mừng khi doanh thu ngày TRÊN 3 triệu
+    let rankLastJson = '';
+    function publishMyRank() {
+      if (!loggedInUser || !isSellRole(staffRole)) return Promise.resolve();
+      const U = loggedInUser.user, today = localDateKey(new Date()), m0 = monthStartKey(today);
+      const byDay = {};
+      personalTrips.forEach(t => {
+        const k = tripDateKey(t);
+        if (!k || k < m0 || k > today || !isSellRole(t.role)) return;
+        const name = String(t.staff || U).trim();
+        const d = byDay[k] = byDay[k] || {};
+        const e = d[bizStaffKey(name)] = d[bizStaffKey(name)] || { name, rev: 0 };
+        e.rev += Number(t.totalFare) || 0;
+      });
+      const upd = {};
+      for (let k = m0; k <= today; k = shiftDateKey(k, 1)) upd[`rank/${k}/${U}`] = byDay[k] || null;
+      const js = JSON.stringify(upd);
+      if (js === rankLastJson) return Promise.resolve();
+      return dbRoot().update(upd).then(() => { rankLastJson = js; }).catch(() => {});   // quy tắc chưa có rank -> bỏ qua
+    }
+    async function myRankInfo(staffName, dk) {
+      try {
+        await publishMyRank();
+        const snap = await dbRef('rank').orderByKey().startAt(monthStartKey(dk)).endAt(dk).once('value');
+        const day = {}, month = {};
+        Object.entries(snap.val() || {}).forEach(([d, accs]) => Object.values(accs || {}).forEach(m => Object.entries(m || {}).forEach(([k, e]) => {
+          const r = Number(e && e.rev) || 0;
+          month[k] = (month[k] || 0) + r;
+          if (d === dk) day[k] = (day[k] || 0) + r;
+        })));
+        const me = bizStaffKey(staffName);
+        const rankOf = map => {
+          const arr = Object.entries(map).filter(([, r]) => r > 0).sort((a, b) => b[1] - a[1]);
+          const i = arr.findIndex(([k]) => k === me);
+          return i < 0 ? null : { rank: i + 1, total: arr.length };
+        };
+        return { day: rankOf(day), month: rankOf(month), monthRev: month[me] || 0 };
+      } catch (e) { return null; }
     }
 
     function renderActiveWorksheetTrips(role) {

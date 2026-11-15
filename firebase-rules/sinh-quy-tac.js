@@ -30,6 +30,8 @@ function strict(B){
     "trip_log": { ".read": mgr,
       "$k": { ".write": `${active} && !data.exists() && newData.child('by').val() === ${me}`,
         ".validate": "newData.hasChildren(['at', 'by', 'action']) && newData.child('at').isNumber() && newData.child('at').val() <= now" } },
+    // Bảng xếp hạng (15/11): tổng doanh thu theo ngày của từng tài khoản (chỉ tên + số tiền), mọi tài khoản đọc; ai ghi phần của người đó
+    "rank": { ".read": active, "$d": { "$u": { ".write": `${mgr} || (${active} && $u === ${me})` } } },
     "drivers": { ".read": mgr, ".write": mgr }
   };
 }

@@ -164,6 +164,47 @@
     const TERMINAL_OPTIONS = ["T2", "T1", "T3"];
     const ROLE_LABELS = { 'pos': 'Bán Vé (Quầy)', 'driver': 'Cổng Chủ Xe', 'plan': 'Team Kế Hoạch', 'plan2': 'Team Kế Hoạch 2', 'manager': 'Quản Lý' };
 
+    // ===== TỰ CẬP NHẬT BẢN MỚI (15/11) =====
+    // Sự cố: iPhone đời cũ / trình duyệt trong Zalo giữ nguyên trang mở từ nhiều ngày trước (vẫn chạy bản cũ còn lỗi, ô ngày vẫn là ngày cũ).
+    // App hỏi /api/version mỗi 5 phút + mỗi lần mở lại app: có bản mới (hoặc đã sang ngày mới) -> tự tải lại nếu không có đơn đang nhập dở;
+    // đang nhập dở -> hiện thanh nhắc bấm để tải lại. Phiên đăng nhập giữ nguyên khi tải lại (Persistence.SESSION).
+    let appVersion = null, appLoadDay = localDateKey(new Date()), updateBannerShown = false;
+    function hasUnsavedWork() {
+      const typed = [...document.querySelectorAll('#tbody-batch input, #tbody-batch select')].some(e => e.dataset.touched && String(e.value || '').trim());
+      const modal = document.querySelector('#edit-trip-modal, #scan-modal, #login-modal, #snapshot-report-modal, #bc-modal:not(.hidden)');
+      return typed || !!modal || (typeof bcBusy !== 'undefined' && bcBusy);
+    }
+    function showUpdateBanner(reason) {
+      if (updateBannerShown) return;
+      updateBannerShown = true;
+      const el = document.createElement('div');
+      el.id = 'update-banner';
+      el.className = 'fixed bottom-3 left-1/2 -translate-x-1/2 z-[80] w-[92%] max-w-md bg-blue-700 text-white px-4 py-3 rounded-2xl shadow-2xl text-sm font-extrabold text-center cursor-pointer';
+      el.innerHTML = `🔄 ${reason}. Lưu đơn đang nhập xong rồi <u>bấm vào đây để tải lại</u>.`;
+      el.onclick = () => location.reload();
+      document.body.appendChild(el);
+    }
+    async function checkAppUpdate() {
+      if (document.visibilityState === 'hidden') return;
+      let reason = '';
+      if (localDateKey(new Date()) !== appLoadDay) reason = 'Đã sang ngày mới';
+      try {
+        const r = await fetch('/api/version?t=' + Date.now(), { cache: 'no-store' });
+        if (r.ok) {
+          const v = (await r.json()).v || '';
+          if (appVersion === null) appVersion = v;
+          else if (v && appVersion && v !== appVersion) reason = 'Có bản cập nhật mới của app';
+        }
+      } catch (e) {}
+      if (!reason) return;
+      if (hasUnsavedWork()) showUpdateBanner(reason);
+      else location.reload();
+    }
+    checkAppUpdate();
+    setInterval(checkAppUpdate, 5 * 60 * 1000);
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') checkAppUpdate(); });
+    window.addEventListener('pageshow', e => { if (e.persisted) checkAppUpdate(); });   // trang lấy lại từ bộ nhớ (bấm Quay lại)
+
     window.addEventListener('DOMContentLoaded', async () => {
       initCloudStatusMonitor();
       if (IS_TEST_ENV) {

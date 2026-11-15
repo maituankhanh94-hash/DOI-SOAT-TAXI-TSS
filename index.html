@@ -3262,7 +3262,7 @@
 
           <!-- MỤC 5.95: HIỆU QUẢ NHÂN VIÊN BÁN VÉ (15/11) -->
           <div class="bg-white rounded-3xl shadow-md border border-slate-200 p-4 sm:p-5 space-y-3">
-            <h4 class="text-xs sm:text-sm font-extrabold text-slate-800 uppercase">🏆 Doanh Thu & Lời / Âm Nhân Viên Bán Vé</h4>
+            <h4 class="text-xs sm:text-sm font-extrabold text-slate-800 uppercase">🏆 Doanh Thu & Lời / Âm Nhân Viên Bán Vé & Kế Hoạch</h4>
             <div id="biz-box" class="space-y-3"></div>
           </div>
 
@@ -4148,7 +4148,8 @@
         fn: r => [[40, 0.03], [50, 0.06], [60, 0.07], [70, 0.08], [80, 0.09], [90, 0.10], [100, 0.11], [Infinity, 0.12]]
           .reduce((a, [hi, pct], i, arr) => { const lo = i ? arr[i - 1][0] * TR : 0; return a + Math.max(0, Math.min(r, hi * TR) - lo) * pct; }, 0) },
       KIOT: { label: 'KIOT', w: 160000, desc: '7% doanh thu (lương 160k vì làm thêm TĐNT)', fn: r => r * 0.07 },
-      CTV: { label: 'CTV', w: 0, desc: '15% doanh thu, không lương', fn: r => r * 0.15 }
+      CTV: { label: 'CTV', w: 0, desc: '15% doanh thu, không lương', fn: r => r * 0.15 },
+      KH: { label: 'Kế hoạch', w: 320000, desc: '10% doanh thu (Team Kế Hoạch / Kế Hoạch 2 – theo file kế toán)', fn: r => r * 0.10 }
     };
     const BIZ_DEFAULT = {
       driverPct: 66,
@@ -4185,11 +4186,14 @@
       return '';
     }
     // Nhóm của NV, theo thứ tự: Quản lý chọn tay -> mã nhóm trong tên -> NGUỒN ĐƠN hay dùng -> tạm tính C10
-    function bizGroupOf(name, srcs) {
+    function bizGroupOf(name, srcs, roles) {
       const set = bizCfg.staffGroup[bizStaffKey(name)];
       if (set && BIZ_SCHEMES[set]) return { g: set, how: 'manual' };
       const byName = bizGroupFromText(name, false);
       if (byName) return { g: byName, how: 'name' };
+      // Đơn chủ yếu nhập ở trang Team Kế Hoạch / Kế Hoạch 2 -> nhóm Kế hoạch (nguồn của KH thường là tên đối tác)
+      const rc = roles || {}, nPlan = (rc.plan || 0) + (rc.plan2 || 0), nAll = Object.values(rc).reduce((a, n) => a + n, 0);
+      if (nPlan && nPlan * 2 >= nAll) return { g: 'KH', how: 'role', note: `nhập ở trang Kế hoạch (${nPlan}/${nAll} đơn)` };
       const votes = {};
       let total = 0;
       Object.entries(srcs || {}).forEach(([src, n]) => { total += n; const g = bizGroupFromText(src, true); if (g) votes[g] = (votes[g] || 0) + n; });
@@ -4217,6 +4221,8 @@
         minor.bills.forEach(b => major.bills.add(b));
         Object.entries(minor.byDay).forEach(([d, v]) => { major.byDay[d] = (major.byDay[d] || 0) + v; });
         Object.entries(minor.srcs).forEach(([k, v]) => { major.srcs[k] = (major.srcs[k] || 0) + v; });
+        major.roles = major.roles || {};
+        Object.entries(minor.roles || {}).forEach(([k, v]) => { major.roles[k] = (major.roles[k] || 0) + v; });
         major.nAll += minor.nAll;
         major.rev += minor.rev;
         (major.merged = major.merged || []).push(...Object.keys(minor.names));
@@ -4255,6 +4261,8 @@
         short.bills.forEach(b => major.bills.add(b));
         Object.entries(short.byDay).forEach(([d, v]) => { major.byDay[d] = (major.byDay[d] || 0) + v; });
         Object.entries(short.srcs).forEach(([kk, v]) => { major.srcs[kk] = (major.srcs[kk] || 0) + v; });
+        major.roles = major.roles || {};
+        Object.entries(short.roles || {}).forEach(([kk, v]) => { major.roles[kk] = (major.roles[kk] || 0) + v; });
         major.nAll = (major.nAll || 0) + (short.nAll || 0);
         major.rev += short.rev;
         (major.merged = major.merged || []).push(...shortNames.map(n => n + ' (tên tắt)'), ...(short.merged || []));
@@ -4266,7 +4274,7 @@
       const mFrom = monthStartKey(from);   // cần doanh thu từ đầu tháng để biết đang ở bậc nào
       const staff = {}, allDays = new Set();
       allCompanyTrips.forEach(t => {
-        if (t.role !== 'pos') return;   // chỉ Bán vé
+        if (!isSellRole(t.role)) return;   // Bán vé + Kế hoạch + Kế hoạch 2 (người kiếm khách); KHÔNG tính Tài xế
         const k = tripDateKey(t);
         if (!k || k < mFrom || k > to) return;
         const name = String(t.staff || t.createdBy || '?').trim();
@@ -4274,6 +4282,8 @@
         // Tên 1 chữ (vd "Huy") tách theo TÀI KHOẢN nhập -> sau đó gộp đúng người theo tài khoản
         const key = base.includes('_') ? base : base + '@' + String(t.createdBy || '');
         const s = staff[key] || (staff[key] = { key, base, names: {}, accs: new Set(), byDay: {}, bills: new Set(), rev: 0, srcs: {} });
+        s.roles = s.roles || {};
+        s.roles[t.role] = (s.roles[t.role] || 0) + 1;
         const src = String(t.source || '').trim();
         if (src) s.srcs[src] = (s.srcs[src] || 0) + 1;
         const fare = Number(t.totalFare) || 0;   // đơn chia tiền "A + B": mỗi người tính phần của mình
@@ -4289,7 +4299,7 @@
       bizMergeTypos(staff);
       const rows = Object.values(staff).filter(s => Object.keys(s.names).length).map(s => {
         const name = Object.entries(s.names).sort((a, b) => b[1] - a[1])[0][0];
-        const { g, how, note } = bizGroupOf(name, s.srcs);
+        const { g, how, note } = bizGroupOf(name, s.srcs, s.roles);
         const auto = how !== 'manual';
         const w = g ? Number((bizCfg.groups[g] || {}).w) || 0 : 0;
         // Hoa hồng trong khoảng = phần tăng thêm của hoa hồng THÁNG do doanh thu các ngày trong khoảng
@@ -4379,7 +4389,7 @@
           <td class="p-2"><select onchange="setBizStaffGroup('${escHtml(bizStaffKey(r.name))}', this.value)" class="p-1 border rounded-lg font-bold text-xs ${r.how === 'default' ? 'bg-amber-50 border-amber-400' : ''}">${groupOpts(r.how === 'manual' ? r.g : '', r.how === 'manual' ? '' : r.g)}</select>${
             r.how === 'manual' ? '<div class="text-[10px] text-slate-400">đã chọn tay</div>'
             : r.how === 'default' ? `<div class="text-[10px] font-bold text-amber-700">⚠ tạm tính C10 (${escHtml(r.note)})</div>`
-            : `<div class="text-[10px] text-emerald-700 font-semibold">tự nhận ${escHtml(BIZ_SCHEMES[r.g].label)} ${r.how === 'name' ? 'theo tên' : escHtml(r.note)}</div>`}</td>
+            : `<div class="text-[10px] text-emerald-700 font-semibold">tự nhận ${escHtml(BIZ_SCHEMES[r.g].label)} ${r.how === 'name' ? 'theo tên' : (r.how === 'role' ? 'vì ' : '') + escHtml(r.note)}</div>`}</td>
           <td class="p-2 text-center">${r.days}</td>
           <td class="p-2 text-center">${r.bills}</td>
           <td class="p-2 text-right font-bold">${bizMoney(r.rev)}</td>
@@ -4416,12 +4426,12 @@
         ${rows.length ? `<div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
           ${card(`🥇 Doanh thu CAO NHẤT ${one ? 'ngày' : 'giai đoạn'}`, top, 'border-emerald-300 bg-emerald-50')}
           ${card(`🔻 Doanh thu THẤP NHẤT ${one ? 'ngày' : 'giai đoạn'}`, bottom, 'border-orange-300 bg-orange-50')}
-        </div>` : `<div class="p-4 text-center text-slate-400 font-bold border rounded-2xl">Không có đơn Bán vé ${bizRangeText()}.</div>`}
+        </div>` : `<div class="p-4 text-center text-slate-400 font-bold border rounded-2xl">Không có đơn Bán vé / Kế hoạch ${bizRangeText()}.</div>`}
         ${rows.length ? `<div class="grid grid-cols-2 lg:grid-cols-4 gap-2">
-          ${kpi('Doanh thu Bán vé', bizMoney(tot.rev), 'bg-slate-50 border-slate-200 text-slate-800', `${tot.bills} đơn • ${rows.length} NV • ${tot.days} ngày`)}
+          ${kpi('Doanh thu Bán vé + Kế hoạch', bizMoney(tot.rev), 'bg-slate-50 border-slate-200 text-slate-800', `${tot.bills} đơn • ${rows.length} NV • ${tot.days} ngày`)}
           ${kpi(`Phần công ty (${ctyPct}%)`, bizMoney(tot.cty), 'bg-slate-50 border-slate-200 text-slate-800', `Tài xế ${bizCfg.driverPct}%: ${bizMoney(tot.rev - tot.cty)}`)}
           ${kpi('Hoa hồng + Lương NV', bizMoney(tot.comm + tot.wage), 'bg-slate-50 border-slate-200 text-slate-800', `HH ${bizMoney(tot.comm)} • Lương ${bizMoney(tot.wage)}${tot.other ? ' • Khác ' + bizMoney(tot.other) : ''}`)}
-          ${kpi(tot.profit < 0 ? 'BÁN VÉ ĐANG ÂM' : 'BÁN VÉ ĐANG LỜI', (tot.profit < 0 ? 'Âm ' : '') + bizMoney(Math.abs(tot.profit)), tot.profit < 0 ? 'bg-red-50 border-red-300 text-red-700' : 'bg-emerald-50 border-emerald-300 text-emerald-700', rankLoss.length ? `${rankLoss.length} NV đang âm, tổng âm ${fmtMoney(Math.round(-lossSum))}đ` : 'Không NV nào âm')}
+          ${kpi(tot.profit < 0 ? 'ĐANG ÂM (BÁN VÉ + KH)' : 'ĐANG LỜI (BÁN VÉ + KH)', (tot.profit < 0 ? 'Âm ' : '') + bizMoney(Math.abs(tot.profit)), tot.profit < 0 ? 'bg-red-50 border-red-300 text-red-700' : 'bg-emerald-50 border-emerald-300 text-emerald-700', rankLoss.length ? `${rankLoss.length} NV đang âm, tổng âm ${fmtMoney(Math.round(-lossSum))}đ` : 'Không NV nào âm')}
         </div>` : ''}
         ${unassigned ? `<div class="text-xs font-bold bg-amber-50 border border-amber-300 text-amber-800 rounded-xl p-2">⚠️ Có ${unassigned} nhân viên có nguồn đơn không cho biết nhóm → đang TẠM TÍNH như nhóm C10. Kiểm tra cột "Nhóm" bên dưới, chọn đúng nhóm 1 lần là app nhớ luôn.</div>` : ''}
         ${rows.length ? `<div class="flex flex-wrap items-center gap-2 text-xs font-bold text-slate-600">Sắp xếp:
@@ -4436,7 +4446,7 @@
             <tbody>${staffRows}</tbody>
           </table>
         </div>` : ''}
-        <div class="text-[11px] text-slate-500">Chỉ tính đơn Bán vé (không tính Kế hoạch, Tài xế). Cách tính: Lời/Âm = Doanh thu × ${ctyPct}% (phần công ty) − hoa hồng (cách kế toán: % × tổng tiền cuốc, bậc theo doanh thu cả tháng; xem ngày = phần hoa hồng tháng của ngày đó) − lương ngày × số ngày có bán. Hòa vốn/ngày = doanh thu cần bán mỗi ngày để không âm. 🟡 Lời ít = doanh thu chưa tới 130% mức hòa vốn. Đơn chia tiền "A + B" tính theo phần của từng người.</div>`;
+        <div class="text-[11px] text-slate-500">Tính đơn Bán vé, Kế hoạch, Kế hoạch 2 (người kiếm khách cho công ty); KHÔNG tính Tài xế. Cách tính: Lời/Âm = Doanh thu × ${ctyPct}% (phần công ty) − hoa hồng (cách kế toán: % × tổng tiền cuốc, bậc theo doanh thu cả tháng; xem ngày = phần hoa hồng tháng của ngày đó) − lương ngày × số ngày có bán. Hòa vốn/ngày = doanh thu cần bán mỗi ngày để không âm. 🟡 Lời ít = doanh thu chưa tới 130% mức hòa vốn. Đơn chia tiền "A + B" tính theo phần của từng người.</div>`;
     }
     // Khung CẢNH BÁO ĐỎ: ai đang âm, âm bao nhiêu, vì sao (phần công ty không đủ trả HH + lương), âm ngày nào, cần bán thêm bao nhiêu
     function bizLossBox(rows, one) {
@@ -4490,14 +4500,14 @@
       try {
         const ExcelJS = await loadExcelJS();
         const wb = new ExcelJS.Workbook(); wb.creator = 'TSS POS';
-        const f = { startDateVal: bizFrom, endDateVal: bizTo, roleFilter: 'pos', matchStatusFilter: 'all', keyword: '' };
+        const f = { startDateVal: bizFrom, endDateVal: bizTo, roleFilter: 'all', matchStatusFilter: 'all', keyword: '' };
         const { rows, tot } = bizCompute(bizFrom, bizTo);
         rows.sort((a, b) => (a.g === 'KIOT') - (b.g === 'KIOT') || b.rev - a.rev);
         let rk = 0;
         const ctyPct = Math.round((100 - bizCfg.driverPct) * 10) / 10;
         // Trang 1: Theo nhân viên
         let ws = xlSheetSetup(wb, 'Theo Nhân Viên', true);
-        xlTitle(ws, 12, f, 'HIỆU QUẢ NHÂN VIÊN BÁN VÉ');
+        xlTitle(ws, 12, f, 'HIỆU QUẢ NHÂN VIÊN BÁN VÉ & KẾ HOẠCH');
         let r = xlTable(ws, 6, [
           { h: 'Hạng', w: 6, align: 'center' }, { h: 'Nhân viên', w: 28, wrap: true }, { h: 'Nhóm', w: 8, align: 'center' }, { h: 'Ngày bán', w: 8, align: 'center' }, { h: 'Số đơn', w: 8, align: 'center' },
           { h: 'Doanh thu', w: 14, fmt: '#,##0' }, { h: `Phần Cty (${ctyPct}%)`, w: 14, fmt: '#,##0' }, { h: 'Hoa hồng', w: 12, fmt: '#,##0' }, { h: 'Lương', w: 12, fmt: '#,##0' },
@@ -4508,9 +4518,9 @@
         xlSignature(ws, r + 2, 12);
         // Trang 2: Tổng hợp
         ws = xlSheetSetup(wb, 'Tổng Hợp', false);
-        xlTitle(ws, 6, f, 'TỔNG HỢP LỜI / ÂM BÁN VÉ');
+        xlTitle(ws, 6, f, 'TỔNG HỢP LỜI / ÂM BÁN VÉ & KẾ HOẠCH');
         r = xlTable(ws, 6, [{ h: 'Chỉ tiêu', w: 38 }, { h: 'Số tiền', w: 18, fmt: '#,##0' }], [
-          ['Doanh thu Bán vé', Math.round(tot.rev)],
+          ['Doanh thu Bán vé + Kế hoạch', Math.round(tot.rev)],
           [`Phần công ty (${ctyPct}%)`, Math.round(tot.cty)],
           ['Hoa hồng nhân viên', -Math.round(tot.comm)],
           ['Lương nhân viên (theo ngày có bán)', -Math.round(tot.wage)],
@@ -4529,7 +4539,7 @@
         const buf = await wb.xlsx.writeBuffer();
         const a = document.createElement('a');
         a.href = URL.createObjectURL(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
-        a.download = `Hieu_Qua_Ban_Ve_TSS_${bizFrom.replace(/-/g, '')}-${bizTo.replace(/-/g, '')}.xlsx`;
+        a.download = `Hieu_Qua_Ban_Ve_Ke_Hoach_TSS_${bizFrom.replace(/-/g, '')}-${bizTo.replace(/-/g, '')}.xlsx`;
         document.body.appendChild(a); a.click();
         setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000);
       } catch (e) {

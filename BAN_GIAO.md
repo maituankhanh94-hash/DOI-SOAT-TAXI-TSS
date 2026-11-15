@@ -198,7 +198,7 @@ Có 4 phân vùng: `pos`, `driver`, `plan`, `manager` (Quản lý).
 |---|---|---|
 | Quét giấy Gemini — CHƯA từng gọi thật thành công (sandbox không ra được Google/Vercel) | main | Chờ người dùng quét thử tờ giấy thật, gửi lỗi nếu có. Khóa Gemini đã LỘ trong ảnh chat (bắt đầu "AQ.") → nhắc tạo khóa mới, sửa trên Vercel, Redeploy |
 | Hỏi người dùng: hoa hồng 7%/3%/15% tính trên tổng tiền cuốc hay trên phần 34% công ty | — | Đã hỏi 13/11, chưa trả lời (xem CLAUDE.md "THÔNG TIN KINH DOANH CẦN NHỚ") |
-| Hiệu Quả Kinh Doanh (lời/lỗ, lợi nhuận từng NV, hòa vốn) | `hieu-qua-kinh-doanh` | Bản thử cũ, dùng tài xế 64% → phải đổi theo số mới (tài xế 66%, BV 7%, KH 7%, KIOT 3%, CTV 15%) và gộp với main mới |
+| Hiệu Quả Kinh Doanh | main | 15/11 ĐÃ LÊN MAIN phần Bán vé (khung 🏆, tài xế 66%). Còn chờ người dùng xác nhận hoa hồng tính trên tổng hay 34% (đang để tổng, chỉnh được) |
 | Giữ dòng chưa lưu + lưu tạm trên máy | `giu-dong-chua-luu` | Chưa lên main (main vẫn xóa cả bảng sau khi lưu). Phải gộp lại với main mới (bảng nhập đã đổi nhiều) |
 | Sao lưu, chặn bản app cũ | `sao-luu-thung-rac` | Phần thùng rác đã làm lại ở main; phần sao lưu JSON / chặn bản cũ chưa làm |
 | Thông báo điện thoại, ô địa chỉ có bản đồ | — | Người dùng chưa quyết |

@@ -79,7 +79,7 @@
 - (14/11, LÊN MAIN) Ô Số phiếu tự nhảy số kế tiếp khi bấm vào (`handleSmartTicketFocus`) — TẮT cho TÀI XẾ (`staffRole === 'driver'`), vì tài xế mỗi cuốc 1 phiếu không theo thứ tự. Bán vé / KH / KH2 vẫn giữ.
 
 ## Tự cập nhật bản mới (15/11, LÊN MAIN)
-- Video người dùng: iPhone đời cũ, bảng nhập giật/nhảy ô. Nguyên nhân: ô Ngày hiện 12/11 (hôm đó 15/11) → trang mở từ 12/11 chưa tải lại = vẫn chạy BẢN CŨ còn lỗi (đã sửa 13/11 "nhập mượt"). iOS cũ / trình duyệt trong Zalo giữ trang nhiều ngày.
+- Video người dùng (iPhone đời cũ, bảng nhập giật/nhảy ô): người dùng ĐÍNH CHÍNH video QUAY NGÀY 12/11 (gửi 15/11) → là lỗi khung cuộn lồng đã sửa 13/11 "nhập mượt", KHÔNG phải trang bị kẹt bản cũ. Đã nhờ người dùng thử lại máy đó với bản hiện tại; nếu còn lỗi cần video mới + phiên bản iOS. Tự cập nhật vẫn giữ (có ích để máy luôn chạy bản mới).
 - `api/version.js` trả `VERCEL_GIT_COMMIT_SHA` (no-store). Client `checkAppUpdate()`: lúc mở + mỗi 5 phút + visibilitychange/pageshow; mã khác lúc mở HOẶC đã sang ngày mới (`appLoadDay`) → `location.reload()` nếu `hasUnsavedWork()` = false (ô nhập hàng loạt có `dataset.touched` + giá trị, hoặc đang mở modal sửa/quét/đăng nhập/ảnh báo cáo/Baby Car đang chạy); nếu đang nhập dở → thanh xanh dưới đáy "🔄 … bấm để tải lại". Phiên đăng nhập giữ khi tải lại (Persistence.SESSION).
 - `vercel.json`: Cache-Control no-cache, must-revalidate cho `/` và `/index.html`.
 - Máy đang chạy bản cũ (trước 15/11) chưa có code này → phải tự tải lại / đóng mở lại 1 lần.

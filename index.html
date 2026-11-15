@@ -536,7 +536,7 @@
         const aS = v('audit-start-date'), aE = v('audit-end-date');
         if (aS) {
           const rev = v('revenue-date-picker') || today;
-          const starts = [aS, rev, remindFrom, bizFrom].filter(Boolean).sort();
+          const starts = [aS, rev, remindFrom, monthStartKey(bizFrom)].filter(Boolean).sort();   // khung Lời/Âm cần DT từ đầu tháng (bậc hoa hồng)
           const ends = [aE || '9999-12-31', rev, remindTo, bizTo].filter(Boolean).sort();
           from = shiftDateKey(starts[0], -1);   // tải thêm 1 ngày trước/sau để ghép đơn tài xế ghi lệch ngày
           to = ends[ends.length - 1] === '9999-12-31' ? '9999-12-31' : shiftDateKey(ends[ends.length - 1], 1);
@@ -4128,23 +4128,31 @@
       if (kind === 'month') { return setRemindRange(t.slice(0, 8) + '01', t); }
     }
 
-    // ===== HIỆU QUẢ NHÂN VIÊN BÁN VÉ (15/11; dựa trên bản thử hieu-qua-kinh-doanh 10/11) =====
+    // ===== HIỆU QUẢ NHÂN VIÊN BÁN VÉ (15/11) =====
     // CHỈ đơn Bán vé (role pos). Mỗi cuốc: tài xế hưởng driverPct (66%), công ty giữ phần còn lại (34%).
-    // Hoa hồng NV theo NHÓM: tính trên TỔNG tiền cuốc (commBase 'total') hoặc trên PHẦN CÔNG TY (commBase 'company') – quản lý chọn.
-    // Lời/Lỗ NV cho công ty = Phần công ty − Hoa hồng − Lương/ngày × Số ngày có bán.
-    // Cài đặt ở meta/biz (chỉ Quản lý ghi): {driverPct, commBase, groups:{C10:{c,w},...}, staffGroup:{slug tên NV: nhóm}}.
+    // Hoa hồng: theo CÁCH KẾ TOÁN (file "Lương Hoa Hồng Tháng 9.2026", trang "Hoa hồng XE"): % × TỔNG tiền cuốc,
+    // theo BẬC của DOANH THU CẢ THÁNG từng NV. Xem ngày/giai đoạn: hoa hồng tháng được chia theo ngày (phần tăng thêm
+    // của hoa hồng tháng khi cộng doanh thu ngày đó) -> cộng các ngày = đúng hoa hồng cả tháng.
+    // Lời/Âm NV = Doanh thu × 34% − Hoa hồng − Lương/ngày × Số ngày có bán.
+    // Cài đặt ở meta/biz (chỉ Quản lý ghi): {driverPct, groups:{C10:{w},...} (chỉ lương/ngày), staffGroup:{slug tên NV: nhóm}}.
+    const TR = 1000000;
+    const bizLevel = r => r * (r >= 130 * TR ? 0.12 : r >= 120 * TR ? 0.11 : r >= 100 * TR ? 0.10 : r >= 90 * TR ? 0.09 : r >= 80 * TR ? 0.08 : 0.07);
+    const BIZ_SCHEMES = {
+      C10: { label: 'C10', w: 320000, desc: '70tr đầu 7%, phần trên 70tr 9%; trên 100tr: cả DT 9%; từ 130tr: cả DT 10%',
+        fn: r => r >= 130 * TR ? r * 0.10 : r > 100 * TR ? r * 0.09 : Math.min(r, 70 * TR) * 0.07 + Math.max(0, r - 70 * TR) * 0.09 },
+      T1: { label: 'T1', w: 320000, desc: 'Cả DT: dưới 80tr 7%, từ 80tr 8%, 90tr 9%, 100tr 10%, 120tr 11%, 130tr 12%', fn: bizLevel },
+      T3: { label: 'T3', w: 320000, desc: 'Như T1', fn: bizLevel },
+      QN: { label: 'QN', w: 160000, desc: 'Như T1 (dưới 80tr 7% … từ 130tr 12%)', fn: bizLevel },
+      QT: { label: 'QT', w: 160000, desc: 'Như QN (file tháng 9 chưa có NV nhóm QT)', fn: bizLevel },
+      QUAY: { label: 'Quầy xe', w: 320000, desc: 'Lũy tiến từng khúc: 40tr đầu 3%, 40–50tr 6%, 50–60tr 7%, 60–70tr 8%, 70–80tr 9%, 80–90tr 10%, 90–100tr 11%, trên 100tr 12%',
+        fn: r => [[40, 0.03], [50, 0.06], [60, 0.07], [70, 0.08], [80, 0.09], [90, 0.10], [100, 0.11], [Infinity, 0.12]]
+          .reduce((a, [hi, pct], i, arr) => { const lo = i ? arr[i - 1][0] * TR : 0; return a + Math.max(0, Math.min(r, hi * TR) - lo) * pct; }, 0) },
+      KIOT: { label: 'KIOT', w: 160000, desc: '7% doanh thu', fn: r => r * 0.07 },
+      CTV: { label: 'CTV', w: 0, desc: '15% doanh thu, không lương', fn: r => r * 0.15 }
+    };
     const BIZ_DEFAULT = {
       driverPct: 66,
-      commBase: 'total',
-      groups: {
-        C10: { c: 7, w: 320000, note: 'Bán vé – lương ngày 320k' },
-        T1: { c: 7, w: 320000, note: 'Lương bằng C10' },
-        T3: { c: 7, w: 320000, note: 'Lương bằng C10' },
-        QT: { c: 3, w: 160000, note: 'Làm thêm TĐNT, lương 160k' },
-        QN: { c: 3, w: 160000, note: 'Làm thêm TĐNT, lương 160k' },
-        KIOT: { c: 3, w: 160000, note: 'Nhân viên KIOT, lương 160k' },
-        CTV: { c: 15, w: 0, note: 'Không lương, chỉ hoa hồng' }
-      },
+      groups: Object.fromEntries(Object.entries(BIZ_SCHEMES).map(([k, x]) => [k, { w: x.w }])),
       staffGroup: {}
     };
     let bizCfg = JSON.parse(JSON.stringify(BIZ_DEFAULT));
@@ -4156,8 +4164,8 @@
       dbRef('meta/biz').on('value', s => {
         const v = s.val() || {};
         const g = JSON.parse(JSON.stringify(BIZ_DEFAULT.groups));
-        Object.entries(v.groups || {}).forEach(([k, x]) => { g[k] = Object.assign({}, g[k] || {}, { c: Number(x.c) || 0, w: Number(x.w) || 0 }); });
-        bizCfg = { driverPct: v.driverPct != null ? Number(v.driverPct) : BIZ_DEFAULT.driverPct, commBase: v.commBase === 'company' ? 'company' : 'total', groups: g, staffGroup: v.staffGroup || {} };
+        Object.entries(v.groups || {}).forEach(([k, x]) => { if (g[k] && x && x.w != null) g[k].w = Number(x.w) || 0; });
+        bizCfg = { driverPct: v.driverPct != null ? Number(v.driverPct) : BIZ_DEFAULT.driverPct, groups: g, staffGroup: v.staffGroup || {} };
         renderBizBox();
       }, () => {});
     }
@@ -4167,50 +4175,56 @@
       const set = bizCfg.staffGroup[bizStaffKey(name)];
       if (set && bizCfg.groups[set]) return { g: set, auto: false };
       const up = ' ' + removeAccents(name).toUpperCase().replace(/[^A-Z0-9]+/g, ' ') + ' ';
-      const hit = Object.keys(bizCfg.groups).find(k => up.includes(' ' + k + ' '));
+      const hit = Object.keys(bizCfg.groups).find(k => k !== 'QUAY' && up.includes(' ' + k + ' '));
       return { g: hit || '', auto: !!hit };
     }
-    // Phần công ty còn lại sau hoa hồng, tính trên 1đ doanh thu
-    function bizMargin(c) {
-      const cty = 1 - (Number(bizCfg.driverPct) || 0) / 100;
-      return bizCfg.commBase === 'company' ? cty * (1 - c) : cty - c;
-    }
+    function bizCommOf(g, monthRev) { const sc = BIZ_SCHEMES[g]; return sc ? sc.fn(Math.max(0, monthRev)) : 0; }
     function bizCompute(from, to) {
       const dp = (Number(bizCfg.driverPct) || 0) / 100;
+      const mFrom = monthStartKey(from);   // cần doanh thu từ đầu tháng để biết đang ở bậc nào
       const staff = {}, allDays = new Set();
       allCompanyTrips.forEach(t => {
         if (t.role !== 'pos') return;   // chỉ Bán vé
         const k = tripDateKey(t);
-        if (!k || k < from || k > to) return;
-        allDays.add(k);
+        if (!k || k < mFrom || k > to) return;
         const name = String(t.staff || t.createdBy || '?').trim();
         const key = bizStaffKey(name);
-        const s = staff[key] || (staff[key] = { key, names: {}, accs: new Set(), days: new Set(), bills: new Set(), rev: 0 });
+        const s = staff[key] || (staff[key] = { key, names: {}, accs: new Set(), byDay: {}, bills: new Set(), rev: 0 });
+        const fare = Number(t.totalFare) || 0;   // đơn chia tiền "A + B": mỗi người tính phần của mình
+        s.byDay[k] = (s.byDay[k] || 0) + fare;
+        if (k < from) return;
+        allDays.add(k);
         s.names[name] = (s.names[name] || 0) + 1;
         if (t.createdBy) s.accs.add(t.createdBy);
-        s.days.add(k);
         s.bills.add(billKey(t));
-        s.rev += Number(t.totalFare) || 0;   // đơn chia tiền "A + B": mỗi người tính phần của mình
+        s.rev += fare;
       });
-      const rows = Object.values(staff).map(s => {
+      const rows = Object.values(staff).filter(s => Object.keys(s.names).length).map(s => {
         const name = Object.entries(s.names).sort((a, b) => b[1] - a[1])[0][0];
         const { g, auto } = bizGroupOf(name);
-        const cfg = bizCfg.groups[g] || { c: 0, w: 0 };
-        const c = (Number(cfg.c) || 0) / 100, w = Number(cfg.w) || 0;
-        const days = s.days.size;
+        const w = g ? Number((bizCfg.groups[g] || {}).w) || 0 : 0;
+        // Hoa hồng trong khoảng = phần tăng thêm của hoa hồng THÁNG do doanh thu các ngày trong khoảng
+        let comm = 0, days = 0, cum = 0, month = '';
+        Object.keys(s.byDay).sort().forEach(d => {
+          if (d.slice(0, 7) !== month) { month = d.slice(0, 7); cum = 0; }
+          const before = cum; cum += s.byDay[d];
+          if (d >= from) { days++; if (g) comm += bizCommOf(g, cum) - bizCommOf(g, before); }
+        });
+        const monthRev = cum;                         // doanh thu từ đầu tháng tới ngày cuối của khoảng
         const cty = s.rev * (1 - dp);
-        const comm = bizCfg.commBase === 'company' ? cty * c : s.rev * c;
         const wage = w * days;
         const profit = cty - comm - wage;
-        const m = bizMargin(c);
-        const beDay = m > 0 && w ? w / m : null;   // doanh thu/ngày cần đạt để hòa vốn
+        // Mức % hoa hồng hiện tại (bậc tháng đang đạt) -> doanh thu/ngày cần bán để hòa vốn
+        const c = g && monthRev > 0 ? bizCommOf(g, monthRev) / monthRev : 0;
+        const m = (1 - dp) - c;
+        const beDay = m > 0 && w ? w / m : null;
         const avgDay = days ? s.rev / days : 0;
         let rate;
         if (!g) rate = { t: '⚪ Chưa xếp nhóm', cls: 'text-slate-500', fill: 'FFF1F5F9', o: 3 };
         else if (profit < 0) rate = { t: '🔴 Đang âm', cls: 'text-red-600', fill: 'FFFEE2E2', o: 0 };
         else if (beDay && avgDay < beDay * 1.3) rate = { t: '🟡 Lời ít', cls: 'text-amber-600', fill: 'FFFEF3C7', o: 1 };
         else rate = { t: '🟢 Lời tốt', cls: 'text-emerald-600', fill: 'FFDCFCE7', o: 2 };
-        return { name, accs: [...s.accs].join(', '), g, auto, c, w, days, bills: s.bills.size, rev: s.rev, cty, comm, wage, profit, beDay, avgDay,
+        return { name, accs: [...s.accs].join(', '), g, auto, c, w, days, bills: s.bills.size, rev: s.rev, monthRev, cty, comm, wage, profit, beDay, avgDay,
           need: beDay && avgDay < beDay ? beDay - avgDay : 0, rate };
       });
       const sum = k => rows.reduce((a, r) => a + r[k], 0);
@@ -4249,18 +4263,17 @@
       const card = (title, r, cls) => !r ? '' : `<div class="rounded-2xl border-2 p-3 ${cls}">
           <div class="text-[11px] font-extrabold uppercase opacity-80">${title}</div>
           <div class="text-base sm:text-lg font-black text-slate-900 leading-tight">${escHtml(r.name)}</div>
-          <div class="text-[11px] text-slate-500 font-semibold">TK ${escHtml(r.accs)}${r.g ? ' • nhóm ' + escHtml(r.g) : ''}</div>
+          <div class="text-[11px] text-slate-500 font-semibold">TK ${escHtml(r.accs)}${r.g ? ' • nhóm ' + escHtml(BIZ_SCHEMES[r.g].label) : ''}</div>
           <div class="mt-1 text-sm font-bold text-slate-800">Doanh thu: ${bizMoney(r.rev)} <span class="text-slate-500 font-semibold">(${r.bills} đơn${one ? '' : `, ${r.days} ngày`})</span></div>
           <div class="mt-1 text-sm font-black ${r.profit < 0 ? 'text-red-600' : 'text-emerald-700'}">${r.g ? (r.profit < 0 ? '🔴 ' : '🟢 ') + bizProfitText(r.profit) + ' cho công ty' : '⚪ Chưa xếp nhóm – chưa tính được lời/lỗ'}</div>
           ${r.need ? `<div class="text-[11px] font-bold text-red-700">Cần thêm ~${bizMoney(r.need)}/ngày để hòa vốn</div>` : ''}
         </div>`;
       const top = byRev[0], bottom = byRev.length > 1 ? byRev[byRev.length - 1] : null;
-      const groupOpts = cur => `<option value="">— Chọn nhóm —</option>` + Object.keys(bizCfg.groups).map(k => `<option value="${k}" ${k === cur ? 'selected' : ''}>${k}</option>`).join('');
-      const cfgRows = Object.entries(bizCfg.groups).map(([k, x]) => `<tr class="border-b">
-          <td class="p-2 font-black">${escHtml(k)}</td>
-          <td class="p-2 whitespace-nowrap"><input id="bizc-${k}" type="number" step="0.5" min="0" max="100" value="${x.c}" class="w-16 p-1 border rounded-lg text-center font-bold"> %</td>
-          <td class="p-2 whitespace-nowrap"><input id="bizw-${k}" type="number" step="10000" min="0" value="${x.w}" class="w-28 p-1 border rounded-lg text-right font-bold"> đ</td>
-          <td class="p-2 text-[11px] text-slate-500">${escHtml(x.note || '')}</td></tr>`).join('');
+      const groupOpts = cur => `<option value="">— Chọn nhóm —</option>` + Object.keys(BIZ_SCHEMES).map(k => `<option value="${k}" ${k === cur ? 'selected' : ''}>${BIZ_SCHEMES[k].label}</option>`).join('');
+      const cfgRows = Object.entries(BIZ_SCHEMES).map(([k, sc]) => `<tr class="border-b">
+          <td class="p-2 font-black whitespace-nowrap">${escHtml(sc.label)}</td>
+          <td class="p-2 text-[11px] text-slate-600">${escHtml(sc.desc)}</td>
+          <td class="p-2 whitespace-nowrap"><input id="bizw-${k}" type="number" step="10000" min="0" value="${(bizCfg.groups[k] || {}).w || 0}" class="w-28 p-1 border rounded-lg text-right font-bold"> đ</td></tr>`).join('');
       const staffRows = rows.map((r, i) => `<tr class="border-b hover:bg-slate-50">
           <td class="p-2 text-center font-bold text-slate-500">${bizSort === 'rev' ? i + 1 : ''}</td>
           <td class="p-2"><div class="font-bold text-slate-800">${escHtml(r.name)}</div><div class="text-[10px] text-slate-400">TK ${escHtml(r.accs)}</div></td>
@@ -4269,7 +4282,7 @@
           <td class="p-2 text-center">${r.bills}</td>
           <td class="p-2 text-right font-bold">${bizMoney(r.rev)}</td>
           <td class="p-2 text-right">${bizMoney(r.cty)}</td>
-          <td class="p-2 text-right">${bizMoney(r.comm)}</td>
+          <td class="p-2 text-right">${bizMoney(r.comm)}${r.g && r.c ? `<div class="text-[10px] text-slate-400">bậc ${Math.round(r.c * 1000) / 10}% (DT tháng ${fmtMoney(Math.round(r.monthRev / 100000) / 10)}tr)</div>` : ''}</td>
           <td class="p-2 text-right">${bizMoney(r.wage)}</td>
           <td class="p-2 text-right font-black whitespace-nowrap ${r.profit < 0 ? 'text-red-600' : 'text-emerald-700'}">${r.g ? bizProfitText(r.profit) : '–'}</td>
           <td class="p-2 text-right">${r.beDay == null ? '–' : bizMoney(r.beDay)}</td>
@@ -4289,11 +4302,8 @@
         </div>
         ${bizCfgOpen ? `<div class="bg-blue-50 border border-blue-200 rounded-2xl p-3 space-y-2 text-xs">
           <div class="font-bold text-slate-700">Tài xế hưởng: <input id="biz-driver" type="number" step="0.5" min="0" max="100" value="${bizCfg.driverPct}" class="w-16 p-1 border rounded-lg text-center font-bold"> % mỗi cuốc (công ty giữ phần còn lại)</div>
-          <div class="font-bold text-slate-700 flex flex-wrap items-center gap-3">Hoa hồng nhân viên tính trên:
-            <label class="flex items-center gap-1"><input type="radio" name="biz-base" value="total" ${bizCfg.commBase !== 'company' ? 'checked' : ''}> Tổng tiền cuốc</label>
-            <label class="flex items-center gap-1"><input type="radio" name="biz-base" value="company" ${bizCfg.commBase === 'company' ? 'checked' : ''}> Phần của công ty</label>
-          </div>
-          <div class="overflow-x-auto"><table class="w-full text-left bg-white rounded-xl"><thead class="bg-slate-100"><tr><th class="p-2">Nhóm NV</th><th class="p-2">% Hoa hồng</th><th class="p-2">Lương / ngày</th><th class="p-2">Ghi chú</th></tr></thead><tbody>${cfgRows}</tbody></table></div>
+          <div class="text-slate-700 font-semibold">Hoa hồng tính theo cách kế toán: % × <b>tổng tiền cuốc</b>, theo bậc doanh thu <b>cả tháng</b> của từng người (chưa gồm phần thưởng trưởng nhóm/trưởng ca, best seller).</div>
+          <div class="overflow-x-auto"><table class="w-full text-left bg-white rounded-xl"><thead class="bg-slate-100"><tr><th class="p-2">Nhóm NV</th><th class="p-2">Hoa hồng (theo kế toán)</th><th class="p-2">Lương / ngày</th></tr></thead><tbody>${cfgRows}</tbody></table></div>
           <div class="flex flex-wrap items-center gap-2"><button onclick="saveBizConfig()" class="px-4 py-2 bg-emerald-600 text-white rounded-lg font-extrabold">💾 Lưu cài đặt</button>
           <span class="text-[11px] text-slate-500">Lương tính theo SỐ NGÀY CÓ BÁN ĐƠN của từng người trong kỳ. Chi phí khác trong kỳ (mặt bằng, điện...):</span>
           <input type="text" inputmode="numeric" value="${bizOtherCost ? fmtMoney(bizOtherCost) : ''}" placeholder="0" onchange="bizOtherCost = parseFloat(this.value.replace(/[^0-9]/g, '')) || 0; renderBizBox()" class="w-28 p-1.5 border rounded-lg text-right"></div>
@@ -4321,22 +4331,20 @@
             <tbody>${staffRows}</tbody>
           </table>
         </div>` : ''}
-        <div class="text-[11px] text-slate-500">Chỉ tính đơn Bán vé (không tính Kế hoạch, Tài xế). Cách tính: Lời/Âm = Doanh thu × ${ctyPct}% (phần công ty) − hoa hồng (${bizCfg.commBase === 'company' ? '% × phần công ty' : '% × tổng tiền cuốc'}) − lương ngày × số ngày có bán. Hòa vốn/ngày = doanh thu cần bán mỗi ngày để không âm. 🟡 Lời ít = doanh thu chưa tới 130% mức hòa vốn. Đơn chia tiền "A + B" tính theo phần của từng người.</div>`;
+        <div class="text-[11px] text-slate-500">Chỉ tính đơn Bán vé (không tính Kế hoạch, Tài xế). Cách tính: Lời/Âm = Doanh thu × ${ctyPct}% (phần công ty) − hoa hồng (cách kế toán: % × tổng tiền cuốc, bậc theo doanh thu cả tháng; xem ngày = phần hoa hồng tháng của ngày đó) − lương ngày × số ngày có bán. Hòa vốn/ngày = doanh thu cần bán mỗi ngày để không âm. 🟡 Lời ít = doanh thu chưa tới 130% mức hòa vốn. Đơn chia tiền "A + B" tính theo phần của từng người.</div>`;
     }
     function saveBizConfig() {
       if (!isManager()) return;
       const num = id => { const v = Number(String((document.getElementById(id) || {}).value || '').replace(',', '.')); return isFinite(v) && v >= 0 ? v : null; };
       const driverPct = num('biz-driver');
       if (driverPct == null || driverPct > 100) { alert('% tài xế phải từ 0 đến 100'); return; }
-      const baseEl = document.querySelector('input[name="biz-base"]:checked');
-      const commBase = baseEl && baseEl.value === 'company' ? 'company' : 'total';
       const groups = {};
-      for (const k of Object.keys(bizCfg.groups)) {
-        const c = num('bizc-' + k), w = num('bizw-' + k);
-        if (c == null || c > 100 || w == null) { alert('Nhóm ' + k + ': số không hợp lệ'); return; }
-        groups[k] = { c, w };
+      for (const k of Object.keys(BIZ_SCHEMES)) {
+        const w = num('bizw-' + k);
+        if (w == null) { alert('Nhóm ' + BIZ_SCHEMES[k].label + ': lương không hợp lệ'); return; }
+        groups[k] = { w };
       }
-      dbRef('meta/biz').update({ driverPct, commBase, groups }).then(() => alert('Đã lưu cài đặt.')).catch(e => alert('Không lưu được: ' + authErrorText(e)));
+      dbRef('meta/biz').update({ driverPct, groups, commBase: null }).then(() => alert('Đã lưu cài đặt.')).catch(e => alert('Không lưu được: ' + authErrorText(e)));
     }
     function setBizStaffGroup(key, g) {
       if (!isManager()) return;
@@ -4360,7 +4368,7 @@
           { h: 'Hạng', w: 6, align: 'center' }, { h: 'Nhân viên', w: 28, wrap: true }, { h: 'Nhóm', w: 8, align: 'center' }, { h: 'Ngày bán', w: 8, align: 'center' }, { h: 'Số đơn', w: 8, align: 'center' },
           { h: 'Doanh thu', w: 14, fmt: '#,##0' }, { h: `Phần Cty (${ctyPct}%)`, w: 14, fmt: '#,##0' }, { h: 'Hoa hồng', w: 12, fmt: '#,##0' }, { h: 'Lương', w: 12, fmt: '#,##0' },
           { h: 'Lời / Âm cho Cty', w: 15, fmt: '#,##0' }, { h: 'Hòa vốn/ngày', w: 13, fmt: '#,##0' }, { h: 'Đánh giá', w: 26, wrap: true }
-        ], rows.map((x, i) => [i + 1, `${x.name} (TK ${x.accs})`, x.g || '?', x.days, x.bills, Math.round(x.rev), Math.round(x.cty), Math.round(x.comm), Math.round(x.wage),
+        ], rows.map((x, i) => [i + 1, `${x.name} (TK ${x.accs})`, x.g ? BIZ_SCHEMES[x.g].label : '?', x.days, x.bills, Math.round(x.rev), Math.round(x.cty), Math.round(x.comm), Math.round(x.wage),
           x.g ? Math.round(x.profit) : '', x.beDay == null ? '' : Math.round(x.beDay),
           x.rate.t.replace(/^\S+\s/, '') + (x.need ? ` (cần thêm ~${fmtMoney(Math.round(x.need))}/ngày)` : '')]), i => rows[i].rate.fill);
         xlSignature(ws, r + 2, 12);
@@ -4380,9 +4388,9 @@
         xlSignature(ws, r + 2, 6);
         // Trang 3: Cài đặt
         ws = xlSheetSetup(wb, 'Cài Đặt', false);
-        xlTitle(ws, 4, f, `CÁCH TÍNH (Tài xế ${bizCfg.driverPct}%, hoa hồng trên ${bizCfg.commBase === 'company' ? 'phần công ty' : 'tổng tiền cuốc'})`);
-        xlTable(ws, 6, [{ h: 'Nhóm', w: 12 }, { h: '% Hoa hồng', w: 14, align: 'center' }, { h: 'Lương / ngày', w: 16, fmt: '#,##0' }, { h: 'Hòa vốn / ngày', w: 18, fmt: '#,##0' }],
-          Object.entries(bizCfg.groups).map(([k, x]) => { const m = bizMargin(x.c / 100); return [k, x.c + '%', x.w, m > 0 && x.w ? Math.round(x.w / m) : '']; }), () => null);
+        xlTitle(ws, 3, f, `CÁCH TÍNH (Tài xế ${bizCfg.driverPct}%, hoa hồng theo kế toán: % × tổng tiền cuốc, bậc theo DT cả tháng)`);
+        xlTable(ws, 6, [{ h: 'Nhóm', w: 12 }, { h: 'Hoa hồng', w: 70, wrap: true }, { h: 'Lương / ngày', w: 16, fmt: '#,##0' }],
+          Object.entries(BIZ_SCHEMES).map(([k, sc]) => [sc.label, sc.desc, Number((bizCfg.groups[k] || {}).w) || 0]), () => null);
         xlStripIcons(wb);
         const buf = await wb.xlsx.writeBuffer();
         const a = document.createElement('a');

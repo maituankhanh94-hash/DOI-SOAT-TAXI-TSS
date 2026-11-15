@@ -4202,6 +4202,27 @@
       return { g: 'C10', how: 'default', note: top ? `nguồn "${top[0]}" không rõ nhóm` : 'không có nguồn đơn' };
     }
     function bizCommOf(g, monthRev) { const sc = BIZ_SCHEMES[g]; return sc ? sc.fn(Math.max(0, monthRev)) : 0; }
+    // Gộp tên gõ sai của CÙNG 1 người (vd "nguyễn trung kiê" 1 đơn & "nguyễn trung kiên" 117 đơn, cùng tài khoản):
+    // cùng tài khoản + (tên này là phần đầu tên kia, hoặc khác 1 ký tự) + tên lạ có ít đơn (≤ 3 hoặc ≤ 1/5 tên chính)
+    function bizMergeTypos(staff) {
+      const cnt = s => s.nAll || 0;
+      const list = Object.values(staff).sort((a, b) => cnt(b) - cnt(a));
+      list.forEach((minor, i) => {
+        if (!staff[minor.key]) return;
+        const major = list.slice(0, i).find(m => staff[m.key] && [...minor.accs].some(a => m.accs.has(a)) && cnt(minor) <= Math.max(3, cnt(m) / 5) &&
+          minor.key.length >= 6 && (m.key.startsWith(minor.key) || minor.key.startsWith(m.key) || bcLev(minor.key, m.key) <= 1));
+        if (!major) return;
+        Object.entries(minor.names).forEach(([n, c]) => { major.names[n] = (major.names[n] || 0) + c; });
+        minor.accs.forEach(a => major.accs.add(a));
+        minor.bills.forEach(b => major.bills.add(b));
+        Object.entries(minor.byDay).forEach(([d, v]) => { major.byDay[d] = (major.byDay[d] || 0) + v; });
+        Object.entries(minor.srcs).forEach(([k, v]) => { major.srcs[k] = (major.srcs[k] || 0) + v; });
+        major.nAll += minor.nAll;
+        major.rev += minor.rev;
+        (major.merged = major.merged || []).push(...Object.keys(minor.names));
+        delete staff[minor.key];
+      });
+    }
     function bizCompute(from, to) {
       const dp = (Number(bizCfg.driverPct) || 0) / 100;
       const mFrom = monthStartKey(from);   // cần doanh thu từ đầu tháng để biết đang ở bậc nào
@@ -4217,13 +4238,15 @@
         if (src) s.srcs[src] = (s.srcs[src] || 0) + 1;
         const fare = Number(t.totalFare) || 0;   // đơn chia tiền "A + B": mỗi người tính phần của mình
         s.byDay[k] = (s.byDay[k] || 0) + fare;
+        if (t.createdBy) s.accs.add(t.createdBy);
+        s.nAll = (s.nAll || 0) + 1;
         if (k < from) return;
         allDays.add(k);
         s.names[name] = (s.names[name] || 0) + 1;
-        if (t.createdBy) s.accs.add(t.createdBy);
         s.bills.add(billKey(t));
         s.rev += fare;
       });
+      bizMergeTypos(staff);
       const rows = Object.values(staff).filter(s => Object.keys(s.names).length).map(s => {
         const name = Object.entries(s.names).sort((a, b) => b[1] - a[1])[0][0];
         const { g, how, note } = bizGroupOf(name, s.srcs);
@@ -4256,7 +4279,7 @@
         else if (profit < 0) rate = { t: '🔴 Đang âm', cls: 'text-red-600', fill: 'FFFEE2E2', o: 0 };
         else if (beDay && avgDay < beDay * 1.3) rate = { t: '🟡 Lời ít', cls: 'text-amber-600', fill: 'FFFEF3C7', o: 1 };
         else rate = { t: '🟢 Lời tốt', cls: 'text-emerald-600', fill: 'FFDCFCE7', o: 2 };
-        return { name, accs: [...s.accs].join(', '), g, auto, how, note, c, w, days, bills: s.bills.size, rev: s.rev, monthRev, cty, comm, wage, profit, beDay, avgDay,
+        return { name, merged: s.merged || [], accs: [...s.accs].join(', '), g, auto, how, note, c, w, days, bills: s.bills.size, rev: s.rev, monthRev, cty, comm, wage, profit, beDay, avgDay,
           negDays: g ? dayRows.filter(x => x.p < 0) : [],
           need: beDay && avgDay < beDay ? beDay - avgDay : 0, rate };
       });
@@ -4290,8 +4313,11 @@
       watchBizConfig();
       const { rows, tot } = bizCompute(bizFrom, bizTo);
       const sorters = { rev: (a, b) => b.rev - a.rev, loss: (a, b) => a.profit - b.profit, name: (a, b) => a.name.localeCompare(b.name, 'vi') };
-      const byRev = rows.slice().sort(sorters.rev);
-      rows.sort(sorters[bizSort] || sorters.rev);
+      // (15/11) KIOT: bán vé xe là việc PHỤ -> không xếp hạng, không vào thẻ cao/thấp nhất, không báo đỏ; để riêng cuối bảng
+      const kiotRows = rows.filter(r => r.g === 'KIOT').sort(sorters.rev);
+      const rankRows = rows.filter(r => r.g !== 'KIOT');
+      const byRev = rankRows.slice().sort(sorters.rev);
+      rankRows.sort(sorters[bizSort] || sorters.rev);
       const one = bizFrom === bizTo;
       const card = (title, r, cls) => !r ? '' : `<div class="rounded-2xl border-2 p-3 ${cls}">
           <div class="text-[11px] font-extrabold uppercase opacity-80">${title}</div>
@@ -4307,9 +4333,9 @@
           <td class="p-2 font-black whitespace-nowrap">${escHtml(sc.label)}</td>
           <td class="p-2 text-[11px] text-slate-600">${escHtml(sc.desc)}</td>
           <td class="p-2 whitespace-nowrap"><input id="bizw-${k}" type="number" step="10000" min="0" value="${(bizCfg.groups[k] || {}).w || 0}" class="w-28 p-1 border rounded-lg text-right font-bold"> đ</td></tr>`).join('');
-      const staffRows = rows.map((r, i) => `<tr class="border-b ${r.g && r.profit < 0 ? 'bg-red-50 hover:bg-red-100 border-l-4 border-l-red-600' : 'hover:bg-slate-50'}">
-          <td class="p-2 text-center font-bold text-slate-500">${bizSort === 'rev' ? i + 1 : ''}</td>
-          <td class="p-2"><div class="font-bold text-slate-800">${escHtml(r.name)}</div><div class="text-[10px] text-slate-400">TK ${escHtml(r.accs)}</div></td>
+      const rowHtml = (r, i, kiot) => `<tr class="border-b ${kiot ? 'bg-slate-50 text-slate-600' : (r.g && r.profit < 0 ? 'bg-red-50 hover:bg-red-100 border-l-4 border-l-red-600' : 'hover:bg-slate-50')}">
+          <td class="p-2 text-center font-bold text-slate-500">${!kiot && bizSort === 'rev' ? i + 1 : ''}</td>
+          <td class="p-2"><div class="font-bold text-slate-800">${escHtml(r.name)}</div><div class="text-[10px] text-slate-400">TK ${escHtml(r.accs)}</div>${r.merged.length ? `<div class="text-[10px] text-blue-600 font-semibold">đã gộp tên gõ khác: ${r.merged.map(escHtml).join(', ')}</div>` : ''}</td>
           <td class="p-2"><select onchange="setBizStaffGroup('${escHtml(bizStaffKey(r.name))}', this.value)" class="p-1 border rounded-lg font-bold text-xs ${r.how === 'default' ? 'bg-amber-50 border-amber-400' : ''}">${groupOpts(r.how === 'manual' ? r.g : '', r.how === 'manual' ? '' : r.g)}</select>${
             r.how === 'manual' ? '<div class="text-[10px] text-slate-400">đã chọn tay</div>'
             : r.how === 'default' ? `<div class="text-[10px] font-bold text-amber-700">⚠ tạm tính C10 (${escHtml(r.note)})</div>`
@@ -4320,12 +4346,14 @@
           <td class="p-2 text-right">${bizMoney(r.cty)}</td>
           <td class="p-2 text-right">${bizMoney(r.comm)}${r.g && r.c ? `<div class="text-[10px] text-slate-400">bậc ${Math.round(r.c * 1000) / 10}% (DT tháng ${fmtMoney(Math.round(r.monthRev / 100000) / 10)}tr)</div>` : ''}</td>
           <td class="p-2 text-right">${bizMoney(r.wage)}</td>
-          <td class="p-2 text-right font-black whitespace-nowrap ${r.profit < 0 ? 'text-red-600' : 'text-emerald-700'}">${r.g ? bizProfitText(r.profit) : '–'}</td>
+          <td class="p-2 text-right font-black whitespace-nowrap ${kiot ? 'text-slate-600' : (r.profit < 0 ? 'text-red-600' : 'text-emerald-700')}">${r.g ? bizProfitText(r.profit) : '–'}</td>
           <td class="p-2 text-right">${r.beDay == null ? '–' : bizMoney(r.beDay)}</td>
-          <td class="p-2 font-bold ${r.rate.cls}">${r.rate.t}${r.need ? `<div class="text-[10px] font-semibold">Cần thêm ~${bizMoney(r.need)}/ngày</div>` : ''}</td>
-        </tr>`).join('');
+          <td class="p-2 font-bold ${kiot ? 'text-slate-500' : r.rate.cls}">${kiot ? '— không xếp hạng (việc phụ)' : r.rate.t}${r.need ? `<div class="text-[10px] font-semibold">Cần thêm ~${bizMoney(r.need)}/ngày</div>` : ''}</td>
+        </tr>`;
+      const staffRows = rankRows.map((r, i) => rowHtml(r, i, false)).join('') + (kiotRows.length ? `<tr><td colspan="12" class="p-2 bg-slate-200 font-extrabold text-slate-700">🏪 Nhân viên KIOT – bán vé xe là việc phụ, KHÔNG xếp hạng, không cảnh báo (doanh thu vẫn cộng vào tổng)</td></tr>` + kiotRows.map((r, i) => rowHtml(r, i, true)).join('') : '');
       const unassigned = rows.filter(r => r.how === 'default').length;
-      const lossSum = tot.loss.reduce((a, r) => a + r.profit, 0);
+      const rankLoss = tot.loss.filter(r => r.g !== 'KIOT');
+      const lossSum = rankLoss.reduce((a, r) => a + r.profit, 0);
       const kpi = (label, val, cls, sub) => `<div class="rounded-2xl border p-3 ${cls}"><div class="text-[11px] font-bold uppercase opacity-80">${label}</div><div class="text-lg sm:text-xl font-black">${val}</div>${sub ? `<div class="text-[11px] font-semibold opacity-80">${sub}</div>` : ''}</div>`;
       const ctyPct = Math.round((100 - bizCfg.driverPct) * 10) / 10;
       box.innerHTML = `
@@ -4344,7 +4372,7 @@
           <span class="text-[11px] text-slate-500">Lương tính theo SỐ NGÀY CÓ BÁN ĐƠN của từng người trong kỳ. Chi phí khác trong kỳ (mặt bằng, điện...):</span>
           <input type="text" inputmode="numeric" value="${bizOtherCost ? fmtMoney(bizOtherCost) : ''}" placeholder="0" onchange="bizOtherCost = parseFloat(this.value.replace(/[^0-9]/g, '')) || 0; renderBizBox()" class="w-28 p-1.5 border rounded-lg text-right"></div>
         </div>` : ''}
-        ${bizLossBox(rows, one)}
+        ${bizLossBox(rankRows, one)}
         ${rows.length ? `<div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
           ${card(`🥇 Doanh thu CAO NHẤT ${one ? 'ngày' : 'giai đoạn'}`, top, 'border-emerald-300 bg-emerald-50')}
           ${card(`🔻 Doanh thu THẤP NHẤT ${one ? 'ngày' : 'giai đoạn'}`, bottom, 'border-orange-300 bg-orange-50')}
@@ -4353,7 +4381,7 @@
           ${kpi('Doanh thu Bán vé', bizMoney(tot.rev), 'bg-slate-50 border-slate-200 text-slate-800', `${tot.bills} đơn • ${rows.length} NV • ${tot.days} ngày`)}
           ${kpi(`Phần công ty (${ctyPct}%)`, bizMoney(tot.cty), 'bg-slate-50 border-slate-200 text-slate-800', `Tài xế ${bizCfg.driverPct}%: ${bizMoney(tot.rev - tot.cty)}`)}
           ${kpi('Hoa hồng + Lương NV', bizMoney(tot.comm + tot.wage), 'bg-slate-50 border-slate-200 text-slate-800', `HH ${bizMoney(tot.comm)} • Lương ${bizMoney(tot.wage)}${tot.other ? ' • Khác ' + bizMoney(tot.other) : ''}`)}
-          ${kpi(tot.profit < 0 ? 'BÁN VÉ ĐANG ÂM' : 'BÁN VÉ ĐANG LỜI', (tot.profit < 0 ? 'Âm ' : '') + bizMoney(Math.abs(tot.profit)), tot.profit < 0 ? 'bg-red-50 border-red-300 text-red-700' : 'bg-emerald-50 border-emerald-300 text-emerald-700', tot.loss.length ? `${tot.loss.length} NV đang âm, tổng âm ${fmtMoney(Math.round(-lossSum))}đ` : 'Không NV nào âm')}
+          ${kpi(tot.profit < 0 ? 'BÁN VÉ ĐANG ÂM' : 'BÁN VÉ ĐANG LỜI', (tot.profit < 0 ? 'Âm ' : '') + bizMoney(Math.abs(tot.profit)), tot.profit < 0 ? 'bg-red-50 border-red-300 text-red-700' : 'bg-emerald-50 border-emerald-300 text-emerald-700', rankLoss.length ? `${rankLoss.length} NV đang âm, tổng âm ${fmtMoney(Math.round(-lossSum))}đ` : 'Không NV nào âm')}
         </div>` : ''}
         ${unassigned ? `<div class="text-xs font-bold bg-amber-50 border border-amber-300 text-amber-800 rounded-xl p-2">⚠️ Có ${unassigned} nhân viên có nguồn đơn không cho biết nhóm → đang TẠM TÍNH như nhóm C10. Kiểm tra cột "Nhóm" bên dưới, chọn đúng nhóm 1 lần là app nhớ luôn.</div>` : ''}
         ${rows.length ? `<div class="flex flex-wrap items-center gap-2 text-xs font-bold text-slate-600">Sắp xếp:
@@ -4424,7 +4452,8 @@
         const wb = new ExcelJS.Workbook(); wb.creator = 'TSS POS';
         const f = { startDateVal: bizFrom, endDateVal: bizTo, roleFilter: 'pos', matchStatusFilter: 'all', keyword: '' };
         const { rows, tot } = bizCompute(bizFrom, bizTo);
-        rows.sort((a, b) => b.rev - a.rev);
+        rows.sort((a, b) => (a.g === 'KIOT') - (b.g === 'KIOT') || b.rev - a.rev);
+        let rk = 0;
         const ctyPct = Math.round((100 - bizCfg.driverPct) * 10) / 10;
         // Trang 1: Theo nhân viên
         let ws = xlSheetSetup(wb, 'Theo Nhân Viên', true);
@@ -4433,9 +4462,9 @@
           { h: 'Hạng', w: 6, align: 'center' }, { h: 'Nhân viên', w: 28, wrap: true }, { h: 'Nhóm', w: 8, align: 'center' }, { h: 'Ngày bán', w: 8, align: 'center' }, { h: 'Số đơn', w: 8, align: 'center' },
           { h: 'Doanh thu', w: 14, fmt: '#,##0' }, { h: `Phần Cty (${ctyPct}%)`, w: 14, fmt: '#,##0' }, { h: 'Hoa hồng', w: 12, fmt: '#,##0' }, { h: 'Lương', w: 12, fmt: '#,##0' },
           { h: 'Lời / Âm cho Cty', w: 15, fmt: '#,##0' }, { h: 'Hòa vốn/ngày', w: 13, fmt: '#,##0' }, { h: 'Đánh giá', w: 26, wrap: true }
-        ], rows.map((x, i) => [i + 1, `${x.name} (TK ${x.accs})`, x.g ? BIZ_SCHEMES[x.g].label : '?', x.days, x.bills, Math.round(x.rev), Math.round(x.cty), Math.round(x.comm), Math.round(x.wage),
+        ], rows.map((x, i) => [x.g === 'KIOT' ? 'KIOT' : ++rk, `${x.name} (TK ${x.accs})`, x.g ? BIZ_SCHEMES[x.g].label : '?', x.days, x.bills, Math.round(x.rev), Math.round(x.cty), Math.round(x.comm), Math.round(x.wage),
           x.g ? Math.round(x.profit) : '', x.beDay == null ? '' : Math.round(x.beDay),
-          x.rate.t.replace(/^\S+\s/, '') + (x.need ? ` (cần thêm ~${fmtMoney(Math.round(x.need))}/ngày)` : '')]), i => rows[i].rate.fill);
+          x.g === 'KIOT' ? 'KIOT – việc phụ, không xếp hạng' : x.rate.t.replace(/^\S+\s/, '') + (x.need ? ` (cần thêm ~${fmtMoney(Math.round(x.need))}/ngày)` : '')]), i => rows[i].g === 'KIOT' ? 'FFF1F5F9' : rows[i].rate.fill);
         xlSignature(ws, r + 2, 12);
         // Trang 2: Tổng hợp
         ws = xlSheetSetup(wb, 'Tổng Hợp', false);

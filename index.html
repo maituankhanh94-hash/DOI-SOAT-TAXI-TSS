@@ -4428,7 +4428,7 @@
       const one = bizFrom === bizTo;
       const card = (title, r, cls) => !r ? '' : `<div class="rounded-2xl border-2 p-3 ${cls}">
           <div class="text-[11px] font-extrabold uppercase opacity-80">${title}</div>
-          <div class="text-base sm:text-lg font-black text-slate-900 leading-tight">${escHtml(r.name)}</div>
+          <div class="text-base sm:text-lg font-black text-slate-900 leading-tight">${escHtml(nameCase(r.name))}</div>
           <div class="text-[11px] text-slate-500 font-semibold">TK ${escHtml(r.accs)}${r.g ? ' • nhóm ' + escHtml(BIZ_SCHEMES[r.g].label) : ''}</div>
           <div class="mt-1 text-sm font-bold text-slate-800">Doanh thu: ${bizMoney(r.rev)} <span class="text-slate-500 font-semibold">(${r.bills} đơn${one ? '' : `, ${r.days} ngày`})</span></div>
           <div class="mt-1 text-sm font-black ${r.profit < 0 ? 'text-red-600' : 'text-emerald-700'}">${r.g ? (r.profit < 0 ? '🔴 ' : '🟢 ') + bizProfitText(r.profit) + ' cho công ty' : '⚪ Chưa xếp nhóm – chưa tính được lời/lỗ'}</div>
@@ -4442,7 +4442,7 @@
           <td class="p-2 whitespace-nowrap"><input id="bizw-${k}" type="number" step="10000" min="0" value="${(bizCfg.groups[k] || {}).w || 0}" class="w-28 p-1 border rounded-lg text-right font-bold"> đ</td></tr>`).join('');
       const rowHtml = (r, i, kiot) => `<tr class="border-b ${kiot ? 'bg-slate-50 text-slate-600' : (r.g && r.profit < 0 ? 'bg-red-50 hover:bg-red-100 border-l-4 border-l-red-600' : 'hover:bg-slate-50')}">
           <td class="p-2 text-center font-bold text-slate-500">${!kiot && bizSort === 'rev' ? i + 1 : ''}</td>
-          <td class="p-2"><div class="font-bold text-slate-800">${escHtml(r.name)}</div><div class="text-[10px] text-slate-400">TK ${escHtml(r.accs)}</div>${r.merged.length ? `<div class="text-[10px] text-blue-600 font-semibold">đã gộp tên gõ khác: ${r.merged.map(escHtml).join(', ')}</div>` : ''}</td>
+          <td class="p-2"><div class="font-bold text-slate-800">${escHtml(nameCase(r.name))}</div><div class="text-[10px] text-slate-400">TK ${escHtml(r.accs)}</div>${r.merged.length ? `<div class="text-[10px] text-blue-600 font-semibold">đã gộp tên gõ khác: ${r.merged.map(escHtml).join(', ')}</div>` : ''}</td>
           <td class="p-2"><select onchange="setBizStaffGroup('${escHtml(bizStaffKey(r.name))}', this.value)" class="p-1 border rounded-lg font-bold text-xs ${r.how === 'default' ? 'bg-amber-50 border-amber-400' : ''}">${groupOpts(r.how === 'manual' ? r.g : '', r.how === 'manual' ? '' : r.g)}</select>${
             r.how === 'manual' ? '<div class="text-[10px] text-slate-400">đã chọn tay</div>'
             : r.how === 'default' ? `<div class="text-[10px] font-bold text-amber-700">⚠ tạm tính C10 (${escHtml(r.note)})</div>`
@@ -4512,7 +4512,7 @@
       if (!loss.length && !someDays.length) return '';
       const soft = someDays.length ? `<div class="bg-white/70 border border-orange-300 rounded-xl p-2 text-orange-800">
           <div class="font-black">🟠 Tổng vẫn lời nhưng CÓ NGÀY ÂM:</div>
-          ${someDays.map(r => `<div class="mt-0.5"><b>${escHtml(r.name)}</b> (TK ${escHtml(r.accs)}): ${r.negDays.slice(0, 12).map(x => `<span class="inline-block bg-white border border-orange-300 rounded px-1 mr-1 mb-0.5">${ddmm(x.d)} ${bizMoney(x.p)}</span>`).join('')}${r.negDays.length > 12 ? '…' : ''}</div>`).join('')}
+          ${someDays.map(r => `<div class="mt-0.5"><b>${escHtml(nameCase(r.name))}</b> (TK ${escHtml(r.accs)}): ${r.negDays.slice(0, 12).map(x => `<span class="inline-block bg-white border border-orange-300 rounded px-1 mr-1 mb-0.5">${ddmm(x.d)} ${bizMoney(x.p)}</span>`).join('')}${r.negDays.length > 12 ? '…' : ''}</div>`).join('')}
         </div>` : '';
       if (!loss.length) return `<div class="rounded-2xl border-2 border-orange-400 bg-orange-50 p-3 space-y-2 text-xs">${soft}</div>`;
       const total = loss.reduce((a, r) => a + r.profit, 0);
@@ -4523,7 +4523,7 @@
         const need = r.need ? `<div class="mt-0.5">👉 Cần bán thêm khoảng <b>${bizMoney(r.need)}/ngày</b> (hòa vốn ≈ ${bizMoney(r.beDay)}/ngày, đang bán TB ${bizMoney(r.avgDay)}/ngày)</div>`
           : (r.beDay ? '' : `<div class="mt-0.5">👉 Nhóm ${escHtml(BIZ_SCHEMES[r.g].label)}: phần công ty không đủ trả hoa hồng – kiểm tra lại nhóm/lương</div>`);
         return `<div class="bg-white/70 border border-red-300 rounded-xl p-2">
-            <div class="font-black text-red-700 text-sm">🔴 ${escHtml(r.name)} <span class="text-[11px] font-bold text-red-500">(TK ${escHtml(r.accs)} • ${escHtml(BIZ_SCHEMES[r.g].label)})</span> – ÂM ${fmtMoney(Math.round(-r.profit))}đ</div>
+            <div class="font-black text-red-700 text-sm">🔴 ${escHtml(nameCase(r.name))} <span class="text-[11px] font-bold text-red-500">(TK ${escHtml(r.accs)} • ${escHtml(BIZ_SCHEMES[r.g].label)})</span> – ÂM ${fmtMoney(Math.round(-r.profit))}đ</div>
             <div class="text-[12px] text-red-800 font-semibold">${why}.</div>${days}${need}
           </div>`;
       }).join('');
@@ -4569,7 +4569,7 @@
           { h: 'Hạng', w: 6, align: 'center' }, { h: 'Nhân viên', w: 28, wrap: true }, { h: 'Nhóm', w: 8, align: 'center' }, { h: 'Ngày bán', w: 8, align: 'center' }, { h: 'Số đơn', w: 8, align: 'center' },
           { h: 'Doanh thu', w: 14, fmt: '#,##0' }, { h: `Phần Cty (${ctyPct}%)`, w: 14, fmt: '#,##0' }, { h: 'Hoa hồng', w: 12, fmt: '#,##0' }, { h: 'Lương', w: 12, fmt: '#,##0' },
           { h: 'Lời / Âm cho Cty', w: 15, fmt: '#,##0' }, { h: 'Hòa vốn/ngày', w: 13, fmt: '#,##0' }, { h: 'Đánh giá', w: 26, wrap: true }
-        ], rows.map((x, i) => [x.g === 'KIOT' ? 'KIOT' : ++rk, `${x.name} (TK ${x.accs})`, x.g ? BIZ_SCHEMES[x.g].label : '?', x.days, x.bills, Math.round(x.rev), Math.round(x.cty), Math.round(x.comm), Math.round(x.wage),
+        ], rows.map((x, i) => [x.g === 'KIOT' ? 'KIOT' : ++rk, `${nameCase(x.name)} (TK ${x.accs})`, x.g ? BIZ_SCHEMES[x.g].label : '?', x.days, x.bills, Math.round(x.rev), Math.round(x.cty), Math.round(x.comm), Math.round(x.wage),
           x.g ? Math.round(x.profit) : '', x.beDay == null ? '' : Math.round(x.beDay),
           x.g === 'KIOT' ? 'KIOT – việc phụ, không xếp hạng' : x.rate.t.replace(/^\S+\s/, '') + (x.need ? ` (cần thêm ~${fmtMoney(Math.round(x.need))}/ngày)` : '')]), i => rows[i].g === 'KIOT' ? 'FFF1F5F9' : rows[i].rate.fill);
         xlSignature(ws, r + 2, 12);
@@ -4689,8 +4689,13 @@
       const tb = document.getElementById('tbody-mgr'); if (tb) tb.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
     // Tên đầy đủ người làm đơn: tên nhân sự ghi trên đơn (vd "Nguyễn Hoàng Minh Phương") + tài khoản trong ngoặc
+    // (15/11) Tên nhân viên chuẩn "Nguyễn Ngọc Hòa" (viết hoa chữ cái đầu mỗi chữ) – dùng khi XUẤT EXCEL / báo cáo, không đổi dữ liệu lưu
+    function nameCase(v) {
+      return String(v == null ? '' : v).split(/(\s*[+,]\s*)/).map(part => /^\s*[+,]\s*$/.test(part) ? part.trim() === ',' ? ', ' : ' + '
+        : part.trim().replace(/\s+/g, ' ').toLocaleLowerCase('vi').replace(/(^|[\s\-.(])(\S)/gu, (m, a, c) => a + c.toLocaleUpperCase('vi'))).join('');
+    }
     function fullStaffName(trips) {
-      const names = [...new Set(trips.map(t => String(t.staff || '').trim()).filter(Boolean))];
+      const names = [...new Set(trips.map(t => nameCase(String(t.staff || '').trim())).filter(Boolean))];
       const acc = [...new Set(trips.map(t => t.createdBy).filter(Boolean))].join(', ');
       return (names.length ? names.join(' + ') : acc) + (acc ? ` (TK ${acc})` : '');
     }
@@ -5198,7 +5203,7 @@
           const first = r;
           g.trips.forEach(t => {
             const role = XL.role[t.role] || { label: t.role || '', color: 'FF334155' };
-            const vals = [stt, normalizeDateInput(t.dateStr) || '',t.timeStr || '', role.label, t.staff || '', formatDisplayTicket(t.ticketNumber), plateCell(t.plateNumber),
+            const vals = [stt, normalizeDateInput(t.dateStr) || '',t.timeStr || '', role.label, nameCase(t.staff), formatDisplayTicket(t.ticketNumber), plateCell(t.plateNumber),
               t.carType || '', t.source || '', t.pickup ? 'Ga ' + t.pickup : '', t.destination || '', t.paymentMethod || '(Chưa ghi)',
               [t.note || '', (di => di && di.over ? `💸 ${discountText(di)}` : '')(discountInfo(t))].filter(Boolean).join(' | '),
               Number(t.totalFare || 0), signFeeOf(t) || '', Number(t.totalFare || 0) + signFeeOf(t), auditStatusText(g)];
@@ -5318,7 +5323,7 @@
           const row = ws.addRow([
             'Chưa thu tiền', dateVal, dateVal, ticket, ticket,
             custCode, 'VC', '131', '5113', 'Chuyến', 1,
-            fare, fare, clean(t.source), t.role === 'driver' ? '' : clean(t.staff),
+            fare, fare, clean(t.source), t.role === 'driver' ? '' : nameCase(clean(t.staff)),
             clean(t.paymentMethod), t.pickup ? 'Ga ' + clean(t.pickup) : '', clean(t.destination)
           ]);
           if (p) { row.getCell(2).numFmt = 'dd/mm/yyyy'; row.getCell(3).numFmt = 'dd/mm/yyyy'; }
@@ -5412,8 +5417,8 @@
       header(['Nhân sự', 'Phân vùng', 'Số đơn', 'Tổng tiền', '', '']);
       const staffMap = {};
       allTrips.forEach(t => {
-        const k = `${t.staff || '(Không tên)'}|${t.role}`;
-        if (!staffMap[k]) staffMap[k] = { name: t.staff || '(Không tên)', role: (XL.role[t.role] || { label: t.role }).label, n: 0, v: 0 };
+        const k = `${nameCase(t.staff) || '(Không tên)'}|${t.role}`;
+        if (!staffMap[k]) staffMap[k] = { name: nameCase(t.staff) || '(Không tên)', role: (XL.role[t.role] || { label: t.role }).label, n: 0, v: 0 };
         staffMap[k].n++;
         staffMap[k].v += Number(t.totalFare || 0);
       });

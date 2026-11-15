@@ -4222,6 +4222,37 @@
         (major.merged = major.merged || []).push(...Object.keys(minor.names));
         delete staff[minor.key];
       });
+      // (15/11) Đơn chia tiền "A + B" hay gõ TẮT tên (vd "Lê Chí Bình + Mẫn") -> "Mẫn" gộp vào "Trần Minh Mẫn":
+      // tên ngắn (1–2 chữ) trùng PHẦN CUỐI của đúng 1 tên đầy đủ (trong đơn hoặc danh sách nhân sự); nhiều người trùng -> ưu tiên cùng tài khoản; vẫn không chắc -> để nguyên
+      const full = {};   // slug -> tên hiển thị
+      (staffOptions || []).forEach(n => { const k = bizStaffKey(n); if (k.split('_').length >= 2) full[k] = String(n).trim(); });
+      Object.values(staff).forEach(x => { if (x.key.split('_').length >= 2) full[x.key] = full[x.key] || Object.entries(x.names).sort((a, b) => b[1] - a[1])[0]?.[0] || x.key; });
+      Object.values(staff).forEach(short => {
+        if (!staff[short.key]) return;
+        const w = short.key.split('_');
+        if (w.length > 2 || short.key.length < 2) return;
+        let cands = Object.keys(full).filter(k => k !== short.key && k.split('_').length > w.length && k.endsWith('_' + short.key));
+        if (cands.length > 1) {
+          const same = cands.filter(k => staff[k] && [...short.accs].some(a => staff[k].accs.has(a)));
+          if (same.length === 1) cands = same;
+        }
+        if (cands.length !== 1) return;
+        const k = cands[0];
+        let major = staff[k];
+        if (!major) {   // người đầy đủ chưa có đơn trong khoảng -> đổi tên dòng này thành tên đầy đủ
+          major = staff[k] = { key: k, names: {}, accs: new Set(), byDay: {}, bills: new Set(), rev: 0, srcs: {}, nAll: 0 };
+        }
+        const shortNames = Object.keys(short.names);
+        Object.entries(short.names).forEach(([n, c]) => { major.names[full[k]] = (major.names[full[k]] || 0) + c; });
+        short.accs.forEach(a => major.accs.add(a));
+        short.bills.forEach(b => major.bills.add(b));
+        Object.entries(short.byDay).forEach(([d, v]) => { major.byDay[d] = (major.byDay[d] || 0) + v; });
+        Object.entries(short.srcs).forEach(([kk, v]) => { major.srcs[kk] = (major.srcs[kk] || 0) + v; });
+        major.nAll = (major.nAll || 0) + (short.nAll || 0);
+        major.rev += short.rev;
+        (major.merged = major.merged || []).push(...shortNames.map(n => n + ' (tên tắt)'), ...(short.merged || []));
+        delete staff[short.key];
+      });
     }
     function bizCompute(from, to) {
       const dp = (Number(bizCfg.driverPct) || 0) / 100;

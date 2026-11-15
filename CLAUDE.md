@@ -109,6 +109,7 @@
 - Xem ngày/giai đoạn: hoa hồng của khoảng = Σ theo ngày [f(DT lũy kế tháng sau ngày) − f(trước ngày)] → cộng các ngày = đúng hoa hồng tháng; vì vậy `refreshManagerWindow` tải từ `monthStartKey(bizFrom)`. Cột Hoa hồng ghi "bậc x% (DT tháng …tr)". Hòa vốn/ngày dùng % bậc hiện tại.
 - Lời/Âm NV = DT × (100−driverPct)% − hoa hồng − lương/ngày × số ngày có bán. Lương/ngày theo nhóm chỉnh được (`meta/biz/groups/<nhóm>/w`; mặc định C10/T1/T3/Quầy xe 320k, QT/QN/KIOT 160k, CTV 0 — file kế toán KHÔNG có lương ngày).
 - Nhóm của NV: chọn ở cột Nhóm (lưu `meta/biz/staffGroup/<placeSlug(tên)>`), tự nhận nếu tên chứa mã nhóm (trừ QUAY). NV chưa xếp nhóm: hiện "–", cảnh báo vàng. Quy tắc meta: chỉ QL ghi, tài khoản active đọc được.
+- (15/11) CẢNH BÁO ĐỎ `bizLossBox` ở đầu khung: từng NV đang âm (âm bao nhiêu; vì sao = phần công ty không đủ trả HH + lương; xem giai đoạn thì liệt kê NGÀY ÂM từ `negDays`; cần bán thêm bao nhiêu/ngày). Dòng NV âm trong bảng tô đỏ cả dòng + viền trái đỏ. NV tổng vẫn lời nhưng có ngày âm → mục cam "Tổng vẫn lời nhưng CÓ NGÀY ÂM". Lời/âm từng ngày = DT ngày × 34% − HH ngày (phần tăng của HH tháng) − lương 1 ngày.
 - Đã thử: `BIZ_SCHEMES` khớp từng đồng 13 NV trong file kế toán tháng 9 (KIOT, Quầy xe lũy tiến, QN, T1, T3 90tr→9%, C10, CTV); emulator: chia hoa hồng theo ngày khi vượt bậc (39tr→41tr: 90k), lưu lương nhóm, Excel.
 
 ## Nhật ký & Thùng rác (11/11, ĐÃ LÊN MAIN; nhánh `nhat-ky-thung-rac`; người dùng đã dán quy tắc mới có trash + trip_log)

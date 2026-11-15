@@ -4205,10 +4205,16 @@
         const w = g ? Number((bizCfg.groups[g] || {}).w) || 0 : 0;
         // Hoa hồng trong khoảng = phần tăng thêm của hoa hồng THÁNG do doanh thu các ngày trong khoảng
         let comm = 0, days = 0, cum = 0, month = '';
+        const dayRows = [];   // lời/âm từng ngày (để chỉ ra ÂM NGÀY NÀO)
         Object.keys(s.byDay).sort().forEach(d => {
           if (d.slice(0, 7) !== month) { month = d.slice(0, 7); cum = 0; }
           const before = cum; cum += s.byDay[d];
-          if (d >= from) { days++; if (g) comm += bizCommOf(g, cum) - bizCommOf(g, before); }
+          if (d >= from) {
+            days++;
+            const cd = g ? bizCommOf(g, cum) - bizCommOf(g, before) : 0;
+            comm += cd;
+            dayRows.push({ d, rev: s.byDay[d], p: s.byDay[d] * (1 - dp) - cd - w });
+          }
         });
         const monthRev = cum;                         // doanh thu từ đầu tháng tới ngày cuối của khoảng
         const cty = s.rev * (1 - dp);
@@ -4225,6 +4231,7 @@
         else if (beDay && avgDay < beDay * 1.3) rate = { t: '🟡 Lời ít', cls: 'text-amber-600', fill: 'FFFEF3C7', o: 1 };
         else rate = { t: '🟢 Lời tốt', cls: 'text-emerald-600', fill: 'FFDCFCE7', o: 2 };
         return { name, accs: [...s.accs].join(', '), g, auto, c, w, days, bills: s.bills.size, rev: s.rev, monthRev, cty, comm, wage, profit, beDay, avgDay,
+          negDays: g ? dayRows.filter(x => x.p < 0) : [],
           need: beDay && avgDay < beDay ? beDay - avgDay : 0, rate };
       });
       const sum = k => rows.reduce((a, r) => a + r[k], 0);
@@ -4274,7 +4281,7 @@
           <td class="p-2 font-black whitespace-nowrap">${escHtml(sc.label)}</td>
           <td class="p-2 text-[11px] text-slate-600">${escHtml(sc.desc)}</td>
           <td class="p-2 whitespace-nowrap"><input id="bizw-${k}" type="number" step="10000" min="0" value="${(bizCfg.groups[k] || {}).w || 0}" class="w-28 p-1 border rounded-lg text-right font-bold"> đ</td></tr>`).join('');
-      const staffRows = rows.map((r, i) => `<tr class="border-b hover:bg-slate-50">
+      const staffRows = rows.map((r, i) => `<tr class="border-b ${r.g && r.profit < 0 ? 'bg-red-50 hover:bg-red-100 border-l-4 border-l-red-600' : 'hover:bg-slate-50'}">
           <td class="p-2 text-center font-bold text-slate-500">${bizSort === 'rev' ? i + 1 : ''}</td>
           <td class="p-2"><div class="font-bold text-slate-800">${escHtml(r.name)}</div><div class="text-[10px] text-slate-400">TK ${escHtml(r.accs)}</div></td>
           <td class="p-2"><select onchange="setBizStaffGroup('${escHtml(bizStaffKey(r.name))}', this.value)" class="p-1 border rounded-lg font-bold text-xs ${r.g ? '' : 'bg-amber-50 border-amber-400'}">${groupOpts(r.g)}</select>${r.auto ? '<div class="text-[10px] text-slate-400">tự nhận theo tên</div>' : ''}</td>
@@ -4308,6 +4315,7 @@
           <span class="text-[11px] text-slate-500">Lương tính theo SỐ NGÀY CÓ BÁN ĐƠN của từng người trong kỳ. Chi phí khác trong kỳ (mặt bằng, điện...):</span>
           <input type="text" inputmode="numeric" value="${bizOtherCost ? fmtMoney(bizOtherCost) : ''}" placeholder="0" onchange="bizOtherCost = parseFloat(this.value.replace(/[^0-9]/g, '')) || 0; renderBizBox()" class="w-28 p-1.5 border rounded-lg text-right"></div>
         </div>` : ''}
+        ${bizLossBox(rows, one)}
         ${rows.length ? `<div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
           ${card(`🥇 Doanh thu CAO NHẤT ${one ? 'ngày' : 'giai đoạn'}`, top, 'border-emerald-300 bg-emerald-50')}
           ${card(`🔻 Doanh thu THẤP NHẤT ${one ? 'ngày' : 'giai đoạn'}`, bottom, 'border-orange-300 bg-orange-50')}
@@ -4332,6 +4340,34 @@
           </table>
         </div>` : ''}
         <div class="text-[11px] text-slate-500">Chỉ tính đơn Bán vé (không tính Kế hoạch, Tài xế). Cách tính: Lời/Âm = Doanh thu × ${ctyPct}% (phần công ty) − hoa hồng (cách kế toán: % × tổng tiền cuốc, bậc theo doanh thu cả tháng; xem ngày = phần hoa hồng tháng của ngày đó) − lương ngày × số ngày có bán. Hòa vốn/ngày = doanh thu cần bán mỗi ngày để không âm. 🟡 Lời ít = doanh thu chưa tới 130% mức hòa vốn. Đơn chia tiền "A + B" tính theo phần của từng người.</div>`;
+    }
+    // Khung CẢNH BÁO ĐỎ: ai đang âm, âm bao nhiêu, vì sao (phần công ty không đủ trả HH + lương), âm ngày nào, cần bán thêm bao nhiêu
+    function bizLossBox(rows, one) {
+      const loss = rows.filter(r => r.g && r.profit < 0).sort((a, b) => a.profit - b.profit);
+      const someDays = one ? [] : rows.filter(r => r.g && r.profit >= 0 && r.negDays.length);
+      if (!loss.length && !someDays.length) return '';
+      const soft = someDays.length ? `<div class="bg-white/70 border border-orange-300 rounded-xl p-2 text-orange-800">
+          <div class="font-black">🟠 Tổng vẫn lời nhưng CÓ NGÀY ÂM:</div>
+          ${someDays.map(r => `<div class="mt-0.5"><b>${escHtml(r.name)}</b> (TK ${escHtml(r.accs)}): ${r.negDays.slice(0, 12).map(x => `<span class="inline-block bg-white border border-orange-300 rounded px-1 mr-1 mb-0.5">${ddmm(x.d)} ${bizMoney(x.p)}</span>`).join('')}${r.negDays.length > 12 ? '…' : ''}</div>`).join('')}
+        </div>` : '';
+      if (!loss.length) return `<div class="rounded-2xl border-2 border-orange-400 bg-orange-50 p-3 space-y-2 text-xs">${soft}</div>`;
+      const total = loss.reduce((a, r) => a + r.profit, 0);
+      const items = loss.map(r => {
+        const why = `Phần công ty ${bizMoney(r.cty)} (doanh thu ${bizMoney(r.rev)}) không đủ trả hoa hồng ${bizMoney(r.comm)} + lương ${bizMoney(r.wage)}${r.days > 1 ? ` (${r.days} ngày × ${bizMoney(r.w)})` : ''}`;
+        const days = !one && r.negDays.length
+          ? `<div class="mt-0.5">📅 Âm ${r.negDays.length}/${r.days} ngày: ${r.negDays.slice(0, 12).map(x => `<span class="inline-block bg-white border border-red-300 rounded px-1 mr-1 mb-0.5">${ddmm(x.d)} ${bizMoney(x.p)}</span>`).join('')}${r.negDays.length > 12 ? '…' : ''}</div>` : '';
+        const need = r.need ? `<div class="mt-0.5">👉 Cần bán thêm khoảng <b>${bizMoney(r.need)}/ngày</b> (hòa vốn ≈ ${bizMoney(r.beDay)}/ngày, đang bán TB ${bizMoney(r.avgDay)}/ngày)</div>`
+          : (r.beDay ? '' : `<div class="mt-0.5">👉 Nhóm ${escHtml(BIZ_SCHEMES[r.g].label)}: phần công ty không đủ trả hoa hồng – kiểm tra lại nhóm/lương</div>`);
+        return `<div class="bg-white/70 border border-red-300 rounded-xl p-2">
+            <div class="font-black text-red-700 text-sm">🔴 ${escHtml(r.name)} <span class="text-[11px] font-bold text-red-500">(TK ${escHtml(r.accs)} • ${escHtml(BIZ_SCHEMES[r.g].label)})</span> – ÂM ${fmtMoney(Math.round(-r.profit))}đ</div>
+            <div class="text-[12px] text-red-800 font-semibold">${why}.</div>${days}${need}
+          </div>`;
+      }).join('');
+      return `<div class="rounded-2xl border-2 border-red-500 bg-red-50 p-3 space-y-2 text-xs">
+          <div class="font-black text-red-700 text-sm sm:text-base">⚠️ CẢNH BÁO: ${loss.length} nhân viên đang ÂM tiền công ty – tổng âm ${fmtMoney(Math.round(-total))}đ ${bizRangeText()}</div>
+          ${items}
+          ${soft}
+        </div>`;
     }
     function saveBizConfig() {
       if (!isManager()) return;

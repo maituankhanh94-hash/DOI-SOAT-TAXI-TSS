@@ -4171,12 +4171,35 @@
     }
     function bizStaffKey(name) { return placeSlug(name) || '_'; }
     // Nhóm của nhân viên: Quản lý chọn tay; chưa chọn thì tự nhận nếu tên có mã nhóm (vd "C10 Huy", "Lan - QT")
-    function bizGroupOf(name) {
+    // Đoán nhóm từ 1 chuỗi (tên NV hoặc NGUỒN ĐƠN): "C10", "QN2-2", "QT2", "T3", "KIOT", "CTV C10", "Khách Quầy"...
+    function bizGroupFromText(text, allowQuay) {
+      const up = ' ' + removeAccents(text).toUpperCase().replace(/[^A-Z0-9]+/g, ' ') + ' ';
+      if (/ CTV /.test(up)) return 'CTV';
+      if (/ KIOT /.test(up) || / KIOS?K? /.test(up)) return 'KIOT';
+      if (/ C ?10 /.test(up)) return 'C10';
+      if (/ QN( |\d)/.test(up)) return 'QN';
+      if (/ QT( |\d)/.test(up)) return 'QT';
+      if (/ T ?1 /.test(up)) return 'T1';
+      if (/ T ?3 /.test(up)) return 'T3';
+      if (allowQuay && / QUAY /.test(up)) return 'QUAY';
+      return '';
+    }
+    // Nhóm của NV, theo thứ tự: Quản lý chọn tay -> mã nhóm trong tên -> NGUỒN ĐƠN hay dùng -> tạm tính C10
+    function bizGroupOf(name, srcs) {
       const set = bizCfg.staffGroup[bizStaffKey(name)];
-      if (set && bizCfg.groups[set]) return { g: set, auto: false };
-      const up = ' ' + removeAccents(name).toUpperCase().replace(/[^A-Z0-9]+/g, ' ') + ' ';
-      const hit = Object.keys(bizCfg.groups).find(k => k !== 'QUAY' && up.includes(' ' + k + ' '));
-      return { g: hit || '', auto: !!hit };
+      if (set && BIZ_SCHEMES[set]) return { g: set, how: 'manual' };
+      const byName = bizGroupFromText(name, false);
+      if (byName) return { g: byName, how: 'name' };
+      const votes = {};
+      let total = 0;
+      Object.entries(srcs || {}).forEach(([src, n]) => { total += n; const g = bizGroupFromText(src, true); if (g) votes[g] = (votes[g] || 0) + n; });
+      const best = Object.entries(votes).sort((a, b) => b[1] - a[1])[0];
+      if (best) {
+        const topSrc = Object.entries(srcs).filter(([src]) => bizGroupFromText(src, true) === best[0]).sort((a, b) => b[1] - a[1])[0][0];
+        return { g: best[0], how: 'source', note: `theo nguồn "${topSrc}" (${best[1]}/${total} đơn)` };
+      }
+      const top = Object.entries(srcs || {}).sort((a, b) => b[1] - a[1])[0];
+      return { g: 'C10', how: 'default', note: top ? `nguồn "${top[0]}" không rõ nhóm` : 'không có nguồn đơn' };
     }
     function bizCommOf(g, monthRev) { const sc = BIZ_SCHEMES[g]; return sc ? sc.fn(Math.max(0, monthRev)) : 0; }
     function bizCompute(from, to) {
@@ -4189,7 +4212,9 @@
         if (!k || k < mFrom || k > to) return;
         const name = String(t.staff || t.createdBy || '?').trim();
         const key = bizStaffKey(name);
-        const s = staff[key] || (staff[key] = { key, names: {}, accs: new Set(), byDay: {}, bills: new Set(), rev: 0 });
+        const s = staff[key] || (staff[key] = { key, names: {}, accs: new Set(), byDay: {}, bills: new Set(), rev: 0, srcs: {} });
+        const src = String(t.source || '').trim();
+        if (src) s.srcs[src] = (s.srcs[src] || 0) + 1;
         const fare = Number(t.totalFare) || 0;   // đơn chia tiền "A + B": mỗi người tính phần của mình
         s.byDay[k] = (s.byDay[k] || 0) + fare;
         if (k < from) return;
@@ -4201,7 +4226,8 @@
       });
       const rows = Object.values(staff).filter(s => Object.keys(s.names).length).map(s => {
         const name = Object.entries(s.names).sort((a, b) => b[1] - a[1])[0][0];
-        const { g, auto } = bizGroupOf(name);
+        const { g, how, note } = bizGroupOf(name, s.srcs);
+        const auto = how !== 'manual';
         const w = g ? Number((bizCfg.groups[g] || {}).w) || 0 : 0;
         // Hoa hồng trong khoảng = phần tăng thêm của hoa hồng THÁNG do doanh thu các ngày trong khoảng
         let comm = 0, days = 0, cum = 0, month = '';
@@ -4230,7 +4256,7 @@
         else if (profit < 0) rate = { t: '🔴 Đang âm', cls: 'text-red-600', fill: 'FFFEE2E2', o: 0 };
         else if (beDay && avgDay < beDay * 1.3) rate = { t: '🟡 Lời ít', cls: 'text-amber-600', fill: 'FFFEF3C7', o: 1 };
         else rate = { t: '🟢 Lời tốt', cls: 'text-emerald-600', fill: 'FFDCFCE7', o: 2 };
-        return { name, accs: [...s.accs].join(', '), g, auto, c, w, days, bills: s.bills.size, rev: s.rev, monthRev, cty, comm, wage, profit, beDay, avgDay,
+        return { name, accs: [...s.accs].join(', '), g, auto, how, note, c, w, days, bills: s.bills.size, rev: s.rev, monthRev, cty, comm, wage, profit, beDay, avgDay,
           negDays: g ? dayRows.filter(x => x.p < 0) : [],
           need: beDay && avgDay < beDay ? beDay - avgDay : 0, rate };
       });
@@ -4276,7 +4302,7 @@
           ${r.need ? `<div class="text-[11px] font-bold text-red-700">Cần thêm ~${bizMoney(r.need)}/ngày để hòa vốn</div>` : ''}
         </div>`;
       const top = byRev[0], bottom = byRev.length > 1 ? byRev[byRev.length - 1] : null;
-      const groupOpts = cur => `<option value="">— Chọn nhóm —</option>` + Object.keys(BIZ_SCHEMES).map(k => `<option value="${k}" ${k === cur ? 'selected' : ''}>${BIZ_SCHEMES[k].label}</option>`).join('');
+      const groupOpts = (cur, autoG) => `<option value="">${autoG ? 'Tự động: ' + BIZ_SCHEMES[autoG].label : '— Chọn nhóm —'}</option>` + Object.keys(BIZ_SCHEMES).map(k => `<option value="${k}" ${k === cur ? 'selected' : ''}>${BIZ_SCHEMES[k].label}</option>`).join('');
       const cfgRows = Object.entries(BIZ_SCHEMES).map(([k, sc]) => `<tr class="border-b">
           <td class="p-2 font-black whitespace-nowrap">${escHtml(sc.label)}</td>
           <td class="p-2 text-[11px] text-slate-600">${escHtml(sc.desc)}</td>
@@ -4284,7 +4310,10 @@
       const staffRows = rows.map((r, i) => `<tr class="border-b ${r.g && r.profit < 0 ? 'bg-red-50 hover:bg-red-100 border-l-4 border-l-red-600' : 'hover:bg-slate-50'}">
           <td class="p-2 text-center font-bold text-slate-500">${bizSort === 'rev' ? i + 1 : ''}</td>
           <td class="p-2"><div class="font-bold text-slate-800">${escHtml(r.name)}</div><div class="text-[10px] text-slate-400">TK ${escHtml(r.accs)}</div></td>
-          <td class="p-2"><select onchange="setBizStaffGroup('${escHtml(bizStaffKey(r.name))}', this.value)" class="p-1 border rounded-lg font-bold text-xs ${r.g ? '' : 'bg-amber-50 border-amber-400'}">${groupOpts(r.g)}</select>${r.auto ? '<div class="text-[10px] text-slate-400">tự nhận theo tên</div>' : ''}</td>
+          <td class="p-2"><select onchange="setBizStaffGroup('${escHtml(bizStaffKey(r.name))}', this.value)" class="p-1 border rounded-lg font-bold text-xs ${r.how === 'default' ? 'bg-amber-50 border-amber-400' : ''}">${groupOpts(r.how === 'manual' ? r.g : '', r.how === 'manual' ? '' : r.g)}</select>${
+            r.how === 'manual' ? '<div class="text-[10px] text-slate-400">đã chọn tay</div>'
+            : r.how === 'default' ? `<div class="text-[10px] font-bold text-amber-700">⚠ tạm tính C10 (${escHtml(r.note)})</div>`
+            : `<div class="text-[10px] text-emerald-700 font-semibold">tự nhận ${escHtml(BIZ_SCHEMES[r.g].label)} ${r.how === 'name' ? 'theo tên' : escHtml(r.note)}</div>`}</td>
           <td class="p-2 text-center">${r.days}</td>
           <td class="p-2 text-center">${r.bills}</td>
           <td class="p-2 text-right font-bold">${bizMoney(r.rev)}</td>
@@ -4295,7 +4324,7 @@
           <td class="p-2 text-right">${r.beDay == null ? '–' : bizMoney(r.beDay)}</td>
           <td class="p-2 font-bold ${r.rate.cls}">${r.rate.t}${r.need ? `<div class="text-[10px] font-semibold">Cần thêm ~${bizMoney(r.need)}/ngày</div>` : ''}</td>
         </tr>`).join('');
-      const unassigned = rows.filter(r => !r.g).length;
+      const unassigned = rows.filter(r => r.how === 'default').length;
       const lossSum = tot.loss.reduce((a, r) => a + r.profit, 0);
       const kpi = (label, val, cls, sub) => `<div class="rounded-2xl border p-3 ${cls}"><div class="text-[11px] font-bold uppercase opacity-80">${label}</div><div class="text-lg sm:text-xl font-black">${val}</div>${sub ? `<div class="text-[11px] font-semibold opacity-80">${sub}</div>` : ''}</div>`;
       const ctyPct = Math.round((100 - bizCfg.driverPct) * 10) / 10;
@@ -4326,7 +4355,7 @@
           ${kpi('Hoa hồng + Lương NV', bizMoney(tot.comm + tot.wage), 'bg-slate-50 border-slate-200 text-slate-800', `HH ${bizMoney(tot.comm)} • Lương ${bizMoney(tot.wage)}${tot.other ? ' • Khác ' + bizMoney(tot.other) : ''}`)}
           ${kpi(tot.profit < 0 ? 'BÁN VÉ ĐANG ÂM' : 'BÁN VÉ ĐANG LỜI', (tot.profit < 0 ? 'Âm ' : '') + bizMoney(Math.abs(tot.profit)), tot.profit < 0 ? 'bg-red-50 border-red-300 text-red-700' : 'bg-emerald-50 border-emerald-300 text-emerald-700', tot.loss.length ? `${tot.loss.length} NV đang âm, tổng âm ${fmtMoney(Math.round(-lossSum))}đ` : 'Không NV nào âm')}
         </div>` : ''}
-        ${unassigned ? `<div class="text-xs font-bold bg-amber-50 border border-amber-300 text-amber-800 rounded-xl p-2">⚠️ Có ${unassigned} nhân viên CHƯA XẾP NHÓM (chưa tính hoa hồng & lương, nên chưa biết lời/lỗ). Chọn nhóm ở cột "Nhóm" bên dưới – chọn 1 lần, app nhớ luôn.</div>` : ''}
+        ${unassigned ? `<div class="text-xs font-bold bg-amber-50 border border-amber-300 text-amber-800 rounded-xl p-2">⚠️ Có ${unassigned} nhân viên có nguồn đơn không cho biết nhóm → đang TẠM TÍNH như nhóm C10. Kiểm tra cột "Nhóm" bên dưới, chọn đúng nhóm 1 lần là app nhớ luôn.</div>` : ''}
         ${rows.length ? `<div class="flex flex-wrap items-center gap-2 text-xs font-bold text-slate-600">Sắp xếp:
           ${[['rev', 'Doanh thu cao → thấp'], ['loss', 'Đang âm trước'], ['name', 'Tên A-Z']].map(([k, l]) => `<button onclick="bizSort='${k}'; renderBizBox()" class="px-2.5 py-1 rounded-lg ${bizSort === k ? 'bg-slate-800 text-white' : 'bg-slate-100'}">${l}</button>`).join('')}</div>
         <div class="overflow-auto custom-scrollbar max-h-[480px] border rounded-xl">

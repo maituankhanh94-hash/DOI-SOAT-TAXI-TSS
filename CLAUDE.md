@@ -26,7 +26,14 @@
 ## THÔNG TIN KINH DOANH CẦN NHỚ (người dùng dặn 13/11 — KHÔNG hiển thị trong app, chỉ để Claude biết khi làm báo cáo/hiệu quả kinh doanh)
 - Chia tiền 1 cuốc xe: **66% tài xế**, **34% công ty**.
 - Trong phần 34% của công ty, hoa hồng nhân viên: **Bán vé 7%**, **Nhân viên KIOT 3%**, **CTV 15%**, **Kế hoạch 7%**.
-- CHƯA RÕ: 7% / 3% / 15% tính trên TỔNG tiền cuốc hay trên phần 34% — đã hỏi người dùng (13/11), cập nhật khi có trả lời.
+- ĐÃ RÕ (15/11, file kế toán "Lương Hoa Hồng Tháng 9.2026", trang "Hoa hồng XE"): hoa hồng tính trên DOANH SỐ BÁN (= TỔNG tiền cuốc, cột "Doanh số bán" của Sổ chi tiết bán hàng), KHÔNG trên 34%. Tính theo DOANH THU CẢ THÁNG của từng NV, có BẬC:
+  - KIOT (NV quầy kiot): 7% × doanh thu (công thức =E*7%; ghi chú cũ trong file "Quầy QT2 & QN1 0-30tr 4%" không dùng).
+  - NV quầy xe (nhóm "Quầy"): LŨY TIẾN từng khúc: 0–40tr 3%, 40–50tr 6%, 50–60tr 7%, 60–70tr 8%, 70–80tr 9%, 80–90tr 10%, 90–100tr 11%, trên 100tr 12%.
+  - QN, T1, T3: CẢ doanh thu × 1 mức: <80tr 7%, ≥80tr 8%, ≥90tr 9%, ≥100tr 10%, ≥120tr 11%, ≥130tr 12%. Trưởng nhóm QN thêm 3% tổng DT nhóm QN.
+  - C10: ≤70tr × 7%, phần trên 70tr × 9%; nếu DT >100tr thì CẢ DT × 9% (≥130tr × 10%). Trưởng ca C10 thêm 1% tổng DT nhóm C10 (+0,5% DT một số NV, >300tr 1%).
+  - CTV C10: 15% × DT. KH: 10% × DT (Thuê xe 5%, đối tác Monica 5%/8%).
+  - File này CHỈ có hoa hồng (+ best seller, phụ cấp, trừ tạm ứng/gửi xe), KHÔNG có lương ngày 320k/160k → số lương ngày trong app vẫn là số người dùng nói 10/11.
+  - Khác với lời người dùng 13/11 (KIOT 3%): file tính KIOT 7%.
 - Khác với nhánh thử `hieu-qua-kinh-doanh` (đang để % tài xế 64%, nhóm QT/QN 3% 160k, C10/T1/T3/KH 7% 320k, CTV 15% 0đ, KIOT 3% 160k) → khi làm tiếp nhánh đó phải sửa theo số mới (tài xế 66%).
 
 ## Đăng nhập & bảo mật (lên main 07/11/2026; nhánh thử `bao-mat-dang-nhap`)

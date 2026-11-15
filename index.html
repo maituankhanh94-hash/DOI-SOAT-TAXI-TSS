@@ -4210,7 +4210,7 @@
       list.forEach((minor, i) => {
         if (!staff[minor.key]) return;
         const major = list.slice(0, i).find(m => staff[m.key] && [...minor.accs].some(a => m.accs.has(a)) && cnt(minor) <= Math.max(3, cnt(m) / 5) &&
-          minor.key.length >= 6 && (m.key.startsWith(minor.key) || minor.key.startsWith(m.key) || bcLev(minor.key, m.key) <= 1));
+          minor.base.length >= 6 && minor.base !== m.base && (m.base.startsWith(minor.base) || minor.base.startsWith(m.base) || bcLev(minor.base, m.base) <= 1));
         if (!major) return;
         Object.entries(minor.names).forEach(([n, c]) => { major.names[n] = (major.names[n] || 0) + c; });
         minor.accs.forEach(a => major.accs.add(a));
@@ -4226,21 +4226,28 @@
       // tên ngắn (1–2 chữ) trùng PHẦN CUỐI của đúng 1 tên đầy đủ (trong đơn hoặc danh sách nhân sự); nhiều người trùng -> ưu tiên cùng tài khoản; vẫn không chắc -> để nguyên
       const full = {};   // slug -> tên hiển thị
       (staffOptions || []).forEach(n => { const k = bizStaffKey(n); if (k.split('_').length >= 2) full[k] = String(n).trim(); });
-      Object.values(staff).forEach(x => { if (x.key.split('_').length >= 2) full[x.key] = full[x.key] || Object.entries(x.names).sort((a, b) => b[1] - a[1])[0]?.[0] || x.key; });
+      Object.values(staff).forEach(x => { if (x.base.split('_').length >= 2) full[x.base] = full[x.base] || Object.entries(x.names).sort((a, b) => b[1] - a[1])[0]?.[0] || x.base; });
+      // Chữ cái đầu họ tên: "Đinh Xuân Huy" -> "DXH" (tài khoản công ty hay đặt như vậy: DXH, PVL, NTAX, TMM2…)
+      const initials = n => removeAccents(n).toUpperCase().split(/[^A-Z0-9]+/).filter(Boolean).map(x => x[0]).join('');
+      const accIs = (acc, k) => { const A = String(acc || '').toUpperCase().replace(/[^A-Z0-9]/g, '').replace(/\d+$/, ''); return A && A === initials(full[k]); };
       Object.values(staff).forEach(short => {
         if (!staff[short.key]) return;
-        const w = short.key.split('_');
-        if (w.length > 2 || short.key.length < 2) return;
-        let cands = Object.keys(full).filter(k => k !== short.key && k.split('_').length > w.length && k.endsWith('_' + short.key));
-        if (cands.length > 1) {
+        const w = short.base.split('_');
+        if (w.length > 2 || short.base.length < 2) return;
+        let cands = Object.keys(full).filter(k => k !== short.base && k.split('_').length > w.length && k.endsWith('_' + short.base));
+        if (cands.length > 1) {   // trùng tên (vd 2 người tên Huy): dựa vào TÀI KHOẢN đã nhập đơn
           const same = cands.filter(k => staff[k] && [...short.accs].some(a => staff[k].accs.has(a)));
           if (same.length === 1) cands = same;
+          else {
+            const byAcc = cands.filter(k => [...short.accs].some(a => accIs(a, k)));
+            if (byAcc.length === 1) cands = byAcc;
+          }
         }
         if (cands.length !== 1) return;
         const k = cands[0];
         let major = staff[k];
         if (!major) {   // người đầy đủ chưa có đơn trong khoảng -> đổi tên dòng này thành tên đầy đủ
-          major = staff[k] = { key: k, names: {}, accs: new Set(), byDay: {}, bills: new Set(), rev: 0, srcs: {}, nAll: 0 };
+          major = staff[k] = { key: k, base: k, names: {}, accs: new Set(), byDay: {}, bills: new Set(), rev: 0, srcs: {}, nAll: 0 };
         }
         const shortNames = Object.keys(short.names);
         Object.entries(short.names).forEach(([n, c]) => { major.names[full[k]] = (major.names[full[k]] || 0) + c; });
@@ -4263,8 +4270,10 @@
         const k = tripDateKey(t);
         if (!k || k < mFrom || k > to) return;
         const name = String(t.staff || t.createdBy || '?').trim();
-        const key = bizStaffKey(name);
-        const s = staff[key] || (staff[key] = { key, names: {}, accs: new Set(), byDay: {}, bills: new Set(), rev: 0, srcs: {} });
+        const base = bizStaffKey(name);
+        // Tên 1 chữ (vd "Huy") tách theo TÀI KHOẢN nhập -> sau đó gộp đúng người theo tài khoản
+        const key = base.includes('_') ? base : base + '@' + String(t.createdBy || '');
+        const s = staff[key] || (staff[key] = { key, base, names: {}, accs: new Set(), byDay: {}, bills: new Set(), rev: 0, srcs: {} });
         const src = String(t.source || '').trim();
         if (src) s.srcs[src] = (s.srcs[src] || 0) + 1;
         const fare = Number(t.totalFare) || 0;   // đơn chia tiền "A + B": mỗi người tính phần của mình

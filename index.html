@@ -581,7 +581,7 @@
         const aS = v('audit-start-date'), aE = v('audit-end-date');
         if (aS) {
           const rev = v('revenue-date-picker') || today;
-          const starts = [aS, rev, shiftDateKey(remindFrom, -GUESS_DAYS + 1), monthStartKey(bizFrom)].filter(Boolean).sort();   // khung Lời/Âm cần DT từ đầu tháng (bậc hoa hồng)
+          const starts = [aS, rev, remindFrom, monthStartKey(bizFrom)].filter(Boolean).sort();   // khung Lời/Âm cần DT từ đầu tháng (bậc hoa hồng)
           const ends = [aE || '9999-12-31', rev, remindTo, bizTo].filter(Boolean).sort();
           from = shiftDateKey(starts[0], -1);   // tải thêm 1 ngày trước/sau để ghép đơn tài xế ghi lệch ngày
           to = ends[ends.length - 1] === '9999-12-31' ? '9999-12-31' : shiftDateKey(ends[ends.length - 1], 1);
@@ -4933,12 +4933,12 @@
       }).join('');
     }
     // (A) Phiếu tài xế đã báo mà bán vé chưa nhập: đoán người đang cầm cuốn phiếu theo các số phiếu KỀ BÊN đã được nhập
-    const GUESS_DAYS = 10, GUESS_RANGE = 50;
+    const GUESS_DAYS = 1, GUESS_RANGE = 50;   // người dùng 16/11: thường chỉ lệch 1 ngày
     function guessSellerByNearTickets(g) {
       const base = tkOf(g.trips[0]);
-      // (16/11) so theo GIÁ TRỊ số (bỏ số 0 đầu: 09838 = 9838), ±50 số, 10 ngày trước … 2 ngày sau (1 cuốn phiếu dùng nhiều ngày)
+      // (16/11) so theo GIÁ TRỊ số (bỏ số 0 đầu: 09838 = 9838), ±50 số, cùng ngày ±1 ngày
       if (!/^\d{4,}$/.test(base) || !g.dateKey) return [];
-      const n = Number(base), nLen = String(n).length, lo = shiftDateKey(g.dateKey, -GUESS_DAYS), hi = shiftDateKey(g.dateKey, 2);
+      const n = Number(base), nLen = String(n).length, lo = shiftDateKey(g.dateKey, -GUESS_DAYS), hi = shiftDateKey(g.dateKey, GUESS_DAYS);
       const by = {};
       allCompanyTrips.forEach(t => {
         if (!isSellRole(t.role)) return;
@@ -4995,7 +4995,7 @@
         if (g.missing === 'pos') {
           const gu = guessSellerText(g);
           h += gu ? `<div class="mt-0.5 text-sky-800 font-bold">👤 Có thể của: ${escHtml(gu)}</div>`
-            : `<div class="mt-0.5 text-slate-400 font-semibold">👤 Chưa đoán được người bán: chưa ai nhập phiếu gần số này (±${GUESS_RANGE} số, ${GUESS_DAYS} ngày gần đó)</div>`;
+            : `<div class="mt-0.5 text-slate-400 font-semibold">👤 Chưa đoán được người bán: chưa ai nhập phiếu gần số này (±${GUESS_RANGE} số, cùng ngày ±${GUESS_DAYS} ngày)</div>`;
         }
         return h;
       };

@@ -201,6 +201,7 @@ Có 4 phân vùng: `pos`, `driver`, `plan`, `manager` (Quản lý).
 | Hiệu Quả Kinh Doanh | main | 15/11 ĐÃ LÊN MAIN phần Bán vé (khung 🏆, tài xế 66%). Còn chờ người dùng xác nhận hoa hồng tính trên tổng hay 34% (đang để tổng, chỉnh được) |
 | Giữ dòng chưa lưu + lưu tạm trên máy | `giu-dong-chua-luu` | Chưa lên main (main vẫn xóa cả bảng sau khi lưu). Phải gộp lại với main mới (bảng nhập đã đổi nhiều) |
 | Sao lưu, chặn bản app cũ | `sao-luu-thung-rac` | Phần thùng rác đã làm lại ở main; phần sao lưu JSON / chặn bản cũ chưa làm |
+| Chống nhập sai phiếu/xe (A đoán người bán, C gợi ý ghép + sửa 2 chiều, D cảnh báo khi nhập) | main | 16/11 ĐÃ LÊN MAIN. Người dùng phải dán `quy-tac-buoc-2.json` mới (có `fleet`) thì cảnh báo biển số mới chạy. (E) kiểm tra chéo tức thì: người dùng chưa chọn |
 | Thông báo điện thoại, ô địa chỉ có bản đồ | — | Người dùng chưa quyết |
 | Chuyển repo sang **Private** | — | Nhắc người dùng (repo công khai; Vercel Hobby vẫn deploy được repo private) |
 

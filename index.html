@@ -17,6 +17,7 @@
     #batch-table th.bstt { position: sticky; left: 0; z-index: 25; }
     /* (15/11) iPhone đời cũ: ô nhập trong khung cuộn ngang bị MẤT HÌNH (chữ + khung) khi chuyển ô -> ép khung thành lớp riêng để máy vẽ lại */
     html.old-ios #batch-wrap { -webkit-transform: translateZ(0); transform: translateZ(0); -webkit-overflow-scrolling: touch; }
+    #tbody-batch input.batch-warn { box-shadow: 0 0 0 2px #fb923c; background-color: #fff7ed; }
     @media (max-width: 767px) {
       #batch-wrap { max-height: none !important; overflow-y: hidden !important; }
       #batch-table thead { position: static !important; }
@@ -248,6 +249,7 @@
       document.getElementById('btn-change-pass').classList.remove('hidden');
       await loadCloudSettings();
       loadPlaces();
+      loadFleet();
       loadPriceList();
       if (r.role === 'manager') startManagerSession();
       else startWorkerSession(r.role);
@@ -579,7 +581,7 @@
         const aS = v('audit-start-date'), aE = v('audit-end-date');
         if (aS) {
           const rev = v('revenue-date-picker') || today;
-          const starts = [aS, rev, remindFrom, monthStartKey(bizFrom)].filter(Boolean).sort();   // khung Lời/Âm cần DT từ đầu tháng (bậc hoa hồng)
+          const starts = [aS, rev, shiftDateKey(remindFrom, -4), monthStartKey(bizFrom)].filter(Boolean).sort();   // khung Lời/Âm cần DT từ đầu tháng (bậc hoa hồng)
           const ends = [aE || '9999-12-31', rev, remindTo, bizTo].filter(Boolean).sort();
           from = shiftDateKey(starts[0], -1);   // tải thêm 1 ngày trước/sau để ghép đơn tài xế ghi lệch ngày
           to = ends[ends.length - 1] === '9999-12-31' ? '9999-12-31' : shiftDateKey(ends[ends.length - 1], 1);
@@ -598,6 +600,7 @@
         updateManagerAuditTable();
         updateManagerRevenueSummary();
         renderBizBox();
+        syncFleetFromTrips();
       };
       q.on('value', mgrWinCb, err => console.warn('trips', err));
     }
@@ -668,6 +671,40 @@
       });
       if (Object.keys(upd).length) dbRoot().update(upd).catch(() => {});
     }
+    // ===== ĐỘI XE (16/11): biển số do TÀI XẾ đã báo -> bán vé gõ biển số lạ thì cảnh báo =====
+    // fleet/<biển số chuẩn hóa> = {p: biển số như tài xế gõ, n: số lần báo, last: yyyy-mm-dd}. Chỉ tài xế / quản lý ghi (quy tắc).
+    // Quy tắc cũ chưa có "fleet" -> đọc lỗi -> không cảnh báo biển số (app vẫn chạy bình thường).
+    let fleetMap = {}, fleetLoaded = false;
+    const fleetSynced = new Set();
+    function loadFleet() {
+      dbRef('fleet').on('value', s => { fleetMap = s.val() || {}; fleetLoaded = true; }, () => { fleetLoaded = false; });
+    }
+    function recordFleet(trips) {
+      const upd = {};
+      trips.forEach(t => {
+        const k = normalizePlate(t.plateNumber);
+        if (!k || k.length > 20 || upd[`fleet/${k}/p`]) return;
+        upd[`fleet/${k}/p`] = String(t.plateNumber).trim().toUpperCase().slice(0, 30);
+        upd[`fleet/${k}/n`] = firebase.database.ServerValue.increment(1);
+        const dk = t.dateKey || tripDateKey(t);
+        if (dk && !((fleetMap[k] || {}).last >= dk)) upd[`fleet/${k}/last`] = dk;
+      });
+      if (Object.keys(upd).length) dbRoot().update(upd).catch(() => {});
+    }
+    // Quản lý: xe tài xế đã báo (trong dữ liệu đang tải) mà chưa có trong danh sách -> bổ sung (chỉ thêm, không đếm lại)
+    function syncFleetFromTrips() {
+      if (!fleetLoaded || !isManager()) return;
+      const upd = {};
+      allCompanyTrips.forEach(t => {
+        if (t.role !== 'driver') return;
+        const k = normalizePlate(t.plateNumber);
+        if (!k || k.length > 20 || fleetMap[k] || fleetSynced.has(k)) return;
+        fleetSynced.add(k);
+        upd[`fleet/${k}`] = { p: String(t.plateNumber).trim().toUpperCase().slice(0, 30), n: 1, last: t.dateKey || tripDateKey(t) || '' };
+      });
+      if (Object.keys(upd).length) dbRoot().update(upd).catch(() => {});
+    }
+
     function placeCandidates() {
       const m = {};
       Object.entries(placesMap).forEach(([k, v]) => { if (v && v.name) m[k] = { name: v.name, n: Number(v.n) || 1 }; });
@@ -1656,6 +1693,38 @@
       if (OLD_IOS) repaintEl(ev && ev.target);
       setTimeout(updateBatchPreview, 60);   // đợi tự điền giá / chọn gợi ý xong
     }
+    // (16/11) CẢNH BÁO KHI NHẬP (vẫn cho lưu): biển số chưa có trong danh sách xe tài xế đã báo; số phiếu lệch xa các phiếu đã nhập gần đây
+    function batchRowWarnings(i) {
+      const v = id => String((document.getElementById(id) || {}).value || '').trim();
+      const out = [];
+      const plate = v(`p-${i}`).toUpperCase(), ticket = v(`t-${i}`), pk = normalizePlate(plate);
+      const fleetKeys = Object.keys(fleetMap);
+      if (pk && fleetLoaded && fleetKeys.length >= 15 && !fleetMap[pk]) {
+        const sim = fleetKeys.filter(k => (pk.length >= 3 && (k.endsWith(pk) || pk.endsWith(k))) || (k.length === pk.length && bcLev(k, pk) <= 1))
+          .sort((a, b) => (Number((fleetMap[b] || {}).n) || 0) - (Number((fleetMap[a] || {}).n) || 0)).slice(0, 3).map(k => (fleetMap[k] || {}).p || k);
+        out.push({ f: 'p', text: staffRole === 'driver'
+          ? `Xe ${plate} chưa có trong danh sách xe công ty` + (sim.length ? ` – có phải xe ${sim.join(' / ')}?` : ' (xe mới thì bỏ qua)')
+          : `Xe ${plate} chưa có tài xế nào báo` + (sim.length ? ` – có phải xe ${sim.join(' / ')}?` : ', kiểm tra lại biển số') });
+      }
+      const base = baseTicketOf(ticket);
+      if (/^\d{3,}$/.test(base)) {
+        const cutoff = shiftDateKey(localDateKey(new Date()), -30);
+        const recent = [...new Set(personalTrips.filter(t => (tripDateKey(t) || '') >= cutoff).map(t => tkOf(t)).filter(x => /^\d{3,}$/.test(x)))];
+        if (recent.length >= 5) {
+          const lens = {};
+          recent.forEach(x => { lens[x.length] = (lens[x.length] || 0) + 1; });
+          const common = Number(Object.entries(lens).sort((a, b) => b[1] - a[1])[0][0]);
+          if (base.length !== common && (lens[base.length] || 0) < 2) out.push({ f: 't', text: `Số phiếu ${ticket} có ${base.length} chữ số, phiếu thường có ${common} chữ số – kiểm tra lại` });
+          else {
+            const n = Number(base);
+            const near = recent.filter(x => x.length === base.length).sort((a, b) => Math.abs(a - n) - Math.abs(b - n))[0];
+            if (near && Math.abs(Number(near) - n) > 3000) out.push({ f: 't', text: `Số phiếu ${ticket} khác xa các phiếu đã nhập gần đây (vd ${near}) – kiểm tra lại` });
+          }
+        }
+      }
+      ['p', 't'].forEach(f => { const el = document.getElementById(`${f}-${i}`); if (el) el.classList.toggle('batch-warn', out.some(w => w.f === f)); });
+      return out;
+    }
     function updateBatchPreview() {
       const box = document.getElementById('batch-preview');
       if (!box) return;
@@ -1668,10 +1737,12 @@
         const ok = typed && (t || p || d || f || sf || note);
         const sttTd = (document.getElementById(`stt-t-${i}`) || {}).parentElement;
         if (sttTd) { sttTd.style.background = ok ? '#d1fae5' : ''; sttTd.classList.toggle('text-emerald-800', !!ok); const n = sttTd.firstElementChild; if (n) n.textContent = ok ? `✓ ${i + 1}` : `${i + 1}`; }
-        if (!ok) continue;
+        if (!ok) { ['p', 't'].forEach(k => { const e = document.getElementById(`${k}-${i}`); if (e) e.classList.remove('batch-warn'); }); continue; }
+        const warns = batchRowWarnings(i);
         const fare = Number(String(f).replace(/[^0-9]/g, '')) || 0;
         const parts = [v(`staff-${i}`) || '(chưa có tên)', t ? 'Phiếu ' + t : '(chưa có phiếu)', p ? 'Xe ' + p : '', d, fare ? fare.toLocaleString('vi-VN') + 'đ' : '', v(`m-${i}`)].filter(Boolean);
-        lines.push(`<div class="py-0.5">✅ <b>Dòng ${i + 1}:</b> ${parts.map(escHtml).join(' • ')}</div>`);
+        lines.push(`<div class="py-0.5">✅ <b>Dòng ${i + 1}:</b> ${parts.map(escHtml).join(' • ')}</div>` +
+          warns.map(w => `<div class="ml-5 mb-0.5 px-2 py-0.5 bg-orange-100 border border-orange-300 rounded-lg text-orange-800 font-extrabold">⚠️ ${escHtml(w.text)}</div>`).join(''));
       }
       if (!lines.length) { box.className = 'hidden'; box.innerHTML = ''; return; }
       box.className = 'mt-2 bg-emerald-50 border border-emerald-300 rounded-2xl p-3 text-[12px] text-emerald-900 font-semibold';
@@ -2532,7 +2603,7 @@
         const rows = trashItems.filter(o => logTrashMatch(o, kw));
         if (info) info.innerText = `${rows.length} đơn đã xóa trong 90 ngày gần nhất. Bấm "Khôi phục" để đưa đơn trở lại.`;
         tb.innerHTML = rows.slice(0, 500).map(o => `<tr class="hover:bg-slate-50"><td class="p-2 font-mono whitespace-nowrap">${fmtTs(o.deletedAt)}</td><td class="p-2 font-extrabold text-rose-700">${escHtml(o.deletedBy)}</td>
-            <td class="p-2">${escHtml(o.createdBy)}</td><td class="p-2 font-mono">${escHtml(o.dateStr)}</td><td class="p-2 font-bold text-blue-700">${escHtml(formatDisplayTicket(o.ticketNumber))}</td>
+            <td class="p-2">${escHtml(o.createdBy)}</td><td class="p-2 font-mono">${escHtml(o.dateStr)}</td><td class="p-2 font-bold text-blue-700">${escHtml(escTk(o))}</td>
             <td class="p-2">${escHtml(o.plateNumber)}</td><td class="p-2">${escHtml(o.staff)}</td><td class="p-2">${escHtml(o.destination)}</td>
             <td class="p-2 text-right font-bold">${Number(o.totalFare || 0).toLocaleString('vi-VN')}</td>
             <td class="p-2"><button onclick="restoreFromTrash('${escHtml(o._k)}')" class="px-2 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-extrabold text-[10px] whitespace-nowrap">♻️ Khôi phục</button></td></tr>`).join('')
@@ -2542,7 +2613,7 @@
     async function restoreFromTrash(key) {
       const o = trashItems.find(x => x._k === key);
       if (!o) return;
-      if (!confirm(`Khôi phục đơn ${formatDisplayTicket(o.ticketNumber)} (${o.dateStr}, TK ${o.createdBy || '?'})?`)) return;
+      if (!confirm(`Khôi phục đơn ${escTk(o)} (${o.dateStr}, TK ${o.createdBy || '?'})?`)) return;
       try {
         const cur = await dbRef(`trips/${o.id}`).once('value');
         const trip = Object.assign({}, o); delete trip._k; delete trip.deletedAt; delete trip.deletedBy;
@@ -3081,6 +3152,14 @@
           return;
         }
       }
+      // (16/11) Biển số / số phiếu đáng ngờ -> hỏi lại 1 lần (đúng thì vẫn lưu)
+      const warnRows = [];
+      for (let i = 0; i < 20; i++) {
+        const g = id => String((document.getElementById(id) || {}).value || '').trim();
+        if (!(g(`staff-${i}`) && g(`t-${i}`) && (plateOpt || g(`p-${i}`)) && g(`d-${i}`))) continue;
+        batchRowWarnings(i).forEach(w => warnRows.push(`• Dòng ${i + 1}: ${w.text}`));
+      }
+      if (warnRows.length && !confirm(`⚠️ KIỂM TRA LẠI TRƯỚC KHI LƯU:\n\n${warnRows.join('\n')}\n\nĐã đúng → bấm OK để LƯU.\nGõ sai → bấm Hủy để sửa (ô sai có viền cam).`)) return;
       // Đơn nhập cho ngày cũ hơn khoảng đã tải: tải thêm đơn của đúng ngày đó để kiểm tra trùng
       let dupPool = personalTrips;
       if (staffMode === 'window' && staffWinFrom) {
@@ -3208,6 +3287,7 @@
       if (count > 0) {
         dbRoot().update(updates).then(() => {
           recordPlaces(savedDests);
+          if (loggedInUser.role === 'driver') recordFleet(Object.keys(updates).filter(k => k.startsWith('trips/')).map(k => updates[k]));
           logTrips('create', Object.keys(updates).filter(k => k.startsWith('trips/')).map(k => updates[k]), () => 'Nhập đơn mới');
           alert(`Đã lưu thành công và phân tách hoa hồng cho ${count} đơn!` + (overDiscountRows.length && !SILENT_DISCOUNT_WATCH ? `\n\n⚠️ Có ${overDiscountRows.length} đơn GIẢM GIÁ VƯỢT MỨC cho phép (${pctText(DISCOUNT_LIMIT.noi)} nội thành, ${pctText(DISCOUNT_LIMIT.ngoai)} ngoại thành) — Quản lý sẽ kiểm tra:\n${overDiscountRows.join('\n')}` : ''));
           renderBatchRows(role);
@@ -4175,6 +4255,14 @@
       };
 
       let rowsHtml = '';
+      // (16/11) Gợi ý ghép cho đơn chưa khớp (gõ sai số phiếu / biển số / ngày ở 1 trong 2 bên)
+      let nearPool = null;
+      const fAud = getAuditFilters();
+      const nearOf = g => {
+        if (!nearPool) nearPool = auditUnmatchedPool(fAud.startDateVal, fAud.endDateVal);
+        return auditNearCands(g, nearPool);
+      };
+      const nUnmatched = groupList.filter(g => g.status === 'unmatched').length;
       groupList.forEach(g => {
         const group = g.trips, status = g.status;
         let statusHtml = statusBadge[status];
@@ -4188,6 +4276,11 @@
           statusHtml = g.overdue
             ? `<span class="px-2 py-1 bg-orange-600 text-white font-extrabold rounded-lg text-[10px] inline-block">⏰ Quá hạn: ${g.missing === 'driver' ? '🚗 Tài xế' : '🚖 Bán vé/KH'} chưa báo</span>`
             : `<span class="px-2 py-1 bg-amber-100 text-amber-800 font-bold rounded-lg text-[10px] inline-block">⏳ Chờ ${g.missing === 'driver' ? 'Tài xế' : 'Bán vé/KH'} báo</span>`;
+          if (nUnmatched <= 400) statusHtml += nearCandHtml(g, nearOf(g));
+          if (g.missing === 'pos') {
+            const gu = guessSellerText(g);
+            if (gu) statusHtml += `<div class="mt-1.5 text-left bg-sky-50 border border-sky-300 rounded-lg p-1.5 text-[10px] font-bold text-sky-900 min-w-[200px]">👤 Có thể của: ${escHtml(gu)}</div>`;
+          }
         }
         group.forEach((t, idx) => {
           const isPos = t.role === 'pos';
@@ -4688,6 +4781,135 @@
       }
     }
     function ddmm(k) { return k ? `${k.slice(8, 10)}/${k.slice(5, 7)}` : ''; }
+
+    // ===== GỢI Ý GHÉP ĐƠN GÕ SAI (16/11) =====
+    // Đơn "chưa khớp" mà bên kia có đơn cũng chưa khớp gần giống: cùng phiếu khác xe / cùng xe phiếu sai 1–2 số / cùng xe cùng ngày cùng tiền.
+    // Quản lý xem phiếu giấy rồi bấm sửa BÊN SAI (bán vé cũng có thể sai, nên có nút cho cả 2 bên).
+    function tkOf(t) { return String((t && (t.originalTicket || baseTicketOf(t.ticketNumber))) || '').replace(/\s+/g, '').toUpperCase(); }
+    const dayGap = (a, b) => (a && b) ? Math.abs(Math.round((Date.parse(a) - Date.parse(b)) / 86400000)) : 99;
+    const groupFare = g => g.trips.reduce((a, t) => a + Number(t.totalFare || 0), 0);
+    function auditUnmatchedPool(from, to) {
+      return computeAuditGroups({ startDateVal: from ? shiftDateKey(from, -1) : '', endDateVal: to ? shiftDateKey(to, 1) : '', roleFilter: 'all', matchStatusFilter: 'unmatched', keyword: '' });
+    }
+    function auditNearCands(g, pool) {
+      const mine = g.trips[0];
+      if (!mine) return [];
+      const mineSell = isSellRole(mine.role), ids = new Set(g.trips.map(t => t.id));
+      const tk = tkOf(mine), pl = normalizePlate(mine.plateNumber), dk = g.dateKey, fare = groupFare(g);
+      const out = [];
+      pool.forEach(g2 => {
+        const t = g2.trips[0];
+        if (!t || isSellRole(t.role) === mineSell || g2.trips.some(x => ids.has(x.id))) return;
+        if (g2.trips.some(x => isSellRole(x.role) === mineSell)) return;   // nhóm kia phải chỉ có 1 bên
+        const tk2 = tkOf(t), pl2 = normalizePlate(t.plateNumber), dd = dayGap(g2.dateKey, dk), fare2 = groupFare(g2);
+        const sameFare = Math.abs(fare - fare2) < 1000;
+        const lev = tk && tk2 && tk !== tk2 ? bcLev(tk, tk2) : 9;
+        let why = '', score = 0;
+        if (tk && tk === tk2 && dd <= 3) {
+          if (pl && pl2 && pl !== pl2) { why = `cùng số phiếu, KHÁC biển số (${t.plateNumber} ≠ ${mine.plateNumber})${dd ? `, lệch ${dd} ngày` : ''}`; score = 4; }
+          else if (dd) { why = `cùng số phiếu${pl && pl2 ? ' + biển số' : ''}, lệch ${dd} ngày`; score = 4; }
+          else return;
+        } else if (pl && pl === pl2 && dd <= 1 && tk.length >= 4 && lev <= 2) {
+          why = `cùng xe, số phiếu GẦN GIỐNG (${tk2} ~ ${tk}, khác ${lev} số)${dd ? ', lệch 1 ngày' : ''}`; score = 3 - lev * 0.4;
+        } else if ((!pl || !pl2) && dd === 0 && sameFare && tk.length >= 4 && lev <= 1) {
+          why = `số phiếu GẦN GIỐNG (${tk2} ~ ${tk}), cùng ngày, cùng tiền`; score = 2;
+        } else if (pl && pl === pl2 && dd === 0 && sameFare && fare > 0) {
+          why = `cùng xe, cùng ngày, cùng tiền nhưng khác số phiếu (${tk2} ≠ ${tk})`; score = 1;
+        } else return;
+        if (sameFare) score += 0.5;
+        else why += `; tiền khác (${fmtMoney(fare2)} ≠ ${fmtMoney(fare)})`;
+        out.push({ g2, why, score });
+      });
+      return out.sort((a, b) => b.score - a.score).slice(0, 3);
+    }
+    // Đổi các ô khác nhau (số phiếu gốc / biển số / ngày) của đơn "target" theo đơn "src"
+    function pairFixChanges(target, src) {
+      const ch = {};
+      const sTk = String(src.originalTicket || baseTicketOf(src.ticketNumber) || '').trim();
+      if (sTk && tkOf(src) !== tkOf(target)) {
+        const cur = String(target.ticketNumber || '').trim();
+        ch.ticketNumber = sTk + cur.slice(baseTicketOf(cur).length);   // giữ đuôi chia tiền "-1/2"
+        ch.originalTicket = sTk;
+      }
+      const sp = String(src.plateNumber || '').trim().toUpperCase();
+      if (sp && normalizePlate(sp) !== normalizePlate(target.plateNumber)) ch.plateNumber = sp;
+      const sk = tripDateKey(src);
+      if (sk && sk !== tripDateKey(target)) { ch.dateStr = normalizeDateInput(src.dateStr); ch.dateKey = sk; }
+      return ch;
+    }
+    const escTk = t => String(t.ticketNumber || '');
+    const sideName = t => t.role === 'driver' ? 'Tài xế' : (t.role === 'plan2' ? 'Kế hoạch 2' : (t.role === 'plan' ? 'Kế hoạch' : 'Bán vé'));
+    function fixAuditPair(targetIdsCsv, srcId) {
+      const targets = String(targetIdsCsv || '').split(',').map(id => allCompanyTrips.find(x => x.id === id)).filter(Boolean);
+      const src = allCompanyTrips.find(x => x.id === srcId);
+      if (!targets.length || !src) return;
+      const chs = targets.map(t => pairFixChanges(t, src));
+      if (!chs.some(c => Object.keys(c).length)) { alert('Hai bên đã giống nhau, không cần sửa.'); return; }
+      const desc = changeText(targets[0], chs[0]);
+      if (!confirm(`Sửa ${targets.length} đơn bên ${sideName(targets[0])} – ${fullStaffName(targets)} – theo bên ${sideName(src)}:\n\n${desc}\n\nHãy chắc chắn đã xem phiếu giấy. Đồng ý sửa?`)) return;
+      const updates = {};
+      targets.forEach((t, i) => Object.entries(chs[i]).forEach(([k, v]) => {
+        updates[`trips/${t.id}/${k}`] = v;
+        if (t.createdBy) updates[`users_trips/${t.createdBy}/${t.id}/${k}`] = v;
+      }));
+      const befores = targets.map(t => Object.assign({}, t));
+      dbRoot().update(updates).then(() => {
+        logTrips('edit', targets, t => `Sửa theo gợi ý ghép đối soát (theo ${sideName(src)} phiếu ${src.ticketNumber}): ` + changeText(befores[targets.indexOf(t)], chs[targets.indexOf(t)]));
+        targets.forEach((t, i) => Object.assign(t, chs[i]));
+        updateManagerAuditTable();
+        updateManagerRevenueSummary();
+      }).catch(err => alert('Lỗi cập nhật: ' + err.message));
+    }
+    // Ô gợi ý ghép (dưới nhãn "Chưa khớp" ở Bảng Đối Soát)
+    function nearCandHtml(g, cands) {
+      if (!cands.length) return '';
+      const mineIds = g.trips.map(t => t.id).join(',');
+      const mine = g.trips[0];
+      return cands.map(c => {
+        const o = c.g2.trips[0], otherIds = c.g2.trips.map(t => t.id).join(',');
+        const toOther = changeText(mine, pairFixChanges(mine, o)), toMine = changeText(o, pairFixChanges(o, mine));
+        const btn = (ids, srcId, label, ch) => ch ? `<button onclick="fixAuditPair('${escHtml(ids)}', '${escHtml(srcId)}')" class="block w-full text-left mt-1 px-1.5 py-1 bg-white hover:bg-indigo-100 border border-indigo-300 rounded-md text-indigo-800">${label}<div class="font-semibold text-[9px] text-slate-600">${escHtml(ch)}</div></button>` : '';
+        return `<div class="mt-1.5 text-left bg-indigo-50 border border-indigo-300 rounded-lg p-1.5 text-[10px] font-bold text-indigo-900 min-w-[200px]">
+            🔗 Có thể cùng cuốc với <b>${escHtml(sideName(o))}</b>: phiếu <b>${escHtml(escTk(o))}</b>, xe ${escHtml(o.plateNumber || '–')}, ${escHtml(ddmm(c.g2.dateKey))}, ${fmtMoney(groupFare(c.g2))}đ – ${escHtml(fullStaffName(c.g2.trips))}
+            <div class="font-semibold text-indigo-700">Vì: ${escHtml(c.why)}. Xem phiếu giấy để biết bên nào sai:</div>
+            ${btn(mineIds, o.id, `✏️ Sửa bên ${escHtml(sideName(mine))} cho giống ${escHtml(sideName(o))}`, toOther)}
+            ${btn(otherIds, mine.id, `✏️ Sửa bên ${escHtml(sideName(o))} cho giống ${escHtml(sideName(mine))}`, toMine)}
+          </div>`;
+      }).join('');
+    }
+    // (A) Phiếu tài xế đã báo mà bán vé chưa nhập: đoán người đang cầm cuốn phiếu theo các số phiếu KỀ BÊN đã được nhập
+    function guessSellerByNearTickets(g) {
+      const base = tkOf(g.trips[0]);
+      if (!/^\d{4,}$/.test(base) || !g.dateKey) return [];
+      const n = Number(base), lo = shiftDateKey(g.dateKey, -5), hi = shiftDateKey(g.dateKey, 1);
+      const by = {};
+      allCompanyTrips.forEach(t => {
+        if (!isSellRole(t.role)) return;
+        const k = tripDateKey(t);
+        if (!k || k < lo || k > hi) return;
+        const b = tkOf(t);
+        if (!/^\d+$/.test(b) || b.length !== base.length) return;
+        const d = Math.abs(Number(b) - n);
+        if (!d || d > 30) return;
+        const acc = t.createdBy || '?';
+        const x = by[acc] = by[acc] || { acc, names: {}, tks: new Set(), score: 0, below: false, above: false, trips: [] };
+        if (!x.tks.has(b)) { x.tks.add(b); x.score += 1 / d; }
+        if (Number(b) < n) x.below = true; else x.above = true;
+        const nm = nameCase(String(t.staff || '').trim());
+        if (nm) x.names[nm] = (x.names[nm] || 0) + 1;
+      });
+      const list = Object.values(by).map(x => Object.assign(x, { score: x.score * (x.below && x.above ? 2 : 1) })).sort((a, b) => b.score - a.score);
+      if (!list.length) return [];
+      return list.filter((x, i) => i === 0 || x.score >= list[0].score * 0.5).slice(0, 2).map(x => ({
+        acc: x.acc, sure: x.below && x.above,
+        name: Object.entries(x.names).sort((a, b) => b[1] - a[1]).map(e => e[0]).slice(0, 2).join(' / ') || x.acc,
+        tks: [...x.tks].sort((a, b) => Math.abs(a - n) - Math.abs(b - n)).slice(0, 4).sort()
+      }));
+    }
+    function guessSellerText(g) {
+      const gs = guessSellerByNearTickets(g);
+      return gs.map(x => `${x.name} (TK ${x.acc}) – đã nhập phiếu ${x.tks.join(', ')}`).join(' hoặc ');
+    }
     function renderReminderBox() {
       const box = document.getElementById('overdue-box');
       if (!box) return;
@@ -4707,6 +4929,15 @@
       const fare = g => g.trips.reduce((a, t) => a + Number(t.totalFare || 0), 0).toLocaleString('vi-VN') + 'đ';
       const lineCls = 'block w-full text-left bg-white border border-slate-300 hover:border-blue-500 hover:bg-blue-50 rounded-lg px-2 py-1 mb-1 cursor-pointer';
       const jump = g => `onclick="jumpToAuditTicket('${escHtml(tk(g))}')" title="Bấm để xem phiếu này ở Bảng Đối Soát"`;
+      // (16/11) Gợi ý: có thể bên kia đã nhập NHẦM số phiếu/xe; phiếu tài xế báo -> đoán người bán theo số phiếu kề bên
+      const rPool = gs.length && gs.length <= 400 ? auditUnmatchedPool(remindFrom, remindTo) : [];
+      const hints = g => {
+        const c = rPool.length ? auditNearCands(g, rPool)[0] : null;
+        let h = '';
+        if (c) { const o = c.g2.trips[0]; h += `<div class="mt-0.5 text-indigo-800 font-bold">🔗 Có thể ${escHtml(sideName(o).toLowerCase())} đã nhập nhầm thành phiếu ${escHtml(escTk(o))}, xe ${escHtml(o.plateNumber || '–')} (${escHtml(fullStaffName(c.g2.trips))}) – ${escHtml(c.why)}</div>`; }
+        if (g.missing === 'pos') { const gu = guessSellerText(g); if (gu) h += `<div class="mt-0.5 text-sky-800 font-bold">👤 Có thể của: ${escHtml(gu)}</div>`; }
+        return h;
+      };
       const plateChips = Object.values(byPlate)
         .sort((a, b) => b.length - a.length || String(a[0].trips[0].plateNumber || '').localeCompare(String(b[0].trips[0].plateNumber || '')))
         .map(list => {
@@ -4716,13 +4947,13 @@
             const t = g.trips[0];
             const who = t.role === 'plan2' ? 'kế hoạch 2' : (t.role === 'plan' ? 'kế hoạch' : 'bán vé');
             return `<button type="button" ${jump(g)} class="${lineCls}">🚗 <b>${plate ? 'Xe ' + escHtml(plate) : '(chưa ghi biển số)'} – Phiếu ${escHtml(tk(g))}</b>${one ? '' : ` <span class="text-slate-500">(${ddmm(g.dateKey)})</span>`}`
-              + ` <span class="text-slate-600">– ${escHtml(fullStaffName(g.trips))} (${who}) đã nhập${t.destination ? ', đi ' + escHtml(t.destination) : ''}, ${fare(g)}</span></button>`;
+              + ` <span class="text-slate-600">– ${escHtml(fullStaffName(g.trips))} (${who}) đã nhập${t.destination ? ', đi ' + escHtml(t.destination) : ''}, ${fare(g)}</span>${hints(g)}</button>`;
           }).join('');
           return list.length > 1 ? `<div class="border-l-4 border-amber-400 pl-1.5 mb-1.5">${rows}</div>` : rows;
         }).join('');
       const posChips = pos.map(g => {
         const t = g.trips[0];
-        return `<button type="button" ${jump(g)} class="${lineCls}"><b>Phiếu ${escHtml(t.originalTicket || t.ticketNumber)}</b>${one ? '' : ` <span class="text-slate-500">(${ddmm(g.dateKey)})</span>`} <span class="text-slate-500">– xe ${escHtml(t.plateNumber || '?')}, ${escHtml(t.staff || '')} đã báo, ${fare(g)}</span></button>`;
+        return `<button type="button" ${jump(g)} class="${lineCls}"><b>Phiếu ${escHtml(t.originalTicket || t.ticketNumber)}</b>${one ? '' : ` <span class="text-slate-500">(${ddmm(g.dateKey)})</span>`} <span class="text-slate-500">– xe ${escHtml(t.plateNumber || '?')}, ${escHtml(t.staff || '')} đã báo, ${fare(g)}</span>${hints(g)}</button>`;
       }).join('');
       const head = one
         ? (late ? `<span class="px-2 py-0.5 bg-rose-600 text-white rounded-lg">⏰ Đã quá hạn (${dlTxt})</span>` : `<span class="px-2 py-0.5 bg-slate-200 text-slate-700 rounded-lg">Hạn báo cáo: ${dlTxt}</span>`)
@@ -4916,21 +5147,25 @@
         // 1. Tài xế chưa báo
         const drv = gs.filter(g => g.missing === 'driver');
         ws = xlSheetSetup(wb, 'Tài Xế Chưa Báo', true);
-        xlTitle(ws, 8, f, 'TÀI XẾ / CHỦ XE CHƯA BÁO CÁO');
+        const xPool = gs.length <= 400 ? auditUnmatchedPool(remindFrom, remindTo) : [];
+        const nearTxt = g => { const c = xPool.length ? auditNearCands(g, xPool)[0] : null; if (!c) return ''; const o = c.g2.trips[0]; return `Có thể ${sideName(o).toLowerCase()} nhập nhầm thành phiếu ${escTk(o)}, xe ${o.plateNumber || '-'} (${fullStaffName(c.g2.trips)}) - ${c.why}`; };
+        xlTitle(ws, 9, f, 'TÀI XẾ / CHỦ XE CHƯA BÁO CÁO');
         xlTable(ws, 6, [
           { h: 'STT', w: 6, align: 'center' }, { h: 'Ngày', w: 12, align: 'center' }, { h: 'Biển số xe', w: 14, align: 'center' }, { h: 'Số phiếu', w: 14, align: 'center' },
-          { h: 'Bán vé / KH đã nhập', w: 30, wrap: true }, { h: 'Điểm đến', w: 34, wrap: true }, { h: 'Số tiền', w: 14, fmt: '#,##0' }, { h: 'Trạng thái', w: 12, align: 'center' }
+          { h: 'Bán vé / KH đã nhập', w: 30, wrap: true }, { h: 'Điểm đến', w: 34, wrap: true }, { h: 'Số tiền', w: 14, fmt: '#,##0' }, { h: 'Trạng thái', w: 12, align: 'center' },
+          { h: 'Gợi ý (nhập nhầm?)', w: 40, wrap: true }
         ], drv.map((g, i) => [i + 1, dmy(g.dateKey), plateCell(g.trips[0].plateNumber), g.trips[0].originalTicket || g.trips[0].ticketNumber,
-          fullStaffName(g.trips), g.trips[0].destination || '', sumFare(g.trips), stTxt(g)]), i => lateFill(drv[i]));
+          fullStaffName(g.trips), g.trips[0].destination || '', sumFare(g.trips), stTxt(g), nearTxt(g)]), i => lateFill(drv[i]));
         // 2. Bán vé chưa nhập
         const pos = gs.filter(g => g.missing === 'pos');
         ws = xlSheetSetup(wb, 'Bán Vé Chưa Nhập', true);
-        xlTitle(ws, 8, f, 'BÁN VÉ / KẾ HOẠCH CHƯA NHẬP ĐƠN');
+        xlTitle(ws, 10, f, 'BÁN VÉ / KẾ HOẠCH CHƯA NHẬP ĐƠN');
         xlTable(ws, 6, [
           { h: 'STT', w: 6, align: 'center' }, { h: 'Ngày', w: 12, align: 'center' }, { h: 'Số phiếu', w: 14, align: 'center' }, { h: 'Biển số xe', w: 14, align: 'center' },
-          { h: 'Tài xế / Chủ xe đã báo', w: 30, wrap: true }, { h: 'Điểm đến', w: 34, wrap: true }, { h: 'Số tiền', w: 14, fmt: '#,##0' }, { h: 'Trạng thái', w: 12, align: 'center' }
+          { h: 'Tài xế / Chủ xe đã báo', w: 30, wrap: true }, { h: 'Điểm đến', w: 34, wrap: true }, { h: 'Số tiền', w: 14, fmt: '#,##0' }, { h: 'Trạng thái', w: 12, align: 'center' },
+          { h: 'Có thể của (theo số phiếu kề)', w: 36, wrap: true }, { h: 'Gợi ý (nhập nhầm?)', w: 40, wrap: true }
         ], pos.map((g, i) => [i + 1, dmy(g.dateKey), g.trips[0].originalTicket || g.trips[0].ticketNumber, plateCell(g.trips[0].plateNumber),
-          fullStaffName(g.trips), g.trips[0].destination || '', sumFare(g.trips), stTxt(g)]), i => lateFill(pos[i]));
+          fullStaffName(g.trips), g.trips[0].destination || '', sumFare(g.trips), stTxt(g), guessSellerText(g), nearTxt(g)]), i => lateFill(pos[i]));
         }
         // 3. Giảm giá vượt mức
         const od = collectOverDiscount(remindFrom, remindTo);
@@ -6190,12 +6425,13 @@
       },
       async nhac_bao_cao(i) {
         const [from, to] = bcRange(i.tu_ngay, i.den_ngay);
-        const wide = await bcLoadTrips(shiftDateKey(from, -1), shiftDateKey(to, 1));
+        const wide = await bcLoadTrips(shiftDateKey(from, -5), shiftDateKey(to, 1));
         const gs = bcWithTrips(wide, () => computeAuditGroups({ startDateVal: from, endDateVal: to, roleFilter: 'all', matchStatusFilter: 'unmatched', keyword: '' }));
         const line = g => {
           const t = g.trips[0];
           return { xe: t.plateNumber || '', phieu: t.originalTicket || baseTicketOf(t.ticketNumber), ngay: t.dateStr, nguoi_nhap: bcWithTrips(wide, () => fullStaffName(g.trips)),
-            phan_vung: bcRoleName(t.role), den: t.destination || '', tien: g.trips.reduce((a, x) => a + Number(x.totalFare || 0), 0), qua_han: g.overdue };
+            phan_vung: bcRoleName(t.role), den: t.destination || '', tien: g.trips.reduce((a, x) => a + Number(x.totalFare || 0), 0), qua_han: g.overdue,
+            co_the_cua_theo_so_phieu_ke: g.missing === 'pos' ? (bcWithTrips(wide, () => guessSellerText(g)) || undefined) : undefined };
         };
         const dl = reportDeadline(to);
         return { khoang: `${from} → ${to}`, han_bao_cao_ngay_cuoi: dl ? bcTime(dl.getTime()) : '',

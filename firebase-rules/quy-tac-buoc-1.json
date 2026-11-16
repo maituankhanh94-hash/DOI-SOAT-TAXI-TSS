@@ -147,6 +147,13 @@
           }
         }
       },
+      "fleet": {
+        ".read": "(auth != null && root.child('test_env/roles/'+auth.uid+'/active').val() === true)",
+        "$k": {
+          ".write": "((auth != null && root.child('test_env/roles/'+auth.uid+'/active').val() === true) && root.child('test_env/roles/'+auth.uid+'/role').val() === 'manager') || ((auth != null && root.child('test_env/roles/'+auth.uid+'/active').val() === true) && root.child('test_env/roles/'+auth.uid+'/role').val() === 'driver')",
+          ".validate": "newData.child('p').isString() && newData.child('p').val().length <= 30"
+        }
+      },
       "drivers": {
         ".read": "((auth != null && root.child('test_env/roles/'+auth.uid+'/active').val() === true) && root.child('test_env/roles/'+auth.uid+'/role').val() === 'manager')",
         ".write": "((auth != null && root.child('test_env/roles/'+auth.uid+'/active').val() === true) && root.child('test_env/roles/'+auth.uid+'/role').val() === 'manager')"

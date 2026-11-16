@@ -32,6 +32,10 @@ function strict(B){
         ".validate": "newData.hasChildren(['at', 'by', 'action']) && newData.child('at').isNumber() && newData.child('at').val() <= now" } },
     // Bảng xếp hạng (15/11): tổng doanh thu theo ngày của từng tài khoản (chỉ tên + số tiền), mọi tài khoản đọc; ai ghi phần của người đó
     "rank": { ".read": active, "$d": { "$u": { ".write": `${mgr} || (${active} && $u === ${me})` } } },
+    // Đội xe (16/11): biển số tài xế đã báo, mọi tài khoản đọc (cảnh báo bán vé gõ biển số lạ); chỉ tài xế / quản lý ghi
+    "fleet": { ".read": active,
+      "$k": { ".write": `${mgr} || (${active} && ${R}+'/role').val() === 'driver')`,
+        ".validate": "newData.child('p').isString() && newData.child('p').val().length <= 30" } },
     "drivers": { ".read": mgr, ".write": mgr }
   };
 }

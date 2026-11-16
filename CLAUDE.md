@@ -86,7 +86,9 @@
 
 ## iPhone đời cũ: ô nhập mất hình khi chuyển ô (15/11, LÊN MAIN)
 - Người dùng: máy chưa cập nhật iOS, gõ xong chuyển ô thì CHỮ + KHUNG ô vừa gõ biến mất → nhân viên lo không biết đã ghi nhận chưa. Là lỗi VẼ của WebKit cũ với ô nhập trong khung cuộn ngang (giá trị vẫn còn). Không thử được trên iOS thật trong sandbox.
-- `OLD_IOS` (UA iPhone/iPad OS < 17) → `html.old-ios`: `#batch-wrap` translateZ(0) + -webkit-overflow-scrolling; `onBatchFocusOut` (tbody onfocusout) ép vẽ lại ô vừa rời (`repaintEl`: opacity 0.99 qua 2 khung hình). KHÔNG đặt transform lên từng ô (iOS cũ lệch con trỏ).
+- (16/11, video người dùng trên iPhone iOS 18 vẫn mất hình khi kéo ngang) `OLD_IOS` nay = MỌI iPhone/iPad (kể cả iPadOS báo MacIntel); thêm: ngừng cuộn #batch-wrap 120ms → `repaintEl(#batch-table)` + ô đang gõ; focusin ô trong bảng → repaint sau 60ms & 400ms. CHƯA thử được trên iPhone thật.
+- (16/11) Lỗi dính số tiền: rời ô Điểm đến sang ô Tiền → `applyRowPrice` tự điền giá bảng vào ô đang đứng, gõ tiếp bị dính ("400000450.000"). Sửa: giá tự điền vào ô đang focus thì bôi đen (`setSelectionRange`), focusin ô `f-i` có `dataset.auto==='1'` cũng bôi đen → gõ là thay.
+- `OLD_IOS` (ban đầu: UA iPhone/iPad OS < 17) → `html.old-ios`: `#batch-wrap` translateZ(0) + -webkit-overflow-scrolling; `onBatchFocusOut` (tbody onfocusout) ép vẽ lại ô vừa rời (`repaintEl`: opacity 0.99 qua 2 khung hình). KHÔNG đặt transform lên từng ô (iOS cũ lệch con trỏ).
 - Xác nhận bằng CHỮ THƯỜNG (không bị lỗi vẽ), mọi máy: ô STT dòng đã gõ chuyển XANH "✓ n" + số phiếu; khung `#batch-preview` DƯỚI bảng "📝 Đã ghi nhận n dòng – CHƯA LƯU" liệt kê từng dòng (tên • phiếu • xe • điểm đến • tiền • TT). Chỉ tính dòng có ô `dataset.touched` (bỏ số phiếu tự nhảy/thói quen). `updateBatchPreview` gọi khi gõ (trễ 250ms), focusout, chọn gợi ý, vẽ lại bảng. Không đặt khung xác nhận TRÊN bảng (đẩy bảng xuống gây chạm nhầm).
 
 ## Lịch chọn ngày + học thói quen nhập (13/11, ĐÃ LÊN MAIN; nhánh `lich-va-thoi-quen`)

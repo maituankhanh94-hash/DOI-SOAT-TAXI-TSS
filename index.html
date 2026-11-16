@@ -1201,7 +1201,11 @@
       const c = document.getElementById(`c-${i}`);
       if (it && f && c) {
         const p = priceForItem(it, c.value);
-        if (p && (!f.value.trim() || f.dataset.auto === '1')) { f.value = fmtMoney(p); f.dataset.auto = '1'; }
+        if (p && (!f.value.trim() || f.dataset.auto === '1')) {
+          f.value = fmtMoney(p); f.dataset.auto = '1';
+          // (16/11) đang đứng ở ô Tiền khi giá tự điền -> bôi đen để gõ số mới là THAY (trước đây bị dính: 450.000400000)
+          if (document.activeElement === f) { try { f.setSelectionRange(0, f.value.length); } catch (e) {} }
+        }
       }
       updateRowPriceHint(i);
     }
@@ -1254,6 +1258,8 @@
     }
 
     function onRowFareInput(i) { const f = document.getElementById(`f-${i}`); if (f) f.dataset.auto = '0'; }
+    // Bấm vào ô Tiền đang có giá TỰ ĐIỀN -> bôi đen sẵn (gõ là thay, không bị dính số)
+    document.addEventListener('focusin', e => { const f = e.target; if (f && /^f-\d+$/.test(f.id || '') && f.dataset.auto === '1' && f.value) setTimeout(() => { try { f.setSelectionRange(0, f.value.length); } catch (err) {} }, 0); }, true);
 
     // Gợi ý điểm đến: Bán vé thấy mục BẢNG GIÁ (📋, có giá) trước, sau đó là địa chỉ hay đi (📍)
     function showDestSuggestions(input, dropId, rowIdx) {
@@ -1681,8 +1687,25 @@
       }
     }
     // (15/11) iPhone đời cũ: ô vừa rời đi bị mất hình -> ép vẽ lại; đồng thời cập nhật DÒNG XÁC NHẬN (chữ thường, không bị lỗi vẽ)
-    const OLD_IOS = (() => { const m = /(?:iPhone|iPad|iPod)[^)]*OS (\d+)_/.exec(navigator.userAgent); return !!(m && Number(m[1]) < 17); })();
+    // (16/11) Video người dùng: iPhone iOS MỚI (18) cũng bị mất hình ô nhập khi kéo ngang bảng -> áp cho MỌI iPhone/iPad (tên biến giữ OLD_IOS)
+    const OLD_IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
     if (OLD_IOS) document.documentElement.classList.add('old-ios');
+    // Kéo ngang bảng nhập xong (ngừng cuộn 120ms) -> ép vẽ lại cả bảng + ô đang gõ
+    if (OLD_IOS) {
+      let rpT = 0;
+      document.addEventListener('scroll', e => {
+        const w = e.target;
+        if (!w || w.id !== 'batch-wrap') return;
+        clearTimeout(rpT);
+        rpT = setTimeout(() => { repaintEl(document.getElementById('batch-table')); const a = document.activeElement; if (a && w.contains(a)) repaintEl(a); }, 120);
+      }, true);
+      // Bấm vào ô (iOS tự kéo bảng tới ô đó) -> vẽ lại ô đang gõ sau khi kéo xong
+      document.addEventListener('focusin', e => {
+        const a = e.target, w = document.getElementById('batch-wrap');
+        if (!w || !a || !w.contains(a)) return;
+        setTimeout(() => repaintEl(a), 60); setTimeout(() => repaintEl(a), 400);
+      }, true);
+    }
     function repaintEl(el) {
       if (!el || !el.style) return;
       requestAnimationFrame(() => {

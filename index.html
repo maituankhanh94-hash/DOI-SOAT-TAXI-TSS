@@ -2616,6 +2616,7 @@
               <button id="lt-tab-log" onclick="setLogTrashTab('log')" class="px-3 py-1.5 rounded-xl text-xs font-extrabold">📜 Nhật Ký (ai nhập / sửa / xóa)</button>
               <button id="lt-tab-trash" onclick="setLogTrashTab('trash')" class="px-3 py-1.5 rounded-xl text-xs font-extrabold">🗑️ Thùng Rác (đơn đã xóa)</button>
               <input id="lt-search" type="text" autocomplete="off" oninput="renderLogTrash()" placeholder="🔍 Tìm số phiếu, tài khoản, biển số, ngày..." class="px-3 py-1.5 bg-slate-50 border rounded-xl font-bold text-xs flex-1 min-w-[180px]">
+              <button id="btn-lt-excel" onclick="exportLogTrashExcel()" class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-extrabold whitespace-nowrap">📥 Xuất Excel</button>
             </div>
             <div id="lt-scan-stats"></div>
             <div id="lt-info" class="text-[11px] text-slate-500 font-bold"></div>
@@ -2666,7 +2667,7 @@
       if (!head || !tb) return;
       const kw = (document.getElementById('lt-search') || {}).value || '';
       if (logTrashTab === 'log') {
-        head.innerHTML = '<tr><th class="p-2.5">Thời điểm</th><th class="p-2.5">Người làm</th><th class="p-2.5">Việc</th><th class="p-2.5">Đơn của TK</th><th class="p-2.5">Ngày đơn</th><th class="p-2.5">Số phiếu</th><th class="p-2.5">Biển số</th><th class="p-2.5 text-right">Tiền</th><th class="p-2.5">Chi tiết</th></tr>';
+        head.innerHTML = '<tr><th class="p-2.5">Thời điểm</th><th class="p-2.5">Người làm</th><th class="p-2.5">Việc</th><th class="p-2.5">Đơn của TK</th><th class="p-2.5">Ngày đơn</th><th class="p-2.5">Số phiếu</th><th class="p-2.5">Biển số</th><th class="p-2.5 text-right">Tiền</th><th class="p-2.5">Chi tiết</th><th class="p-2.5"></th></tr>';
         const rows = logItems.filter(o => logTrashMatch(o, kw));
         if (info) info.innerText = `Hiện ${Math.min(rows.length, 500)}/${rows.length} dòng (trong ${logItems.length} thao tác gần nhất, mới nhất ở trên). Nhật ký chỉ có từ khi cập nhật bản này.`;
         tb.innerHTML = rows.slice(0, 500).map(o => {
@@ -2674,8 +2675,9 @@
           return `<tr class="hover:bg-slate-50"><td class="p-2 font-mono whitespace-nowrap">${fmtTs(o.at)}</td><td class="p-2 font-extrabold">${escHtml(o.by)}</td>
             <td class="p-2"><span class="px-2 py-0.5 rounded-md font-extrabold text-[10px] whitespace-nowrap ${a[1]}">${escHtml(a[0])}</span></td>
             <td class="p-2">${escHtml(o.owner)}</td><td class="p-2 font-mono">${escHtml(o.dateStr)}</td><td class="p-2 font-bold text-blue-700">${escHtml(formatDisplayTicket(o.ticket))}</td>
-            <td class="p-2">${escHtml(o.plate)}</td><td class="p-2 text-right font-bold">${Number(o.fare || 0).toLocaleString('vi-VN')}</td><td class="p-2 text-slate-600">${escHtml(o.detail)}</td></tr>`;
-        }).join('') || '<tr><td colspan="9" class="p-4 text-center text-slate-400">Không có dòng nào.</td></tr>';
+            <td class="p-2">${escHtml(o.plate)}</td><td class="p-2 text-right font-bold">${Number(o.fare || 0).toLocaleString('vi-VN')}</td><td class="p-2 text-slate-600">${escHtml(o.detail)}</td>
+            <td class="p-2">${o.action === 'delete' ? logRestoreCell(o) : ''}</td></tr>`;
+        }).join('') || '<tr><td colspan="10" class="p-4 text-center text-slate-400">Không có dòng nào.</td></tr>';
       } else {
         head.innerHTML = '<tr><th class="p-2.5">Xóa lúc</th><th class="p-2.5">Người xóa</th><th class="p-2.5">Đơn của TK</th><th class="p-2.5">Ngày đơn</th><th class="p-2.5">Số phiếu</th><th class="p-2.5">Biển số</th><th class="p-2.5">Nhân sự</th><th class="p-2.5">Điểm đến</th><th class="p-2.5 text-right">Tiền</th><th class="p-2.5"></th></tr>';
         const rows = trashItems.filter(o => logTrashMatch(o, kw));
@@ -2686,6 +2688,67 @@
             <td class="p-2 text-right font-bold">${Number(o.totalFare || 0).toLocaleString('vi-VN')}</td>
             <td class="p-2"><button onclick="restoreFromTrash('${escHtml(o._k)}')" class="px-2 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-extrabold text-[10px] whitespace-nowrap">♻️ Khôi phục</button></td></tr>`).join('')
           || '<tr><td colspan="10" class="p-4 text-center text-slate-400">Thùng rác trống.</td></tr>';
+      }
+    }
+    // (16/11) Dòng "Xóa" trong Nhật ký: còn trong thùng rác -> nút Khôi phục; đã khôi phục / không còn -> ghi chú
+    function logDeleteStatus(o) {
+      if (!o.tripId) return { st: 'none' };
+      const t = trashItems.filter(x => x.id === o.tripId).sort((a, b) => (b.deletedAt || 0) - (a.deletedAt || 0))[0];
+      if (t) return { st: 'trash', key: t._k };
+      if (logItems.some(x => x.action === 'restore' && x.tripId === o.tripId && (x.at || 0) >= (o.at || 0))) return { st: 'restored' };
+      return { st: 'none' };
+    }
+    function logRestoreCell(o) {
+      const s = logDeleteStatus(o);
+      if (s.st === 'trash') return `<button onclick="restoreFromTrash('${escHtml(s.key)}')" class="px-2 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-extrabold text-[10px] whitespace-nowrap">♻️ Khôi phục</button>`;
+      if (s.st === 'restored') return '<span class="text-[10px] font-bold text-purple-700 whitespace-nowrap">♻️ Đã khôi phục</span>';
+      return '<span class="text-[10px] text-slate-400 whitespace-nowrap" title="Đơn xóa trước khi có thùng rác, hoặc đã quá 90 ngày">không còn bản lưu</span>';
+    }
+    // (16/11) Xuất Excel đúng tab đang xem + đúng ô tìm (toàn bộ dòng khớp, không giới hạn 500)
+    async function exportLogTrashExcel() {
+      const btn = document.getElementById('btn-lt-excel'), old = btn ? btn.innerText : '';
+      if (btn) { btn.disabled = true; btn.innerText = '⏳ Đang tạo...'; }
+      try {
+        const ExcelJS = await loadExcelJS();
+        const wb = new ExcelJS.Workbook(); wb.creator = 'TSS POS';
+        const kw = (document.getElementById('lt-search') || {}).value || '';
+        const isLog = logTrashTab === 'log';
+        const rows = (isLog ? logItems : trashItems).filter(o => logTrashMatch(o, kw));
+        const ts = rows.map(o => isLog ? o.at : o.deletedAt).filter(Boolean);
+        const dk = ms => ms ? localDateKey(new Date(ms)) : '';
+        const f = { startDateVal: ts.length ? dk(Math.min(...ts)) : '', endDateVal: ts.length ? dk(Math.max(...ts)) : '', roleFilter: 'all', matchStatusFilter: 'all', keyword: kw.trim() };
+        const ws = xlSheetSetup(wb, isLog ? 'Nhật Ký' : 'Thùng Rác', true);
+        let r;
+        if (isLog) {
+          xlTitle(ws, 11, f, 'NHẬT KÝ ĐƠN HÀNG (AI NHẬP / SỬA / XÓA)');
+          const stTxt = o => { if (o.action !== 'delete') return ''; const s = logDeleteStatus(o).st; return s === 'trash' ? 'Còn trong thùng rác' : s === 'restored' ? 'Đã khôi phục' : 'Không còn bản lưu'; };
+          r = xlTable(ws, 6, [
+            { h: 'Thời điểm', w: 17, align: 'center' }, { h: 'Người làm', w: 12 }, { h: 'Việc', w: 14 }, { h: 'Đơn của TK', w: 12 }, { h: 'Ngày đơn', w: 12, align: 'center' },
+            { h: 'Số phiếu', w: 13, align: 'center' }, { h: 'Biển số', w: 12, align: 'center' }, { h: 'Tiền', w: 13, fmt: '#,##0' }, { h: 'Chi tiết', w: 50, wrap: true },
+            { h: 'Tình trạng đơn xóa', w: 18 }, { h: 'Mã đơn', w: 20 }
+          ], rows.map(o => [fmtTs(o.at), o.by || '', (LOG_ACTION[o.action] || [o.action])[0], o.owner || '', o.dateStr || '', formatDisplayTicket(o.ticket),
+            plateCell(o.plate), Number(o.fare || 0), o.detail || '', stTxt(o), o.tripId || '']),
+            i => ({ delete: 'FFFEE2E2', restore: 'FFF3E8FF', edit: 'FFDBEAFE' })[rows[i].action] || null);
+        } else {
+          xlTitle(ws, 11, f, 'THÙNG RÁC – ĐƠN ĐÃ XÓA (90 NGÀY)');
+          r = xlTable(ws, 6, [
+            { h: 'Xóa lúc', w: 17, align: 'center' }, { h: 'Người xóa', w: 12 }, { h: 'Đơn của TK', w: 12 }, { h: 'Ngày đơn', w: 12, align: 'center' }, { h: 'Số phiếu', w: 13, align: 'center' },
+            { h: 'Biển số', w: 12, align: 'center' }, { h: 'Nhân sự', w: 24, wrap: true }, { h: 'Nguồn', w: 14 }, { h: 'Điểm đến', w: 34, wrap: true }, { h: 'Thanh toán', w: 16 }, { h: 'Tiền', w: 13, fmt: '#,##0' }
+          ], rows.map(o => [fmtTs(o.deletedAt), o.deletedBy || '', o.createdBy || '', o.dateStr || '', formatDisplayTicket(o.ticketNumber), plateCell(o.plateNumber),
+            nameCase(o.staff || ''), o.source || '', o.destination || '', o.paymentMethod || '', Number(o.totalFare || 0)]), () => null);
+        }
+        xlSignature(ws, r + 2, 11);
+        xlStripIcons(wb);
+        const buf = await wb.xlsx.writeBuffer();
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+        a.download = `${isLog ? 'Nhat_Ky' : 'Thung_Rac'}_TSS_${localDateKey(new Date()).replace(/-/g, '')}.xlsx`;
+        document.body.appendChild(a); a.click();
+        setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000);
+      } catch (e) {
+        alert('Lỗi xuất Excel: ' + (e && e.message ? e.message : e));
+      } finally {
+        if (btn) { btn.disabled = false; btn.innerText = old; }
       }
     }
     async function restoreFromTrash(key) {

@@ -581,7 +581,7 @@
         const aS = v('audit-start-date'), aE = v('audit-end-date');
         if (aS) {
           const rev = v('revenue-date-picker') || today;
-          const starts = [aS, rev, shiftDateKey(remindFrom, -4), monthStartKey(bizFrom)].filter(Boolean).sort();   // khung Lời/Âm cần DT từ đầu tháng (bậc hoa hồng)
+          const starts = [aS, rev, shiftDateKey(remindFrom, -GUESS_DAYS + 1), monthStartKey(bizFrom)].filter(Boolean).sort();   // khung Lời/Âm cần DT từ đầu tháng (bậc hoa hồng)
           const ends = [aE || '9999-12-31', rev, remindTo, bizTo].filter(Boolean).sort();
           from = shiftDateKey(starts[0], -1);   // tải thêm 1 ngày trước/sau để ghép đơn tài xế ghi lệch ngày
           to = ends[ends.length - 1] === '9999-12-31' ? '9999-12-31' : shiftDateKey(ends[ends.length - 1], 1);
@@ -4864,7 +4864,7 @@
           if (pl && pl2 && pl !== pl2) { why = `cùng số phiếu, KHÁC biển số (${t.plateNumber} ≠ ${mine.plateNumber})${dd ? `, lệch ${dd} ngày` : ''}`; score = 4; }
           else if (dd) { why = `cùng số phiếu${pl && pl2 ? ' + biển số' : ''}, lệch ${dd} ngày`; score = 4; }
           else return;
-        } else if (pl && pl === pl2 && dd <= 1 && tk.length >= 4 && lev <= 2) {
+        } else if (pl && pl === pl2 && dd <= 1 && tk.length >= 4 && (lev <= 1 || (lev === 2 && tk.length === tk2.length))) {   // khác độ dài thì chỉ nhận thiếu/thừa 1 số
           why = `cùng xe, số phiếu GẦN GIỐNG (${tk2} ~ ${tk}, khác ${lev} số)${dd ? ', lệch 1 ngày' : ''}`; score = 3 - lev * 0.4;
         } else if ((!pl || !pl2) && dd === 0 && sameFare && tk.length >= 4 && lev <= 1) {
           why = `số phiếu GẦN GIỐNG (${tk2} ~ ${tk}), cùng ngày, cùng tiền`; score = 2;
@@ -4933,19 +4933,21 @@
       }).join('');
     }
     // (A) Phiếu tài xế đã báo mà bán vé chưa nhập: đoán người đang cầm cuốn phiếu theo các số phiếu KỀ BÊN đã được nhập
+    const GUESS_DAYS = 10, GUESS_RANGE = 50;
     function guessSellerByNearTickets(g) {
       const base = tkOf(g.trips[0]);
+      // (16/11) so theo GIÁ TRỊ số (bỏ số 0 đầu: 09838 = 9838), ±50 số, 10 ngày trước … 2 ngày sau (1 cuốn phiếu dùng nhiều ngày)
       if (!/^\d{4,}$/.test(base) || !g.dateKey) return [];
-      const n = Number(base), lo = shiftDateKey(g.dateKey, -5), hi = shiftDateKey(g.dateKey, 1);
+      const n = Number(base), nLen = String(n).length, lo = shiftDateKey(g.dateKey, -GUESS_DAYS), hi = shiftDateKey(g.dateKey, 2);
       const by = {};
       allCompanyTrips.forEach(t => {
         if (!isSellRole(t.role)) return;
         const k = tripDateKey(t);
         if (!k || k < lo || k > hi) return;
         const b = tkOf(t);
-        if (!/^\d+$/.test(b) || b.length !== base.length) return;
+        if (!/^\d+$/.test(b) || String(Number(b)).length !== nLen) return;
         const d = Math.abs(Number(b) - n);
-        if (!d || d > 30) return;
+        if (!d || d > GUESS_RANGE) return;
         const acc = t.createdBy || '?';
         const x = by[acc] = by[acc] || { acc, names: {}, tks: new Set(), score: 0, below: false, above: false, trips: [] };
         if (!x.tks.has(b)) { x.tks.add(b); x.score += 1 / d; }
@@ -4990,7 +4992,11 @@
         const c = rPool.length ? auditNearCands(g, rPool)[0] : null;
         let h = '';
         if (c) { const o = c.g2.trips[0]; h += `<div class="mt-0.5 text-indigo-800 font-bold">🔗 Có thể ${escHtml(sideName(o).toLowerCase())} đã nhập nhầm thành phiếu ${escHtml(escTk(o))}, xe ${escHtml(o.plateNumber || '–')} (${escHtml(fullStaffName(c.g2.trips))}) – ${escHtml(c.why)}</div>`; }
-        if (g.missing === 'pos') { const gu = guessSellerText(g); if (gu) h += `<div class="mt-0.5 text-sky-800 font-bold">👤 Có thể của: ${escHtml(gu)}</div>`; }
+        if (g.missing === 'pos') {
+          const gu = guessSellerText(g);
+          h += gu ? `<div class="mt-0.5 text-sky-800 font-bold">👤 Có thể của: ${escHtml(gu)}</div>`
+            : `<div class="mt-0.5 text-slate-400 font-semibold">👤 Chưa đoán được người bán: chưa ai nhập phiếu gần số này (±${GUESS_RANGE} số, ${GUESS_DAYS} ngày gần đó)</div>`;
+        }
         return h;
       };
       const plateChips = Object.values(byPlate)

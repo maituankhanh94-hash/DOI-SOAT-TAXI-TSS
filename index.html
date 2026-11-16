@@ -1554,6 +1554,7 @@
     }
 
     function renderBatchRows(role) {
+      hideWarnBubble();
       const tb = document.getElementById('tbody-batch');
       if (!tb) return;
       const now = new Date();
@@ -1692,7 +1693,60 @@
     function onBatchFocusOut(ev) {
       if (OLD_IOS) repaintEl(ev && ev.target);
       setTimeout(updateBatchPreview, 60);   // đợi tự điền giá / chọn gợi ý xong
+      // (16/11) Vừa rời ô Biển số / Số phiếu mà đáng ngờ -> hiện BONG BÓNG ngay cạnh ô (người dùng: hay không kéo xuống cuối trang)
+      const el = ev && ev.target, m = el && /^(p|t)-(\d+)$/.exec(el.id || '');
+      if (m && String(el.value || '').trim() && el.dataset.touched) setTimeout(() => {
+        const w = batchRowWarnings(Number(m[2])).filter(x => x.f === m[1]);
+        if (w.length) showWarnBubble(el, w); else if (warnBubbleFor === el) hideWarnBubble();
+      }, 80);
     }
+    // Bong bóng cảnh báo nổi ngay dưới (hoặc trên) ô vừa nhập; tự ẩn sau 10 giây / bấm ✕ / sửa hết lỗi
+    let warnBubbleFor = null, warnBubbleTimer = 0;
+    function hideWarnBubble() {
+      const b = document.getElementById('warn-bubble'); if (b) b.remove();
+      warnBubbleFor = null; clearTimeout(warnBubbleTimer);
+    }
+    function placeWarnBubble() {
+      const b = document.getElementById('warn-bubble'), el = warnBubbleFor;
+      if (!b || !el || !document.body.contains(el)) { if (b) hideWarnBubble(); return; }
+      const r = el.getBoundingClientRect(), vw = document.documentElement.clientWidth, vh = (window.visualViewport ? window.visualViewport.height : window.innerHeight);
+      const bw = b.offsetWidth, bh = b.offsetHeight;
+      let top = r.bottom + 10, up = false;
+      if (top + bh > vh - 8 && r.top - bh - 10 > 8) { top = r.top - bh - 10; up = true; }
+      const left = Math.max(8, Math.min(r.left, vw - bw - 8));
+      b.style.top = top + 'px'; b.style.left = left + 'px';
+      const ar = b.querySelector('.wb-arrow');
+      if (ar) { ar.style.left = Math.max(12, Math.min(r.left + Math.min(r.width / 2, 24) - left, bw - 24)) + 'px'; ar.style.top = up ? '' : '-9px'; ar.style.bottom = up ? '-9px' : ''; ar.style.transform = up ? 'rotate(225deg)' : 'rotate(45deg)'; }
+    }
+    function showWarnBubble(el, warns) {
+      hideWarnBubble();
+      const b = document.createElement('div');
+      b.id = 'warn-bubble';
+      b.className = 'fixed z-[80] bg-orange-50 border-2 border-orange-400 text-orange-900 rounded-2xl shadow-2xl pl-3 pr-8 py-2 text-[13px] font-extrabold leading-snug';
+      b.style.maxWidth = 'min(92vw, 380px)';
+      b.innerHTML = `<div class="wb-arrow absolute w-4 h-4 bg-orange-50 border-l-2 border-t-2 border-orange-400"></div>
+        <button type="button" data-x="1" class="absolute top-1 right-1.5 w-6 h-6 rounded-full text-orange-700 hover:bg-orange-200 font-black">✕</button>` +
+        warns.map(w => `<div class="relative">⚠️ ${escHtml(w.text)}</div>` + ((w.sug || []).length ? `<div class="relative mt-1 flex flex-wrap gap-1">${w.sug.map(x => `<button type="button" data-v="${escHtml(x)}" class="px-2 py-1 bg-white border border-orange-400 hover:bg-orange-100 rounded-lg text-orange-800">✏️ Sửa thành ${escHtml(x)}</button>`).join('')}</div>` : '')).join('');
+      b.addEventListener('mousedown', e => e.preventDefault());   // không làm mất ô đang gõ
+      b.addEventListener('click', e => {
+        const btn = e.target.closest('button'); if (!btn) return;
+        if (btn.dataset.v != null && warnBubbleFor) {
+          const inp = warnBubbleFor;
+          inp.value = btn.dataset.v; inp.dataset.touched = '1';
+          inp.dispatchEvent(new Event('input', { bubbles: true }));
+          const m = /^(p|t)-(\d+)$/.exec(inp.id); if (m) batchRowWarnings(Number(m[2]));
+          updateBatchPreview();
+        }
+        hideWarnBubble();
+      });
+      document.body.appendChild(b);
+      warnBubbleFor = el;
+      placeWarnBubble();
+      warnBubbleTimer = setTimeout(hideWarnBubble, 10000);
+    }
+    window.addEventListener('scroll', () => { if (warnBubbleFor) placeWarnBubble(); }, true);
+    window.addEventListener('resize', () => { if (warnBubbleFor) placeWarnBubble(); });
+    if (window.visualViewport) window.visualViewport.addEventListener('resize', () => { if (warnBubbleFor) placeWarnBubble(); });
     // (16/11) CẢNH BÁO KHI NHẬP (vẫn cho lưu): biển số chưa có trong danh sách xe tài xế đã báo; số phiếu lệch xa các phiếu đã nhập gần đây
     function batchRowWarnings(i) {
       const v = id => String((document.getElementById(id) || {}).value || '').trim();
@@ -1702,7 +1756,7 @@
       if (pk && fleetLoaded && fleetKeys.length >= 15 && !fleetMap[pk]) {
         const sim = fleetKeys.filter(k => (pk.length >= 3 && (k.endsWith(pk) || pk.endsWith(k))) || (k.length === pk.length && bcLev(k, pk) <= 1))
           .sort((a, b) => (Number((fleetMap[b] || {}).n) || 0) - (Number((fleetMap[a] || {}).n) || 0)).slice(0, 3).map(k => (fleetMap[k] || {}).p || k);
-        out.push({ f: 'p', text: staffRole === 'driver'
+        out.push({ f: 'p', sug: sim, text: staffRole === 'driver'
           ? `Xe ${plate} chưa có trong danh sách xe công ty` + (sim.length ? ` – có phải xe ${sim.join(' / ')}?` : ' (xe mới thì bỏ qua)')
           : `Xe ${plate} chưa có tài xế nào báo` + (sim.length ? ` – có phải xe ${sim.join(' / ')}?` : ', kiểm tra lại biển số') });
       }
@@ -1744,6 +1798,7 @@
         lines.push(`<div class="py-0.5">✅ <b>Dòng ${i + 1}:</b> ${parts.map(escHtml).join(' • ')}</div>` +
           warns.map(w => `<div class="ml-5 mb-0.5 px-2 py-0.5 bg-orange-100 border border-orange-300 rounded-lg text-orange-800 font-extrabold">⚠️ ${escHtml(w.text)}</div>`).join(''));
       }
+      if (warnBubbleFor && !warnBubbleFor.classList.contains('batch-warn')) hideWarnBubble();   // đã sửa hết -> tắt bong bóng
       if (!lines.length) { box.className = 'hidden'; box.innerHTML = ''; return; }
       box.className = 'mt-2 bg-emerald-50 border border-emerald-300 rounded-2xl p-3 text-[12px] text-emerald-900 font-semibold';
       box.innerHTML = `<div class="font-extrabold text-emerald-800 mb-1">📝 Đã ghi nhận ${lines.length} dòng trên máy – <span class="text-rose-700">CHƯA LƯU</span>, kiểm tra rồi bấm "Lưu Đơn Lên Cloud":</div>${lines.join('')}`;

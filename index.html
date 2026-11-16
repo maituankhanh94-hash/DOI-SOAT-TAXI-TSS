@@ -1715,7 +1715,7 @@
           recent.forEach(x => { lens[x.length] = (lens[x.length] || 0) + 1; });
           const common = Number(Object.entries(lens).sort((a, b) => b[1] - a[1])[0][0]);
           if (base.length !== common && (lens[base.length] || 0) < 2) out.push({ f: 't', text: `Số phiếu ${ticket} có ${base.length} chữ số, phiếu thường có ${common} chữ số – kiểm tra lại` });
-          else {
+          else if (staffRole !== 'driver') {   // tài xế: phiếu KHÔNG theo thứ tự (mỗi cuốc 1 phiếu của quầy khác nhau) -> chỉ xét số chữ số
             const n = Number(base);
             const near = recent.filter(x => x.length === base.length).sort((a, b) => Math.abs(a - n) - Math.abs(b - n))[0];
             if (near && Math.abs(Number(near) - n) > 3000) out.push({ f: 't', text: `Số phiếu ${ticket} khác xa các phiếu đã nhập gần đây (vd ${near}) – kiểm tra lại` });

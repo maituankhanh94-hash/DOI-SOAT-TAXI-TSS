@@ -2766,6 +2766,111 @@
         if (btn) { btn.disabled = false; btn.innerText = old; }
       }
     }
+    // ===== (17/11) SỬA TÊN NHÂN VIÊN SAI KIỂU TRONG ĐƠN CŨ (Quản lý; xem trước → chọn → sửa ô staff ở trips + users_trips) =====
+    let fixNamesPlan = null;
+    function buildFixNamesPlan(trips) {
+      const fullCnt = {};   // slug -> {display: count}
+      const addFull = (n, w) => { const v = nameCase(String(n || '').trim()); const k = placeSlug(v); if (!k || k.split('_').length < 2 || /\d/.test(v)) return; const c = fullCnt[k] = fullCnt[k] || {}; c[v] = (c[v] || 0) + w; };
+      (staffOptions || []).forEach(n => addFull(n, 1000));
+      trips.forEach(t => addFull(t.staff, 1));
+      const full = {}; Object.entries(fullCnt).forEach(([k, c]) => { full[k] = Object.entries(c).sort((a, b) => b[1] - a[1])[0][0]; });
+      const accUse = {};   // TK -> slug -> số đơn
+      trips.forEach(t => { const k = placeSlug(t.staff); if (!k) return; const a = accUse[t.createdBy || ''] = accUse[t.createdBy || ''] || {}; a[k] = (a[k] || 0) + 1; });
+      const plateName = {};   // 3 số cuối -> tên tài xế hay dùng
+      trips.forEach(t => { if (t.role !== 'driver') return; const n = String(t.staff || '').trim(); if (!n || /\d/.test(n)) return; const pk = plateKey(t.plateNumber); if (!pk) return; const c = plateName[pk] = plateName[pk] || {}; const v = nameCase(n); c[v] = (c[v] || 0) + 1; });
+      const groups = {};
+      trips.forEach(t => {
+        const cur = String(t.staff || '').trim();
+        if (!cur) return;
+        let nv = '', kind = '';
+        if (t.role === 'driver' && looksLikePlate(cur)) {
+          const c = plateName[plateKey(cur)] || plateName[plateKey(t.plateNumber)];
+          if (c) { nv = Object.entries(c).sort((a, b) => b[1] - a[1])[0][0]; kind = 'Số xe → tên tài xế'; }
+        } else if (!/\d/.test(cur)) {
+          nv = nameCase(cur); kind = 'Viết hoa đúng';
+          const slug = placeSlug(nv), w = slug.split('_');
+          if (w.length <= 2) {
+            let c = Object.keys(full).filter(k => k !== slug && k.split('_').length > w.length && k.endsWith('_' + slug));
+            if (c.length > 1) { const u = accUse[t.createdBy || ''] || {}; c.sort((a, b) => (u[b] || 0) - (u[a] || 0)); if ((u[c[0]] || 0) > (u[c[1]] || 0)) c = [c[0]]; }
+            if (c.length === 1) { nv = full[c[0]]; kind = 'Tên tắt → tên đầy đủ'; }
+          }
+        }
+        if (!nv || nv === cur) return;
+        const key = cur + '→' + nv;
+        const g = groups[key] = groups[key] || { from: cur, to: nv, kind, trips: [], accs: new Set() };
+        g.trips.push(t); if (t.createdBy) g.accs.add(t.createdBy);
+      });
+      const order = { 'Tên tắt → tên đầy đủ': 0, 'Số xe → tên tài xế': 1, 'Viết hoa đúng': 2 };
+      return Object.values(groups).sort((a, b) => order[a.kind] - order[b.kind] || b.trips.length - a.trips.length);
+    }
+    async function openFixNamesModal() {
+      if (!isManager()) return;
+      const old = document.getElementById('fixnames-modal'); if (old) old.remove();
+      document.getElementById('main-container').insertAdjacentHTML('beforeend', `
+        <div id="fixnames-modal" class="fixed inset-0 bg-slate-900/85 z-50 flex items-center justify-center p-2 sm:p-3 backdrop-blur-sm">
+          <div class="bg-white rounded-3xl shadow-2xl max-w-4xl w-full p-4 sm:p-5 space-y-3 max-h-[94vh] flex flex-col">
+            <div class="flex items-center justify-between gap-2 border-b pb-3">
+              <h3 class="text-sm font-extrabold text-slate-900 uppercase">🔤 Sửa tên nhân viên sai kiểu trong đơn cũ</h3>
+              <button onclick="document.getElementById('fixnames-modal').remove()" class="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 rounded-xl text-xs font-bold">Đóng</button>
+            </div>
+            <div id="fixnames-body" class="overflow-auto custom-scrollbar flex-1 text-xs"><div class="p-6 text-center text-slate-500 font-bold">⏳ Đang tải toàn bộ đơn để kiểm tra...</div></div>
+          </div>
+        </div>`);
+      const body = document.getElementById('fixnames-body');
+      try {
+        const ts = await dbRef('trips').once('value');
+        const trips = Object.values(ts.val() || {});
+        fixNamesPlan = { groups: buildFixNamesPlan(trips) };
+        const gs = fixNamesPlan.groups;
+        const total = gs.reduce((a, g) => a + g.trips.length, 0);
+        if (!gs.length) { body.innerHTML = `<div class="p-6 text-center text-emerald-700 font-extrabold">✅ Đã kiểm tra ${trips.length} đơn – không có tên nào cần sửa.</div>`; return; }
+        body.innerHTML = `<div class="mb-2 font-bold text-slate-700">Đã kiểm tra ${trips.length} đơn. Có <b class="text-amber-700">${total} đơn</b> (${gs.length} kiểu tên) cần sửa. Bỏ chọn dòng nào bạn KHÔNG muốn sửa, rồi bấm nút cuối trang.</div>
+          <div class="mb-2 flex gap-2"><button onclick="document.querySelectorAll('.fixnm-cb').forEach(c => c.checked = true)" class="px-2 py-1 bg-slate-100 rounded-lg font-bold">Chọn hết</button><button onclick="document.querySelectorAll('.fixnm-cb').forEach(c => c.checked = false)" class="px-2 py-1 bg-slate-100 rounded-lg font-bold">Bỏ chọn hết</button></div>
+          <table class="w-full border-collapse"><thead class="bg-slate-800 text-white sticky top-0"><tr><th class="p-2"></th><th class="p-2 text-left">Tên đang ghi</th><th class="p-2 text-left">Sửa thành</th><th class="p-2 text-left">Kiểu sửa</th><th class="p-2 text-center">Số đơn</th><th class="p-2 text-left">Tài khoản</th></tr></thead><tbody>
+          ${gs.map((g, i) => `<tr class="border-b ${g.kind !== 'Viết hoa đúng' ? 'bg-amber-50' : ''}"><td class="p-2 text-center"><input type="checkbox" class="fixnm-cb w-4 h-4" data-i="${i}" checked></td>
+            <td class="p-2 font-bold text-rose-700">${escHtml(g.from)}</td><td class="p-2 font-extrabold text-emerald-700">${escHtml(g.to)}</td><td class="p-2">${escHtml(g.kind)}</td>
+            <td class="p-2 text-center font-bold">${g.trips.length}</td><td class="p-2 text-slate-500">${escHtml([...g.accs].join(', '))}</td></tr>`).join('')}
+          </tbody></table>
+          <div class="sticky bottom-0 bg-white pt-3"><button id="btn-fixnames" onclick="applyFixNames()" class="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-extrabold text-sm">✅ SỬA CÁC DÒNG ĐÃ CHỌN</button>
+          <div class="text-[11px] text-slate-500 mt-1">Chỉ đổi ô Tên nhân sự (không đổi tiền, phiếu, ngày…). Mỗi lần sửa được ghi vào Nhật ký. Dòng nền vàng = đổi tên tắt / số xe, nên xem kỹ.</div></div>`;
+      } catch (e) {
+        body.innerHTML = `<div class="p-6 text-center text-rose-600 font-bold">Không tải được dữ liệu: ${escHtml(authErrorText(e))}</div>`;
+      }
+    }
+    async function applyFixNames() {
+      if (!fixNamesPlan) return;
+      const sel = [...document.querySelectorAll('.fixnm-cb')].filter(c => c.checked).map(c => fixNamesPlan.groups[Number(c.dataset.i)]).filter(Boolean);
+      const n = sel.reduce((a, g) => a + g.trips.length, 0);
+      if (!n) { alert('Chưa chọn dòng nào.'); return; }
+      if (!confirm(`Sửa tên nhân sự cho ${n} đơn (${sel.length} kiểu tên)?`)) return;
+      const btn = document.getElementById('btn-fixnames'); if (btn) { btn.disabled = true; btn.innerText = '⏳ Đang sửa...'; }
+      const paths = [];
+      try {
+        // bản sao theo tài khoản: chỉ sửa đơn đang CÓ ở users_trips (không tạo bản ghi lẻ)
+        const accs = [...new Set(sel.flatMap(g => g.trips.map(t => t.createdBy).filter(Boolean)))];
+        const ut = {};
+        await Promise.all(accs.map(a => dbRef('users_trips/' + a).once('value').then(s => { ut[a] = s.val() || {}; }).catch(() => { ut[a] = {}; })));
+        sel.forEach(g => g.trips.forEach(t => {
+          paths.push([`trips/${t.id}/staff`, g.to]);
+          if (t.createdBy && ut[t.createdBy] && ut[t.createdBy][t.id]) paths.push([`users_trips/${t.createdBy}/${t.id}/staff`, g.to]);
+        }));
+        for (let i = 0; i < paths.length; i += 400) {
+          const upd = {}; paths.slice(i, i + 400).forEach(([k, v]) => { upd[k] = v; });
+          await dbRoot().update(upd);
+          if (btn) btn.innerText = `⏳ Đang sửa... ${Math.min(i + 400, paths.length)}/${paths.length}`;
+        }
+        const detail = `Sửa tên NV trong ${n} đơn cũ: ` + sel.map(g => `${g.from} → ${g.to} (${g.trips.length})`).join('; ');
+        const log = {}; log['trip_log/' + dbRef('trip_log').push().key] = tripLogEntry('edit', { id: '', createdBy: '' }, detail);
+        dbRoot().update(log).catch(() => {});
+        sel.forEach(g => g.trips.forEach(t => { const m = allCompanyTrips.find(x => x.id === t.id); if (m) m.staff = g.to; }));
+        alert(`Đã sửa tên cho ${n} đơn.`);
+        document.getElementById('fixnames-modal').remove();
+        updateManagerAuditTable(); renderBizBox();
+      } catch (e) {
+        alert('Lỗi khi sửa (một phần có thể đã sửa xong, mở lại để xem phần còn lại): ' + authErrorText(e));
+        if (btn) { btn.disabled = false; btn.innerText = '✅ SỬA CÁC DÒNG ĐÃ CHỌN'; }
+      }
+    }
     async function restoreFromTrash(key) {
       const o = trashItems.find(x => x._k === key);
       if (!o) return;
@@ -3535,6 +3640,8 @@
               </div>
             </div>
             <div class="flex flex-wrap gap-2 pt-2" id="staff-tag-list"></div>
+            <div class="pt-2 border-t"><button onclick="openFixNamesModal()" class="px-3 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-extrabold text-xs">🔤 Sửa Tên Nhân Viên Sai Kiểu Trong Đơn Cũ</button>
+              <span class="text-[11px] text-slate-500 ml-1">Viết hoa đúng, tên tắt → tên đầy đủ, tài xế ghi số xe → tên tài xế. Xem trước rồi mới sửa.</span></div>
           </div>
 
           <!-- MỤC 3: QUẢN LÝ LOẠI XE -->
@@ -4542,7 +4649,7 @@
               <td class="p-2.5"><input type="text" value="${escHtml(t.dateStr || '')}" placeholder="dd/mm/yyyy" class="inline-edit-input w-24" onblur="updateInlineTripField('${t.id}', 'dateStr', this.value)"></td>
               <td class="p-2.5 font-mono font-bold text-slate-600">${escHtml(t.timeStr || '--')}</td>
               <td class="p-2.5">${roleBadge}</td>
-              <td class="p-2.5 font-extrabold text-slate-800">${escHtml(t.staff || 'N/A')}</td>
+              <td class="p-2.5 font-extrabold text-slate-800">${escHtml(nameCase(t.staff) || 'N/A')}</td>
               <td class="p-2.5"><input type="text" value="${escHtml(t.ticketNumber || '')}" class="inline-edit-input w-24 text-blue-600" onblur="updateInlineTripField('${t.id}', 'ticketNumber', this.value)"></td>
               <td class="p-2.5"><input type="text" value="${escHtml(t.plateNumber || '')}" class="inline-edit-input w-28 uppercase" onblur="updateInlineTripField('${t.id}', 'plateNumber', this.value)"></td>
               ${auditCell}

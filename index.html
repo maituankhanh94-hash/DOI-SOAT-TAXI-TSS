@@ -601,6 +601,7 @@
         updateManagerRevenueSummary();
         renderBizBox();
         syncFleetFromTrips();
+        scheduleAutoFixNames();
       };
       q.on('value', mgrWinCb, err => console.warn('trips', err));
     }
@@ -2768,16 +2769,17 @@
     }
     // ===== (17/11) SỬA TÊN NHÂN VIÊN SAI KIỂU TRONG ĐƠN CŨ (Quản lý; xem trước → chọn → sửa ô staff ở trips + users_trips) =====
     let fixNamesPlan = null;
-    function buildFixNamesPlan(trips) {
+    function buildFixNamesPlan(trips, dictTrips) {
+      dictTrips = dictTrips || trips;
       const fullCnt = {};   // slug -> {display: count}
       const addFull = (n, w) => { const v = nameCase(String(n || '').trim()); const k = placeSlug(v); if (!k || k.split('_').length < 2 || /\d/.test(v)) return; const c = fullCnt[k] = fullCnt[k] || {}; c[v] = (c[v] || 0) + w; };
       (staffOptions || []).forEach(n => addFull(n, 1000));
-      trips.forEach(t => addFull(t.staff, 1));
+      dictTrips.forEach(t => addFull(t.staff, 1));
       const full = {}; Object.entries(fullCnt).forEach(([k, c]) => { full[k] = Object.entries(c).sort((a, b) => b[1] - a[1])[0][0]; });
       const accUse = {};   // TK -> slug -> số đơn
-      trips.forEach(t => { const k = placeSlug(t.staff); if (!k) return; const a = accUse[t.createdBy || ''] = accUse[t.createdBy || ''] || {}; a[k] = (a[k] || 0) + 1; });
+      dictTrips.forEach(t => { const k = placeSlug(t.staff); if (!k) return; const a = accUse[t.createdBy || ''] = accUse[t.createdBy || ''] || {}; a[k] = (a[k] || 0) + 1; });
       const plateName = {};   // 3 số cuối -> tên tài xế hay dùng
-      trips.forEach(t => { if (t.role !== 'driver') return; const n = String(t.staff || '').trim(); if (!n || /\d/.test(n)) return; const pk = plateKey(t.plateNumber); if (!pk) return; const c = plateName[pk] = plateName[pk] || {}; const v = nameCase(n); c[v] = (c[v] || 0) + 1; });
+      dictTrips.forEach(t => { if (t.role !== 'driver') return; const n = String(t.staff || '').trim(); if (!n || /\d/.test(n)) return; const pk = plateKey(t.plateNumber); if (!pk) return; const c = plateName[pk] = plateName[pk] || {}; const v = nameCase(n); c[v] = (c[v] || 0) + 1; });
       const groups = {};
       trips.forEach(t => {
         const cur = String(t.staff || '').trim();
@@ -2844,8 +2846,21 @@
       if (!n) { alert('Chưa chọn dòng nào.'); return; }
       if (!confirm(`Sửa tên nhân sự cho ${n} đơn (${sel.length} kiểu tên)?`)) return;
       const btn = document.getElementById('btn-fixnames'); if (btn) { btn.disabled = true; btn.innerText = '⏳ Đang sửa...'; }
-      const paths = [];
       try {
+        await writeFixGroups(sel, `Sửa tên NV trong ${n} đơn cũ: `, done => { if (btn) btn.innerText = `⏳ Đang sửa... ${done}`; });
+        alert(`Đã sửa tên cho ${n} đơn.`);
+        document.getElementById('fixnames-modal').remove();
+        updateManagerAuditTable(); renderBizBox();
+      } catch (e) {
+        alert('Lỗi khi sửa (một phần có thể đã sửa xong, mở lại để xem phần còn lại): ' + authErrorText(e));
+        if (btn) { btn.disabled = false; btn.innerText = '✅ SỬA CÁC DÒNG ĐÃ CHỌN'; }
+      }
+    }
+    // Ghi tên mới cho các nhóm (trips + users_trips đang có), 400 đường dẫn/lần, 1 dòng nhật ký tóm tắt
+    async function writeFixGroups(sel, logPrefix, onProgress) {
+      const n = sel.reduce((a, g) => a + g.trips.length, 0);
+      const paths = [];
+      {
         // bản sao theo tài khoản: chỉ sửa đơn đang CÓ ở users_trips (không tạo bản ghi lẻ)
         const accs = [...new Set(sel.flatMap(g => g.trips.map(t => t.createdBy).filter(Boolean)))];
         const ut = {};
@@ -2857,19 +2872,45 @@
         for (let i = 0; i < paths.length; i += 400) {
           const upd = {}; paths.slice(i, i + 400).forEach(([k, v]) => { upd[k] = v; });
           await dbRoot().update(upd);
-          if (btn) btn.innerText = `⏳ Đang sửa... ${Math.min(i + 400, paths.length)}/${paths.length}`;
+          if (onProgress) onProgress(`${Math.min(i + 400, paths.length)}/${paths.length}`);
         }
-        const detail = `Sửa tên NV trong ${n} đơn cũ: ` + sel.map(g => `${g.from} → ${g.to} (${g.trips.length})`).join('; ');
+        const detail = logPrefix + sel.map(g => `${g.from} → ${g.to} (${g.trips.length})`).join('; ');
         const log = {}; log['trip_log/' + dbRef('trip_log').push().key] = tripLogEntry('edit', { id: '', createdBy: '' }, detail);
         dbRoot().update(log).catch(() => {});
         sel.forEach(g => g.trips.forEach(t => { const m = allCompanyTrips.find(x => x.id === t.id); if (m) m.staff = g.to; }));
-        alert(`Đã sửa tên cho ${n} đơn.`);
-        document.getElementById('fixnames-modal').remove();
+      }
+      return n;
+    }
+    // (17/11, người dùng: "cứ thấy sai là tự động sửa") TỰ ĐỘNG sửa tên sai kiểu khi Quản lý mở app:
+    // 1 lần quét TOÀN BỘ đơn lúc đăng nhập, sau đó mỗi khi có đơn mới tải về (dùng bộ tên đã quét làm từ điển).
+    let autoFixDict = null, autoFixBusy = false, autoFixTimer = 0;
+    async function autoFixNames(full) {
+      if (!isManager() || autoFixBusy) return;
+      autoFixBusy = true;
+      try {
+        let trips = allCompanyTrips;
+        if (full) { const ts = await dbRef('trips').once('value'); trips = Object.values(ts.val() || {}); autoFixDict = trips; }
+        const dict = autoFixDict ? autoFixDict.concat(allCompanyTrips) : trips;
+        const groups = buildFixNamesPlan(trips, dict);
+        if (!groups.length) return;
+        const n = await writeFixGroups(groups, `Tự động sửa tên NV trong ${groups.reduce((a, g) => a + g.trips.length, 0)} đơn: `);
+        if (autoFixDict) groups.forEach(g => g.trips.forEach(t => { t.staff = g.to; }));
+        showNameFixToast(n, groups);
         updateManagerAuditTable(); renderBizBox();
       } catch (e) {
-        alert('Lỗi khi sửa (một phần có thể đã sửa xong, mở lại để xem phần còn lại): ' + authErrorText(e));
-        if (btn) { btn.disabled = false; btn.innerText = '✅ SỬA CÁC DÒNG ĐÃ CHỌN'; }
-      }
+        console.warn('autoFixNames', e && e.message);
+      } finally { autoFixBusy = false; }
+    }
+    function scheduleAutoFixNames() { clearTimeout(autoFixTimer); autoFixTimer = setTimeout(() => autoFixNames(!autoFixDict), autoFixDict ? 3000 : 5000); }
+    function showNameFixToast(n, groups) {
+      const old = document.getElementById('namefix-toast'); if (old) old.remove();
+      const d = document.createElement('div');
+      d.id = 'namefix-toast';
+      d.className = 'fixed left-3 bottom-3 z-[70] max-w-sm bg-emerald-700 text-white rounded-2xl shadow-2xl px-4 py-3 text-xs font-bold';
+      d.innerHTML = `🔤 Đã tự sửa tên nhân viên cho ${n} đơn<div class="font-semibold text-emerald-100 mt-1">${groups.slice(0, 4).map(g => `${escHtml(g.from)} → ${escHtml(g.to)}`).join('<br>')}${groups.length > 4 ? '<br>…' : ''}</div><div class="font-semibold text-emerald-200 mt-1">(xem chi tiết ở Nhật ký)</div>`;
+      d.onclick = () => d.remove();
+      document.body.appendChild(d);
+      setTimeout(() => d.remove(), 12000);
     }
     async function restoreFromTrash(key) {
       const o = trashItems.find(x => x._k === key);
@@ -3641,7 +3682,7 @@
             </div>
             <div class="flex flex-wrap gap-2 pt-2" id="staff-tag-list"></div>
             <div class="pt-2 border-t"><button onclick="openFixNamesModal()" class="px-3 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-extrabold text-xs">🔤 Sửa Tên Nhân Viên Sai Kiểu Trong Đơn Cũ</button>
-              <span class="text-[11px] text-slate-500 ml-1">Viết hoa đúng, tên tắt → tên đầy đủ, tài xế ghi số xe → tên tài xế. Xem trước rồi mới sửa.</span></div>
+              <span class="text-[11px] text-slate-500 ml-1">App ĐÃ TỰ SỬA mỗi khi mở Trang Quản lý (viết hoa đúng, tên tắt → tên đầy đủ, tài xế ghi số xe → tên tài xế). Nút này để kiểm tra lại.</span></div>
           </div>
 
           <!-- MỤC 3: QUẢN LÝ LOẠI XE -->

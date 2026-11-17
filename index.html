@@ -682,10 +682,12 @@
     function recordFleet(trips) {
       const upd = {};
       trips.forEach(t => {
-        const k = normalizePlate(t.plateNumber);
+        const k = plateKey(t.plateNumber);   // (17/11) theo 3 số cuối
         if (!k || k.length > 20 || upd[`fleet/${k}/p`]) return;
-        upd[`fleet/${k}/p`] = String(t.plateNumber).trim().toUpperCase().slice(0, 30);
+        upd[`fleet/${k}/p`] = plateTail(t.plateNumber).slice(0, 30);
         upd[`fleet/${k}/n`] = firebase.database.ServerValue.increment(1);
+        const nm = String(t.staff || '').trim();
+        if (nm && !/\d/.test(nm) && nm.length <= 80) upd[`fleet/${k}/nm`] = nameCase(nm);   // tên tài xế xe này (để tự sửa ô tên "711")
         const dk = t.dateKey || tripDateKey(t);
         if (dk && !((fleetMap[k] || {}).last >= dk)) upd[`fleet/${k}/last`] = dk;
       });
@@ -694,13 +696,23 @@
     // Quản lý: xe tài xế đã báo (trong dữ liệu đang tải) mà chưa có trong danh sách -> bổ sung (chỉ thêm, không đếm lại)
     function syncFleetFromTrips() {
       if (!fleetLoaded || !isManager()) return;
-      const upd = {};
+      const upd = {}, names = {};
       allCompanyTrips.forEach(t => {
         if (t.role !== 'driver') return;
-        const k = normalizePlate(t.plateNumber);
-        if (!k || k.length > 20 || fleetMap[k] || fleetSynced.has(k)) return;
+        const k = plateKey(t.plateNumber);
+        if (!k || k.length > 20) return;
+        const nm = String(t.staff || '').trim();
+        if (nm && !/\d/.test(nm)) { const c = names[k] = names[k] || {}; const v = nameCase(nm); c[v] = (c[v] || 0) + 1; }
+        if (fleetMap[k] || fleetSynced.has(k)) return;
         fleetSynced.add(k);
-        upd[`fleet/${k}`] = { p: String(t.plateNumber).trim().toUpperCase().slice(0, 30), n: 1, last: t.dateKey || tripDateKey(t) || '' };
+        upd[`fleet/${k}`] = { p: plateTail(t.plateNumber).slice(0, 30), n: 1, last: t.dateKey || tripDateKey(t) || '' };
+      });
+      // tên tài xế hay dùng của từng xe (chỉ bổ sung khi danh sách chưa có tên)
+      Object.entries(names).forEach(([k, c]) => {
+        if (fleetSynced.has('nm:' + k) || (fleetMap[k] && fleetMap[k].nm)) return;
+        fleetSynced.add('nm:' + k);
+        const best = Object.entries(c).sort((a, b) => b[1] - a[1])[0][0];
+        if (upd[`fleet/${k}`]) upd[`fleet/${k}`].nm = best; else upd[`fleet/${k}/nm`] = best;
       });
       if (Object.keys(upd).length) dbRoot().update(upd).catch(() => {});
     }
@@ -1387,7 +1399,7 @@
     function billKey(t) {
       const side = t.role === 'driver' ? 'D' : 'P';
       const tk = String(t.originalTicket || baseTicketOf(t.ticketNumber) || t.id || '').replace(/\s+/g, '').toUpperCase();
-      return `${side}|${tk}|${normalizePlate(t.plateNumber)}|${tripDateKey(t)}`;
+      return `${side}|${tk}|${plateKey(t.plateNumber)}|${tripDateKey(t)}`;
     }
     function countBills(trips) { return new Set(trips.map(billKey)).size; }
     // "1 đơn (2 dòng chia tiền)" khi có đơn chia đôi, ngược lại "3 đơn"
@@ -1580,11 +1592,11 @@
             <td class="p-2 text-center font-bold bstt"><div>${i+1}</div><div id="stt-t-${i}" class="text-[9px] font-mono font-bold text-blue-700 leading-tight break-all"></div></td>
             <td class="p-2.5"><input type="date" id="date-${i}" value="${localDateKey(now)}" ${dateInputHandler} class="w-full p-2 bg-slate-50 border rounded-xl font-mono text-xs cursor-pointer" onclick="try{this.showPicker()}catch(e){}"></td>
             <td class="p-2.5 relative">
-              <input type="text" id="staff-${i}" autocomplete="off" value="" placeholder="Gõ tên để đề xuất..." class="w-full p-2 bg-slate-50 border rounded-xl font-bold text-xs" oninput="showStaffSuggestions(this, 'staff-drop-${i}')" onfocus="showStaffSuggestions(this, 'staff-drop-${i}')" onkeydown="suggestKeydown(event, 'staff-drop-${i}')" onblur="hideSuggestLater('staff-drop-${i}')">
+              <input type="text" id="staff-${i}" autocomplete="off" value="" placeholder="Gõ tên để đề xuất..." class="w-full p-2 bg-slate-50 border rounded-xl font-bold text-xs" oninput="showStaffSuggestions(this, 'staff-drop-${i}')" onfocus="showStaffSuggestions(this, 'staff-drop-${i}')" onkeydown="suggestKeydown(event, 'staff-drop-${i}')" onblur="hideSuggestLater('staff-drop-${i}'); normalizeStaffField(this, ${i})">
               <div id="staff-drop-${i}"></div>
             </td>
             <td class="p-2.5"><input type="text" id="t-${i}" autocomplete="off" placeholder="Phiếu..." class="w-full p-2 bg-slate-50 border rounded-xl font-mono font-bold text-xs" onfocus="handleSmartTicketFocus(${i})"></td>
-            <td class="p-2.5"><input type="text" id="p-${i}" autocomplete="off" placeholder="${plateOptional(role) ? 'Không bắt buộc' : '51H-...'}" class="w-full p-2 bg-slate-50 border rounded-xl font-mono font-bold uppercase text-xs"></td>
+            <td class="p-2.5"><input type="text" id="p-${i}" autocomplete="off" inputmode="numeric" placeholder="${plateOptional(role) ? '3 số cuối (không bắt buộc)' : '3 số cuối, vd 599'}" onblur="normalizePlateField(this)" class="w-full p-2 bg-slate-50 border rounded-xl font-mono font-bold uppercase text-xs"></td>
             <td class="p-2.5">
               <select id="c-${i}" class="w-full p-2 bg-slate-50 border rounded-xl font-bold text-xs" onchange="applyRowPrice(${i})">
                 ${carTypeOptions.map(ct => `<option value="${escHtml(ct)}" ${ct === defaultCarType ? 'selected' : ''}>${escHtml(ct)}</option>`).join('')}
@@ -1774,11 +1786,13 @@
     function batchRowWarnings(i) {
       const v = id => String((document.getElementById(id) || {}).value || '').trim();
       const out = [];
-      const plate = v(`p-${i}`).toUpperCase(), ticket = v(`t-${i}`), pk = normalizePlate(plate);
-      const fleetKeys = Object.keys(fleetMap);
-      if (pk && fleetLoaded && fleetKeys.length >= 15 && !fleetMap[pk]) {
-        const sim = fleetKeys.filter(k => (pk.length >= 3 && (k.endsWith(pk) || pk.endsWith(k))) || (k.length === pk.length && bcLev(k, pk) <= 1))
-          .sort((a, b) => (Number((fleetMap[b] || {}).n) || 0) - (Number((fleetMap[a] || {}).n) || 0)).slice(0, 3).map(k => (fleetMap[k] || {}).p || k);
+      const plate = v(`p-${i}`).toUpperCase(), ticket = v(`t-${i}`), pk = plateKey(plate);
+      // (17/11) so theo 3 số cuối: danh sách xe -> {3 số cuối: số lần báo}
+      const tails = {};
+      Object.entries(fleetMap).forEach(([k, x]) => { const t = plateKey(k); tails[t] = (tails[t] || 0) + (Number((x || {}).n) || 1); });
+      if (pk && fleetLoaded && Object.keys(tails).length >= 15 && !tails[pk]) {
+        const sim = Object.keys(tails).filter(k => k.length === pk.length && bcLev(k, pk) <= 1)
+          .sort((a, b) => tails[b] - tails[a]).slice(0, 3);
         out.push({ f: 'p', sug: sim, text: staffRole === 'driver'
           ? `Xe ${plate} chưa có trong danh sách xe công ty` + (sim.length ? ` – có phải xe ${sim.join(' / ')}?` : ' (xe mới thì bỏ qua)')
           : `Xe ${plate} chưa có tài xế nào báo` + (sim.length ? ` – có phải xe ${sim.join(' / ')}?` : ', kiểm tra lại biển số') });
@@ -2403,8 +2417,9 @@
       const rawDate = document.getElementById('edit-modal-date').value;
       const formattedDate = normalizeDateInput(rawDate);
       const ticket = document.getElementById('edit-modal-ticket').value.trim();
-      const plate = document.getElementById('edit-modal-plate').value.trim().toUpperCase();
-      const staff = document.getElementById('edit-modal-staff').value.trim();
+      const staffNorm = normalizeStaffText(document.getElementById('edit-modal-staff').value.trim(), trip.role);
+      const plate = plateTail(document.getElementById('edit-modal-plate').value) || staffNorm.plate;
+      const staff = staffNorm.text;
       const carType = document.getElementById('edit-modal-cartype').value;
       const source = document.getElementById('edit-modal-source').value;
       const pickup = document.getElementById('edit-modal-pickup').value;
@@ -3334,9 +3349,10 @@
         let formattedDate = normalizeDateInput(rawDate);
         if (formattedDate) lastFormattedDate = formattedDate;
 
-        const rawStaff = document.getElementById(`staff-${i}`).value.trim();
+        const staffNorm = normalizeStaffText(document.getElementById(`staff-${i}`).value.trim(), loggedInUser.role);
+        const rawStaff = staffNorm.text;
         const ticket = document.getElementById(`t-${i}`).value.trim();
-        const plate = document.getElementById(`p-${i}`).value.trim().toUpperCase();
+        const plate = plateTail(document.getElementById(`p-${i}`).value) || staffNorm.plate;
         const dest = document.getElementById(`d-${i}`).value.trim();
         const totalFare = parseFloat(document.getElementById(`f-${i}`).value.replace(/[^0-9]/g, '')) || 0;
         const carType = document.getElementById(`c-${i}`).value;
@@ -4187,6 +4203,80 @@
 
     // "50E-123.27", "50e 12327" -> "50E12327" (để 2 bên gõ khác kiểu vẫn ghép được)
     function normalizePlate(p) { return String(p || '').toUpperCase().replace(/[^A-Z0-9]/g, ''); }
+    // (17/11) Người dùng: biển số CHỈ CẦN 3 SỐ CUỐI (vd 51H-599.12 -> 912). Ghép đối soát cũng so 3 số cuối
+    // (số phiếu không bao giờ trùng nên đủ an toàn; đơn cũ ghi đủ biển số vẫn ghép được với đơn mới ghi 3 số).
+    function plateKey(p) { const d = String(p || '').replace(/\D/g, ''); return d.length >= 3 ? d.slice(-3) : normalizePlate(p); }
+    function plateTail(p) { const v = String(p || '').trim(); const d = v.replace(/\D/g, ''); return d.length >= 3 ? d.slice(-3) : v.toUpperCase(); }
+    function normalizePlateField(el) {
+      if (!el) return;
+      const v = el.value.trim(); if (!v) return;
+      const t = plateTail(v);
+      if (t !== el.value) { el.value = t; el.dataset.touched = '1'; }
+    }
+    // ===== (17/11) TỰ SỬA Ô TÊN NHÂN VIÊN =====
+    // "LÊ CHÍ BÌNH" -> "Lê Chí Bình"; "Lê Chí Bình+Mẫn" -> "Lê Chí Bình + Trần Minh Mẫn"; "Mẫn" -> "Trần Minh Mẫn" (khớp đúng 1 tên đầy đủ);
+    // Tài xế gõ số xe vào ô tên ("711") -> tên tài xế xe đó (theo đơn cũ của tài khoản / danh sách đội xe).
+    function staffFullNames() {
+      const m = {};
+      const add = n => { const v = nameCase(String(n || '').trim()); const k = placeSlug(v); if (k && k.split('_').length >= 2 && !/\d/.test(v)) m[k] = m[k] || v; };
+      (staffOptions || []).forEach(add);
+      personalTrips.forEach(t => String(t.staff || '').split(/\s*[+,&]\s*/).forEach(add));
+      return m;
+    }
+    function staffUseCount() {
+      const c = {};
+      personalTrips.forEach(t => String(t.staff || '').split(/\s*[+,&]\s*/).forEach(n => { const k = placeSlug(n); if (k) c[k] = (c[k] || 0) + 1; }));
+      return c;
+    }
+    function expandShortName(part) {
+      const nm = nameCase(part), slug = placeSlug(nm), w = slug.split('_');
+      if (!slug || w.length > 2) return nm;
+      const full = staffFullNames();
+      let c = Object.keys(full).filter(k => k !== slug && k.split('_').length > w.length && k.endsWith('_' + slug));
+      if (c.length > 1) {   // trùng tên -> lấy người tài khoản này hay nhập nhất (phải hơn hẳn người thứ hai)
+        const u = staffUseCount();
+        c.sort((a, b) => (u[b] || 0) - (u[a] || 0));
+        if ((u[c[0]] || 0) > (u[c[1]] || 0)) c = [c[0]];
+      }
+      return c.length === 1 ? full[c[0]] : nm;
+    }
+    function driverNameForPlate(tail) {
+      if (!tail) return '';
+      const cnt = {};
+      personalTrips.forEach(t => {
+        if (plateKey(t.plateNumber) !== tail) return;
+        const n = String(t.staff || '').trim();
+        if (!n || /\d/.test(n)) return;
+        const k = nameCase(n); cnt[k] = (cnt[k] || 0) + 1;
+      });
+      const best = Object.entries(cnt).sort((a, b) => b[1] - a[1])[0];
+      if (best) return best[0];
+      const f = Object.entries(fleetMap || {}).filter(([k, v]) => v && v.nm && plateKey(k) === tail).sort((a, b) => (Number(b[1].n) || 0) - (Number(a[1].n) || 0))[0];
+      return f ? nameCase(f[1].nm) : '';
+    }
+    const looksLikePlate = p => /\d/.test(p) && p.replace(/\D/g, '').length >= 3 && !/[a-z]{3,}/i.test(removeAccents(p));
+    function normalizeStaffText(v, role) {
+      const parts = String(v || '').split(/\s*[+,&]\s*/).map(x => x.trim()).filter(Boolean);
+      let plate = '';
+      const out = parts.map(x => {
+        if (role === 'driver' && looksLikePlate(x)) {
+          const tail = plateKey(x); if (!plate) plate = tail;
+          return driverNameForPlate(tail) || x;
+        }
+        return /\d/.test(x) ? x : expandShortName(x);
+      });
+      return { text: out.join(' + '), plate };
+    }
+    function normalizeStaffField(el, i) {
+      setTimeout(() => {   // đợi chọn gợi ý xong
+        if (!el || !el.value.trim()) return;
+        const r = normalizeStaffText(el.value, staffRole);
+        if (r.text && r.text !== el.value) { el.value = r.text; el.dataset.touched = '1'; }
+        const pEl = document.getElementById(`p-${i}`);
+        if (r.plate && pEl && !pEl.value.trim()) { pEl.value = r.plate; pEl.dataset.touched = '1'; }
+        updateBatchPreview();
+      }, 300);
+    }
 
     // Quy đổi hình thức thanh toán về 1 nhóm để so 2 bên:
     //  FREE = Free nội bộ (khớp với mọi hình thức), NVQ = Nhân viên quầy thu, THE = Thẻ, TXT = Tài xế thu, KH = Kế hoạch / Công nợ / đối tác.
@@ -4272,7 +4362,7 @@
           }
         }
         const ticketKey = (t.originalTicket || baseTicketOf(t.ticketNumber)).replace(/\s+/g, '').toUpperCase();
-        const plate = normalizePlate(t.plateNumber);
+        const plate = plateKey(t.plateNumber);
         if (ticketKey && plate) {
           const baseTicket = ticketKey;
           // Gom chung một nhóm theo Số phiếu + Biển số + Ngày
@@ -4303,7 +4393,7 @@
         const t0 = trips[0];
         return { k, side: [...sides][0], dk,
           ticket: (t0.originalTicket || baseTicketOf(t0.ticketNumber)).replace(/\s+/g, '').toUpperCase(),
-          plate: normalizePlate(t0.plateNumber) };
+          plate: plateKey(t0.plateNumber) };
       }).filter(Boolean);
       const sells = entries.filter(e => e.side === 'S'), drvs = entries.filter(e => e.side === 'D');
       const near = (a, b) => b.dk === shiftDateKey(a.dk, 1) || b.dk === shiftDateKey(a.dk, -1);
@@ -4936,13 +5026,13 @@
       const mine = g.trips[0];
       if (!mine) return [];
       const mineSell = isSellRole(mine.role), ids = new Set(g.trips.map(t => t.id));
-      const tk = tkOf(mine), pl = normalizePlate(mine.plateNumber), dk = g.dateKey, fare = groupFare(g);
+      const tk = tkOf(mine), pl = plateKey(mine.plateNumber), dk = g.dateKey, fare = groupFare(g);
       const out = [];
       pool.forEach(g2 => {
         const t = g2.trips[0];
         if (!t || isSellRole(t.role) === mineSell || g2.trips.some(x => ids.has(x.id))) return;
         if (g2.trips.some(x => isSellRole(x.role) === mineSell)) return;   // nhóm kia phải chỉ có 1 bên
-        const tk2 = tkOf(t), pl2 = normalizePlate(t.plateNumber), dd = dayGap(g2.dateKey, dk), fare2 = groupFare(g2);
+        const tk2 = tkOf(t), pl2 = plateKey(t.plateNumber), dd = dayGap(g2.dateKey, dk), fare2 = groupFare(g2);
         const sameFare = Math.abs(fare - fare2) < 1000;
         const lev = tk && tk2 && tk !== tk2 ? bcLev(tk, tk2) : 9;
         let why = '', score = 0;
@@ -4973,7 +5063,7 @@
         ch.originalTicket = sTk;
       }
       const sp = String(src.plateNumber || '').trim().toUpperCase();
-      if (sp && normalizePlate(sp) !== normalizePlate(target.plateNumber)) ch.plateNumber = sp;
+      if (sp && plateKey(sp) !== plateKey(target.plateNumber)) ch.plateNumber = sp;
       const sk = tripDateKey(src);
       if (sk && sk !== tripDateKey(target)) { ch.dateStr = normalizeDateInput(src.dateStr); ch.dateKey = sk; }
       return ch;
@@ -5067,7 +5157,7 @@
       // Tài xế chưa báo -> theo biển số xe. Bán vé chưa nhập -> theo số phiếu (kèm xe / tài xế đã báo)
       // (11/11) Tài xế chưa báo: mỗi phiếu 1 dòng, xếp liền theo xe; bấm vào -> Bảng Đối Soát lọc đúng phiếu đó
       const byPlate = {};
-      drv.forEach(g => { const k = normalizePlate(g.trips[0].plateNumber) || '?'; (byPlate[k] = byPlate[k] || []).push(g); });
+      drv.forEach(g => { const k = plateKey(g.trips[0].plateNumber) || '?'; (byPlate[k] = byPlate[k] || []).push(g); });
       const tk = g => String(g.trips[0].originalTicket || baseTicketOf(g.trips[0].ticketNumber) || '');
       const fare = g => g.trips.reduce((a, t) => a + Number(t.totalFare || 0), 0).toLocaleString('vi-VN') + 'đ';
       const lineCls = 'block w-full text-left bg-white border border-slate-300 hover:border-blue-500 hover:bg-blue-50 rounded-lg px-2 py-1 mb-1 cursor-pointer';

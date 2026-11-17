@@ -1722,6 +1722,7 @@
       el.dataset.touched = '1';
       clearTimeout(onBatchRowInput._pv); onBatchRowInput._pv = setTimeout(updateBatchPreview, 250);
       if (ev.type === 'input' && ['p', 't', 'staff'].includes(k)) autoNextAfterInput(el, k);
+      if (ev.type === 'change' && el.tagName === 'SELECT' && document.activeElement === el) focusNextBatchText(el);   // chọn xong ô chọn -> sang ô kế
       if (k === 't') { const s = document.getElementById(`stt-t-${i}`); if (s) s.textContent = el.value.trim(); }
       if (['t', 'p', 'd', 'f', 'sf', 'note'].includes(k) && el.value.trim() && i > 0) {
         const st = document.getElementById(`staff-${i}`);
@@ -1883,7 +1884,8 @@
     }
     // (17/11, người dùng) TỰ NHẢY SANG Ô KẾ TIẾP khi ô đã nhập xong (bỏ qua ô chọn – mở ô chọn trên iPhone sẽ bật bảng chọn)
     function focusNextBatchText(el) {
-      const list = batchFields().filter(x => x.tagName === 'INPUT' && x.type !== 'date');
+      // (17/11, người dùng: "phải ngừng ở từng cột xem đã đúng Nguồn, Điểm Đón chưa") -> DỪNG cả ở ô chọn; chỉ bỏ qua ô Ngày
+      const list = batchFields().filter(x => x.type !== 'date');
       const idx = list.indexOf(el);
       const next = idx >= 0 ? list[idx + 1] : null;
       if (!next) return;
@@ -1902,21 +1904,21 @@
         let dx = 0;
         if (r.left < leftLim) dx = r.left - leftLim;
         else if (r.right > rightLim) dx = Math.min(r.right - rightLim, r.left - leftLim);
-        if (Math.abs(dx) > 2) { try { wrap.scrollTo({ left: wrap.scrollLeft + dx, behavior: 'smooth' }); } catch (e) { wrap.scrollLeft += dx; } }
+        if (Math.abs(dx) > 2) wrap.scrollLeft = wrap.scrollLeft + dx;   // kéo ngay (iPhone hay bỏ qua kéo "mượt")
         if (main) {
           const mr = main.getBoundingClientRect(), vv = window.visualViewport;
           const bottom = Math.min(mr.bottom, vv ? vv.offsetTop + vv.height : window.innerHeight) - 12, top = mr.top + 12;
           let dy = 0;
           if (r.bottom > bottom) dy = r.bottom - bottom + 40;
           else if (r.top < top) dy = r.top - top - 40;
-          if (dy) { try { main.scrollBy({ top: dy, behavior: 'smooth' }); } catch (e) { main.scrollTop += dy; } }
+          if (dy) main.scrollTop = main.scrollTop + dy;
         }
       };
       go();
-      setTimeout(go, 350);   // iPhone tự kéo xong rồi chỉnh lại cho đúng
+      setTimeout(go, 350); setTimeout(go, 750);   // iPhone tự kéo xong rồi chỉnh lại cho đúng
     }
     // Mọi cách sang ô (bấm vào ô, phím Tiếp, tự nhảy) đều kéo bảng tới ô đó
-    document.addEventListener('focusin', e => { const t = e.target; if (t && t.matches && t.matches('#batch-wrap input')) setTimeout(() => ensureBatchFieldVisible(t), 30); }, true);
+    document.addEventListener('focusin', e => { const t = e.target; if (t && t.matches && t.matches('#batch-wrap input, #batch-wrap select')) setTimeout(() => ensureBatchFieldVisible(t), 30); }, true);
     function ticketCommonLen() {
       const tks = personalTrips.map(t => tkOf(t)).filter(x => /^\d{4,}$/.test(x));
       if (tks.length < 5) return 0;

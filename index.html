@@ -1077,7 +1077,7 @@
       if (!ws.length) return [];
       return priceItems.filter(it => it.kind === 'sb' && ws.some(w => wordsOf(it.ward).includes(wordsOf(w[1]))));
     }
-    const DEST_RULE_TEXT = 'BẮT BUỘC ghi TÊN ĐƯỜNG + Phường/Xã mới (hoặc Quận/Huyện cũ) — vd: "140/20 Võ Duy Ninh, Thạnh Mỹ Tây", "Đề Thám, Q1", "Tỉnh lộ 8, Củ Chi". Chỉ ghi phường/quận là CHƯA ĐỦ. Bệnh viện, khách sạn, bến xe, đi tỉnh cũng phải có tên đường — vd: "Bệnh viện Chợ Rẫy, 201B Nguyễn Chí Thanh", "Vũng Tàu, 12 Thùy Vân".';
+    const DEST_RULE_TEXT = 'BẮT BUỘC ghi TÊN ĐƯỜNG + Phường/Xã (hoặc Quận/Huyện). Số nhà có hay không đều được — vd: "Võ Duy Ninh, Thạnh Mỹ Tây", "140/20 Võ Duy Ninh, Thạnh Mỹ Tây", "Đề Thám, Q1". Chỉ ghi phường/quận là CHƯA ĐỦ. Bệnh viện, khách sạn, bến xe, đi tỉnh cũng phải có tên đường — vd: "Bệnh viện Chợ Rẫy, Nguyễn Chí Thanh, Q5", "Thùy Vân, Vũng Tàu".';
     const HCM_DISTRICT_NAMES = ['thu duc', 'go vap', 'binh thanh', 'binh tan', 'tan binh', 'phu nhuan', 'tan phu',
       'binh chanh', 'can gio', 'hoc mon', 'cu chi', 'nha be'];
     const PROVINCE_EXTRA = ['vung tau', 'ba ria', 'da lat', 'phan thiet', 'mui ne', 'phan rang', 'nha trang', 'cam ranh', 'buon ma thuot', 'dak lak', 'daklak',

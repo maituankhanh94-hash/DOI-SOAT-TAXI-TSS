@@ -22,7 +22,9 @@
     #batch-table input, #batch-table select { font-size: 17px !important; padding: 10px 12px !important; min-height: 48px; border-width: 2px; }
     #batch-table input::placeholder { font-size: 15px; }
     #batch-table thead th { font-size: 14px !important; }
-    #batch-table td.bstt { font-size: 16px !important; }
+    #batch-table td.bstt { font-size: 15px !important; padding-left: 4px !important; padding-right: 4px !important; }
+    #tbody-batch td:not(.bstt) { padding-left: 6px !important; padding-right: 6px !important; }
+    #batch-table thead th { padding: 10px 8px !important; line-height: 1.25; }
     #tbody-batch td { padding-top: 8px; padding-bottom: 8px; }
     @media (max-width: 767px) {
       #batch-wrap { max-height: none !important; overflow-y: hidden !important; }
@@ -1574,22 +1576,22 @@
             </div>
 
             <div id="batch-wrap" class="overflow-x-auto custom-scrollbar max-h-[450px]">
-              <table id="batch-table" class="text-left border-collapse" style="table-layout:fixed; width:${hasSignFee(role) ? 2490 : 2320}px">
+              <table id="batch-table" class="text-left border-collapse" style="table-layout:fixed; width:${hasSignFee(role) ? 2374 : 2214}px">
                 <thead class="sticky top-0 z-20 shadow-md">
                   <tr class="bg-slate-900 text-white text-[11px] font-bold">
-                    <th class="p-3 text-center bg-slate-900 bstt" style="width:80px">STT</th>
+                    <th class="p-3 text-center bg-slate-900 bstt" style="width:64px">STT</th>
                     <th class="p-3 bg-slate-900" style="width:240px">Ngày Tháng</th>
-                    <th class="p-3 bg-slate-900 relative" style="width:280px">Tên Nhân Sự (Gõ mới đề xuất)</th>
-                    <th class="p-3 bg-slate-900" style="width:170px">Số Phiếu (Tự nhảy)</th>
-                    <th class="p-3 bg-slate-900" style="width:130px">Biển Số Xe</th>
+                    <th class="p-3 bg-slate-900 relative" style="width:250px">Tên Nhân Sự (Gõ mới đề xuất)</th>
+                    <th class="p-3 bg-slate-900" style="width:160px">Số Phiếu (Tự nhảy)</th>
+                    <th class="p-3 bg-slate-900" style="width:120px">Biển Số Xe</th>
                     <th class="p-3 bg-slate-900" style="width:170px">Loại Xe</th>
-                    <th class="p-3 bg-slate-900" style="width:210px">Nguồn Đơn</th>
-                    <th class="p-3 bg-slate-900" style="width:140px">Điểm Đón</th>
-                    <th class="p-3 bg-slate-900" style="width:340px">Điểm Đến</th>
-                    <th class="p-3 text-right bg-slate-900" style="width:170px">Tổng Tiền</th>
-                    ${hasSignFee(role) ? '<th class="p-3 text-right bg-pink-800" style="width:170px">🪧 Bảng Đón (công nợ ĐT)</th>' : ''}
-                    <th class="p-3 bg-slate-900" style="width:210px">Thanh Toán</th>
-                    <th class="p-3 bg-slate-900" style="width:180px">Ghi Chú</th>
+                    <th class="p-3 bg-slate-900" style="width:200px">Nguồn Đơn</th>
+                    <th class="p-3 bg-slate-900" style="width:130px">Điểm Đón</th>
+                    <th class="p-3 bg-slate-900" style="width:320px">Điểm Đến</th>
+                    <th class="p-3 text-right bg-slate-900" style="width:160px">Tổng Tiền</th>
+                    ${hasSignFee(role) ? '<th class="p-3 text-right bg-pink-800" style="width:160px">🪧 Bảng Đón (công nợ ĐT)</th>' : ''}
+                    <th class="p-3 bg-slate-900" style="width:200px">Thanh Toán</th>
+                    <th class="p-3 bg-slate-900" style="width:200px">Ghi Chú</th>
                   </tr>
                 </thead>
                 <tbody id="tbody-batch" class="divide-y divide-slate-200 text-xs" oninput="onBatchRowInput(event)" onchange="onBatchRowInput(event)" onkeydown="onBatchKeydown(event)" onfocusout="onBatchFocusOut(event)"></tbody>

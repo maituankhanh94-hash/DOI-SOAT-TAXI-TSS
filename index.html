@@ -18,6 +18,12 @@
     /* (15/11) iPhone đời cũ: ô nhập trong khung cuộn ngang bị MẤT HÌNH (chữ + khung) khi chuyển ô -> ép khung thành lớp riêng để máy vẽ lại */
     html.old-ios #batch-wrap { -webkit-transform: translateZ(0); transform: translateZ(0); -webkit-overflow-scrolling: touch; }
     #tbody-batch input.batch-warn { box-shadow: 0 0 0 2px #fb923c; background-color: #fff7ed; }
+    /* (17/11) Bảng nhập: chữ + ô TO cho người lớn tuổi (16px còn giúp iPhone không tự phóng to khi bấm vào ô) */
+    #batch-table input, #batch-table select { font-size: 17px !important; padding: 10px 12px !important; min-height: 48px; border-width: 2px; }
+    #batch-table input::placeholder { font-size: 15px; }
+    #batch-table thead th { font-size: 14px !important; }
+    #batch-table td.bstt { font-size: 16px !important; }
+    #tbody-batch td { padding-top: 8px; padding-bottom: 8px; }
     @media (max-width: 767px) {
       #batch-wrap { max-height: none !important; overflow-y: hidden !important; }
       #batch-table thead { position: static !important; }
@@ -1556,10 +1562,10 @@
             </div>
           </div>
 
-          <!-- BẢNG 3: NHẬP HÀNG LOẠT 20 ĐƠN -->
+          <!-- BẢNG 3: NHẬP HÀNG LOẠT 15 ĐƠN -->
           <div class="bg-white p-4 sm:p-6 rounded-3xl shadow-xl border border-slate-200 space-y-4">
             <div class="flex flex-col sm:flex-row items-center justify-between gap-3 border-b pb-4">
-              <h3 class="text-xs sm:text-sm font-extrabold uppercase ${themeColorClass}">📋 Nhập Hàng Loạt 20 Dòng Nhanh</h3>
+              <h3 class="text-xs sm:text-sm font-extrabold uppercase ${themeColorClass}">📋 Nhập Hàng Loạt 15 Dòng Nhanh</h3>
               <div class="flex flex-wrap items-center gap-2">
                 <button onclick="printScanTemplate('${role}')" class="px-3 py-2.5 bg-white border-2 border-slate-300 hover:bg-slate-50 text-slate-700 font-extrabold text-xs rounded-xl">🖨️ In Mẫu Giấy</button>
                 <button onclick="openScanModal('${role}')" class="px-4 py-2.5 bg-amber-500 hover:bg-amber-600 text-white font-extrabold text-xs rounded-xl shadow-lg">📷 Quét Giấy</button>
@@ -1568,7 +1574,7 @@
             </div>
 
             <div id="batch-wrap" class="overflow-x-auto custom-scrollbar max-h-[450px]">
-              <table id="batch-table" class="w-full text-left border-collapse min-w-[1700px]">
+              <table id="batch-table" class="w-full text-left border-collapse min-w-[2050px]">
                 <thead class="sticky top-0 z-20 shadow-md">
                   <tr class="bg-slate-900 text-white text-[11px] font-bold">
                     <th class="p-3 text-center w-14 bg-slate-900 bstt">STT</th>
@@ -1625,7 +1631,7 @@
       const defaultCarType = carTypeOptions.includes("Xe 7 Chỗ") ? "Xe 7 Chỗ" : (carTypeOptions[0] || "Xe 4 Chỗ");
 
       let html = '';
-      for (let i = 0; i < 20; i++) {
+      for (let i = 0; i < BATCH_ROWS; i++) {
         const dateInputHandler = (i === 0) ? `oninput="syncBatchDates(this.value)"` : ``;
         html += `
           <tr>
@@ -1706,7 +1712,7 @@
       const tb = document.getElementById('tbody-batch');
       if (!tb || !loggedInUser || !personalTrips.length) return;
       const h = learnHabits(loggedInUser.role);
-      for (let i = 0; i < 20; i++) {
+      for (let i = 0; i < BATCH_ROWS; i++) {
         const t = document.getElementById(`t-${i}`), d = document.getElementById(`d-${i}`);
         if (!t || t.value.trim() || (d && d.value.trim())) continue;   // dòng đang nhập dở -> không đụng
         ['c', 'src', 'pick', 'm'].forEach(k => {
@@ -1863,7 +1869,7 @@
       if (!box) return;
       const v = id => { const e = document.getElementById(id); return e ? String(e.value || '').trim() : ''; };
       const lines = [];
-      for (let i = 0; i < 20; i++) {
+      for (let i = 0; i < BATCH_ROWS; i++) {
         const t = v(`t-${i}`), p = v(`p-${i}`), d = v(`d-${i}`), f = v(`f-${i}`), sf = v(`sf-${i}`), note = v(`note-${i}`);
         // chỉ tính dòng nhân viên THẬT SỰ gõ (bỏ qua số phiếu tự nhảy / thói quen tự điền)
         const typed = ['t', 'p', 'd', 'f', 'sf', 'note', 'staff'].some(k => { const e = document.getElementById(`${k}-${i}`); return e && e.dataset.touched && String(e.value || '').trim(); });
@@ -1960,8 +1966,10 @@
         autoNextNameT = setTimeout(() => { if (document.activeElement === el && placeSlug(el.value) === slug) focusNextBatchText(el); }, 700);
       }
     }
+    // (17/11, người dùng: cho cô chú lớn tuổi dễ dùng) bảng nhập còn 15 dòng, chữ + ô to hơn
+    const BATCH_ROWS = 15;
     function syncBatchDates(val) {
-      for (let i = 1; i < 20; i++) {
+      for (let i = 1; i < BATCH_ROWS; i++) {
         const inp = document.getElementById(`date-${i}`);
         if (inp) {
           inp.value = val;
@@ -3414,7 +3422,7 @@
         const n = applyScanToBatch(parsed, role);
         document.getElementById('scan-modal').remove();
         const extra = parsed.rows.length - n;
-        showFloatingWarning(`🤖 Đã đọc ảnh và điền ${n} đơn${extra > 0 ? ` (còn ${extra} đơn chưa điền vì bảng đã đủ 20 dòng — lưu rồi quét tiếp)` : ''}. Ô TÔ VÀNG = cần kiểm tra. Đối chiếu lại với tờ giấy rồi bấm Lưu.`);
+        showFloatingWarning(`🤖 Đã đọc ảnh và điền ${n} đơn${extra > 0 ? ` (còn ${extra} đơn chưa điền vì bảng đã đủ ${BATCH_ROWS} dòng — lưu rồi quét tiếp)` : ''}. Ô TÔ VÀNG = cần kiểm tra. Đối chiếu lại với tờ giấy rồi bấm Lưu.`);
       } catch (e) {
         say('bg-rose-50 border border-rose-300 text-rose-800', '⚠️ ' + escHtml(e.message || String(e)) + '<br><span class="font-semibold">Có thể dùng "Cách khác" bên dưới (chép chữ rồi dán).</span>');
       } finally {
@@ -3464,7 +3472,7 @@
       const n = applyScanToBatch(parsed, role);
       document.getElementById('scan-modal').remove();
       const extra = parsed.rows.length - n;
-      showFloatingWarning(`📷 Đã điền ${n} đơn từ giấy quét${extra > 0 ? ` (còn ${extra} đơn chưa điền vì bảng đã đủ 20 dòng — lưu rồi dán tiếp)` : ''}. Ô TÔ VÀNG = app chưa chắc, vui lòng kiểm tra rồi bấm Lưu.`);
+      showFloatingWarning(`📷 Đã điền ${n} đơn từ giấy quét${extra > 0 ? ` (còn ${extra} đơn chưa điền vì bảng đã đủ ${BATCH_ROWS} dòng — lưu rồi dán tiếp)` : ''}. Ô TÔ VÀNG = app chưa chắc, vui lòng kiểm tra rồi bấm Lưu.`);
     }
     // Điền vào bảng nhập hàng loạt (từ dòng trống đầu tiên). Trả về số đơn đã điền.
     function applyScanToBatch(parsed, role) {
@@ -3475,7 +3483,7 @@
       const staff = scanBestMatch(h.staff, staffOptions) || h.staff;
       const source = scanBestMatch(h.source, sourceOptions);
       const free = [];
-      for (let i = 0; i < 20; i++) {
+      for (let i = 0; i < BATCH_ROWS; i++) {
         const v = k => ((document.getElementById(`${k}-${i}`) || {}).value || '').trim();
         if (!v('t') && !v('p') && !v('d') && !v('staff')) free.push(i);
       }
@@ -3555,7 +3563,7 @@
       // Quy ước: địa chỉ nội thành bắt buộc ghi Quận (Bán vé + Kế hoạch). Có dòng thiếu -> chưa lưu dòng nào, để sửa lại.
       if (usesPriceList()) {
         const noDistrict = [];   // chỉ số dòng thiếu Quận
-        for (let i = 0; i < 20; i++) {
+        for (let i = 0; i < BATCH_ROWS; i++) {
           const dEl = document.getElementById(`d-${i}`);
           const dest = dEl ? dEl.value.trim() : '';
           const filled = document.getElementById(`staff-${i}`).value.trim() && document.getElementById(`t-${i}`).value.trim() && (plateOpt || document.getElementById(`p-${i}`).value.trim()) && dest;
@@ -3572,7 +3580,7 @@
       }
       // (16/11) Biển số / số phiếu đáng ngờ -> hỏi lại 1 lần (đúng thì vẫn lưu)
       const warnRows = [];
-      for (let i = 0; i < 20; i++) {
+      for (let i = 0; i < BATCH_ROWS; i++) {
         const g = id => String((document.getElementById(id) || {}).value || '').trim();
         if (!(g(`staff-${i}`) && g(`t-${i}`) && (plateOpt || g(`p-${i}`)) && g(`d-${i}`))) continue;
         batchRowWarnings(i).forEach(w => warnRows.push(`• Dòng ${i + 1}: ${w.text}`));
@@ -3582,7 +3590,7 @@
       let dupPool = personalTrips;
       if (staffMode === 'window' && staffWinFrom) {
         const oldKeys = new Set();
-        for (let i = 0; i < 20; i++) {
+        for (let i = 0; i < BATCH_ROWS; i++) {
           const el = document.getElementById(`date-${i}`);
           const dk = el ? tripDateKey({ dateStr: el.value }) : '';
           if (dk && dk < staffWinFrom && document.getElementById(`t-${i}`).value.trim()) oldKeys.add(dk);
@@ -3606,7 +3614,7 @@
       let invalidDateRows = [];
       let overDiscountRows = [];
 
-      for (let i = 0; i < 20; i++) {
+      for (let i = 0; i < BATCH_ROWS; i++) {
         let rawDate = document.getElementById(`date-${i}`).value.trim();
         let formattedDate = normalizeDateInput(rawDate);
         if (formattedDate) lastFormattedDate = formattedDate;

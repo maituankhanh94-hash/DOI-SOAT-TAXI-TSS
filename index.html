@@ -1564,10 +1564,10 @@
             </div>
           </div>
 
-          <!-- BẢNG 3: NHẬP HÀNG LOẠT 15 ĐƠN -->
+          <!-- BẢNG 3: BẢNG NHẬP ĐƠN (15 dòng) -->
           <div class="bg-white p-4 sm:p-6 rounded-3xl shadow-xl border border-slate-200 space-y-4">
             <div class="flex flex-col sm:flex-row items-center justify-between gap-3 border-b pb-4">
-              <h3 class="text-xs sm:text-sm font-extrabold uppercase ${themeColorClass}">📋 Nhập Hàng Loạt 15 Dòng Nhanh</h3>
+              <h3 class="w-full sm:w-auto flex items-center justify-center sm:justify-start gap-3 px-5 py-3 rounded-2xl text-white shadow-lg ${role === 'plan2' ? 'bg-gradient-to-r from-pink-600 to-rose-500' : (isPlan ? 'bg-gradient-to-r from-purple-700 to-fuchsia-600' : (isPos ? 'bg-gradient-to-r from-blue-700 to-sky-500' : 'bg-gradient-to-r from-amber-600 to-orange-500'))}"><span class="text-2xl sm:text-3xl leading-none">📝</span><span class="text-xl sm:text-2xl font-black uppercase tracking-wide leading-none">Bảng Nhập Đơn</span></h3>
               <div class="flex flex-wrap items-center gap-2">
                 <button onclick="printScanTemplate('${role}')" class="px-3 py-2.5 bg-white border-2 border-slate-300 hover:bg-slate-50 text-slate-700 font-extrabold text-xs rounded-xl">🖨️ In Mẫu Giấy</button>
                 <button onclick="openScanModal('${role}')" class="px-4 py-2.5 bg-amber-500 hover:bg-amber-600 text-white font-extrabold text-xs rounded-xl shadow-lg">📷 Quét Giấy</button>
@@ -1638,7 +1638,7 @@
         html += `
           <tr>
             <td class="p-2 text-center font-bold bstt"><div>${i+1}</div><div id="stt-t-${i}" class="text-[9px] font-mono font-bold text-blue-700 leading-tight break-all"></div></td>
-            <td class="p-2.5"><input type="date" id="date-${i}" value="${localDateKey(now)}" ${dateInputHandler} class="w-full p-2 bg-slate-50 border rounded-xl font-mono text-xs cursor-pointer" onclick="try{this.showPicker()}catch(e){}"></td>
+            <td class="p-2.5"><input type="date" id="date-${i}" value="${localDateKey(now)}" ${dateInputHandler} class="w-full p-2 bg-slate-50 border rounded-xl cursor-pointer" style="font-size:16px" onclick="try{this.showPicker()}catch(e){}"></td>
             <td class="p-2.5 relative">
               <input type="text" id="staff-${i}" autocomplete="off" value="" placeholder="Gõ tên để đề xuất..." class="w-full p-2 bg-slate-50 border rounded-xl font-bold text-xs" oninput="showStaffSuggestions(this, 'staff-drop-${i}')" onfocus="showStaffSuggestions(this, 'staff-drop-${i}')" onkeydown="suggestKeydown(event, 'staff-drop-${i}')" onblur="hideSuggestLater('staff-drop-${i}'); normalizeStaffField(this, ${i})">
               <div id="staff-drop-${i}"></div>

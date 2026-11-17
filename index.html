@@ -752,6 +752,7 @@
       const drop = document.getElementById(el.dataset.drop);
       if (drop) drop.innerHTML = '';
       if (typeof updateBatchPreview === 'function') setTimeout(updateBatchPreview, 60);
+      if (inp && /^staff-\d+$/.test(inp.id)) { inp.dataset.touched = '1'; focusNextBatchText(inp); }   // chọn tên gợi ý -> nhảy sang ô kế tiếp
     }
     function suggestKeydown(e, dropId) {
       const drop = document.getElementById(dropId);
@@ -1720,6 +1721,7 @@
       const k = m[1], i = Number(m[2]);
       el.dataset.touched = '1';
       clearTimeout(onBatchRowInput._pv); onBatchRowInput._pv = setTimeout(updateBatchPreview, 250);
+      if (ev.type === 'input' && ['p', 't', 'staff'].includes(k)) autoNextAfterInput(el, k);
       if (k === 't') { const s = document.getElementById(`stt-t-${i}`); if (s) s.textContent = el.value.trim(); }
       if (['t', 'p', 'd', 'f', 'sf', 'note'].includes(k) && el.value.trim() && i > 0) {
         const st = document.getElementById(`staff-${i}`);
@@ -1878,6 +1880,36 @@
       ev.preventDefault();
       const next = list[idx + 1];
       if (next) { next.focus(); try { next.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } catch (e) {} }
+    }
+    // (17/11, người dùng) TỰ NHẢY SANG Ô KẾ TIẾP khi ô đã nhập xong (bỏ qua ô chọn – mở ô chọn trên iPhone sẽ bật bảng chọn)
+    function focusNextBatchText(el) {
+      const list = batchFields().filter(x => x.tagName === 'INPUT' && x.type !== 'date');
+      const idx = list.indexOf(el);
+      const next = idx >= 0 ? list[idx + 1] : null;
+      if (!next) return;
+      // ô vừa rời: chạy ngay việc chuẩn hóa / cảnh báo như khi rời ô bình thường
+      next.focus();
+      try { next.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } catch (e) {}
+    }
+    function ticketCommonLen() {
+      const tks = personalTrips.map(t => tkOf(t)).filter(x => /^\d{4,}$/.test(x));
+      if (tks.length < 5) return 0;
+      const c = {}; tks.forEach(x => { c[x.length] = (c[x.length] || 0) + 1; });
+      return Number(Object.entries(c).sort((a, b) => b[1] - a[1])[0][0]);
+    }
+    let autoNextNameT = 0;
+    function autoNextAfterInput(el, k) {
+      const v = String(el.value || '').trim();
+      if (k === 'p' && /^\d{3}$/.test(v)) { focusNextBatchText(el); return; }        // biển số đủ 3 số
+      if (k === 't' && /^\d+$/.test(v)) { const L = ticketCommonLen(); if (L && v.length === L) focusNextBatchText(el); return; }   // số phiếu đủ số chữ số thường dùng
+      if (k === 'staff') {   // gõ đúng trọn 1 tên trong danh sách (không ai khác bắt đầu bằng tên đó) -> ngừng gõ chút là nhảy
+        clearTimeout(autoNextNameT);
+        const slug = placeSlug(v);
+        if (!slug || slug.split('_').length < 2) return;
+        const names = (staffOptions || []).map(placeSlug);
+        if (!names.includes(slug) || names.some(n => n !== slug && n.startsWith(slug + '_'))) return;
+        autoNextNameT = setTimeout(() => { if (document.activeElement === el && placeSlug(el.value) === slug) focusNextBatchText(el); }, 700);
+      }
     }
     function syncBatchDates(val) {
       for (let i = 1; i < 20; i++) {

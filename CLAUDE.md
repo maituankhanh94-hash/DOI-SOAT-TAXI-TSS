@@ -76,6 +76,7 @@
 - Cột STT (`.bstt`) sticky trái + hiện số phiếu của dòng (`stt-t-i`).
 - `onBatchKeydown`: Enter / "Tiếp" → ô kế tiếp theo thứ tự DOM trong tbody (bỏ qua nếu ô gợi ý đã xử lý Enter: `defaultPrevented`); inputs có `enterkeyhint="next"`.
 - `onBatchRowInput`: gõ vào phiếu/biển số/điểm đến/tiền/bảng đón/ghi chú của dòng mới mà Tên trống → chép tên từ dòng trên gần nhất.
+- (17/11, người dùng) TỰ NHẢY Ô KẾ TIẾP (`autoNextAfterInput` trong onBatchRowInput, `focusNextBatchText` = ô chữ kế tiếp theo DOM, BỎ QUA ô chọn/ngày): Tên → chọn gợi ý thì nhảy ngay (pickSuggest); gõ trọn đúng 1 tên trong `staffOptions` (≥2 chữ, không ai khác bắt đầu bằng tên đó) → 0,7 giây sau nhảy (tên 1 chữ / mơ hồ không nhảy, để còn gõ " + B"); Số phiếu toàn số đủ độ dài thường dùng của TK (`ticketCommonLen`, cần ≥5 phiếu) → nhảy; Biển số đúng 3 chữ số → nhảy. Phím Enter/"Tiếp" vẫn như cũ.
 - (14/11, LÊN MAIN) Ô Số phiếu tự nhảy số kế tiếp khi bấm vào (`handleSmartTicketFocus`) — TẮT cho TÀI XẾ (`staffRole === 'driver'`), vì tài xế mỗi cuốc 1 phiếu không theo thứ tự. Bán vé / KH / KH2 vẫn giữ.
 
 ## Tự cập nhật bản mới (15/11, LÊN MAIN)

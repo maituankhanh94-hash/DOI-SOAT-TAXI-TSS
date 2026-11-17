@@ -753,6 +753,15 @@
       if (drop) drop.innerHTML = '';
       if (typeof updateBatchPreview === 'function') setTimeout(updateBatchPreview, 60);
       if (inp && /^staff-\d+$/.test(inp.id)) { inp.dataset.touched = '1'; focusNextBatchText(inp); }   // chọn tên gợi ý -> nhảy sang ô kế tiếp
+      const dm = inp && /^d-(\d+)$/.exec(inp.id);
+      if (dm) {   // chọn điểm đến gợi ý: đã đủ tên đường + phường/quận -> sang ô Tổng tiền (thiếu thì đứng lại để gõ thêm)
+        inp.dataset.touched = '1';
+        const i = Number(dm[1]), it = rowPriceItem(i), pay = (document.getElementById(`m-${i}`) || {}).value, v = inp.value.trim();
+        if (!usesPriceList() || (destHasDistrict(v, it && it.id, pay) && destHasStreet(v, it && it.id, pay))) {
+          const f = document.getElementById(`f-${i}`);
+          if (f) { f.focus(); ensureBatchFieldVisible(f); }   // ngay trong lúc bấm (iPhone giữ bàn phím)
+        }
+      }
     }
     function suggestKeydown(e, dropId) {
       const drop = document.getElementById(dropId);
@@ -1721,7 +1730,7 @@
       const k = m[1], i = Number(m[2]);
       el.dataset.touched = '1';
       clearTimeout(onBatchRowInput._pv); onBatchRowInput._pv = setTimeout(updateBatchPreview, 250);
-      if (ev.type === 'input' && ['p', 't', 'staff'].includes(k)) autoNextAfterInput(el, k);
+      if (ev.type === 'input' && ['p', 't', 'staff', 'd'].includes(k)) autoNextAfterInput(el, k);
       if (ev.type === 'change' && el.tagName === 'SELECT' && document.activeElement === el) focusNextBatchText(el);   // chọn xong ô chọn -> sang ô kế
       if (k === 't') { const s = document.getElementById(`stt-t-${i}`); if (s) s.textContent = el.value.trim(); }
       if (['t', 'p', 'd', 'f', 'sf', 'note'].includes(k) && el.value.trim() && i > 0) {
@@ -1930,6 +1939,18 @@
       const v = String(el.value || '').trim();
       if (k === 'p' && /^\d{3}$/.test(v)) { focusNextBatchText(el); return; }        // biển số đủ 3 số
       if (k === 't' && /^\d+$/.test(v)) { const L = ticketCommonLen(); if (L && v.length === L) focusNextBatchText(el); return; }   // số phiếu đủ số chữ số thường dùng
+      if (k === 'd') {   // (17/11) Điểm đến ĐÃ ĐỦ (tên đường + phường/quận) + ngừng gõ 1,5 giây -> sang ô Tổng tiền
+        clearTimeout(autoNextNameT);
+        if (!usesPriceList()) return;
+        const i = Number(el.id.split('-')[1]), it = rowPriceItem(i), pay = (document.getElementById(`m-${i}`) || {}).value;
+        if (!v || !destHasDistrict(v, it && it.id, pay) || !destHasStreet(v, it && it.id, pay)) return;
+        autoNextNameT = setTimeout(() => {
+          if (document.activeElement !== el || el.value.trim() !== v) return;
+          const f = document.getElementById(`f-${i}`);
+          if (f) { f.focus(); ensureBatchFieldVisible(f); }
+        }, 1500);
+        return;
+      }
       if (k === 'staff') {   // gõ đúng trọn 1 tên trong danh sách (không ai khác bắt đầu bằng tên đó) -> ngừng gõ chút là nhảy
         clearTimeout(autoNextNameT);
         const slug = placeSlug(v);

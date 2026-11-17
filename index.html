@@ -1879,7 +1879,7 @@
       if (idx < 0) return;
       ev.preventDefault();
       const next = list[idx + 1];
-      if (next) { next.focus(); try { next.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } catch (e) {} }
+      if (next) { next.focus(); ensureBatchFieldVisible(next); }
     }
     // (17/11, người dùng) TỰ NHẢY SANG Ô KẾ TIẾP khi ô đã nhập xong (bỏ qua ô chọn – mở ô chọn trên iPhone sẽ bật bảng chọn)
     function focusNextBatchText(el) {
@@ -1889,8 +1889,34 @@
       if (!next) return;
       // ô vừa rời: chạy ngay việc chuẩn hóa / cảnh báo như khi rời ô bình thường
       next.focus();
-      try { next.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } catch (e) {}
+      ensureBatchFieldVisible(next);
     }
+    // (17/11, người dùng) Con nháy sang ô nào thì KÉO BẢNG tới ô đó (ngang: khung bảng; dọc: trang), chừa cột STT dính bên trái và bàn phím
+    function ensureBatchFieldVisible(el) {
+      const wrap = document.getElementById('batch-wrap'), main = document.getElementById('main-container');
+      if (!el || !wrap || !wrap.contains(el)) return;
+      const go = () => {
+        const wr = wrap.getBoundingClientRect(), r = el.getBoundingClientRect();
+        const stt = wrap.querySelector('td.bstt');
+        const leftLim = wr.left + (stt ? stt.getBoundingClientRect().width : 0) + 8, rightLim = wr.right - 8;
+        let dx = 0;
+        if (r.left < leftLim) dx = r.left - leftLim;
+        else if (r.right > rightLim) dx = Math.min(r.right - rightLim, r.left - leftLim);
+        if (Math.abs(dx) > 2) { try { wrap.scrollTo({ left: wrap.scrollLeft + dx, behavior: 'smooth' }); } catch (e) { wrap.scrollLeft += dx; } }
+        if (main) {
+          const mr = main.getBoundingClientRect(), vv = window.visualViewport;
+          const bottom = Math.min(mr.bottom, vv ? vv.offsetTop + vv.height : window.innerHeight) - 12, top = mr.top + 12;
+          let dy = 0;
+          if (r.bottom > bottom) dy = r.bottom - bottom + 40;
+          else if (r.top < top) dy = r.top - top - 40;
+          if (dy) { try { main.scrollBy({ top: dy, behavior: 'smooth' }); } catch (e) { main.scrollTop += dy; } }
+        }
+      };
+      go();
+      setTimeout(go, 350);   // iPhone tự kéo xong rồi chỉnh lại cho đúng
+    }
+    // Mọi cách sang ô (bấm vào ô, phím Tiếp, tự nhảy) đều kéo bảng tới ô đó
+    document.addEventListener('focusin', e => { const t = e.target; if (t && t.matches && t.matches('#batch-wrap input')) setTimeout(() => ensureBatchFieldVisible(t), 30); }, true);
     function ticketCommonLen() {
       const tks = personalTrips.map(t => tkOf(t)).filter(x => /^\d{4,}$/.test(x));
       if (tks.length < 5) return 0;

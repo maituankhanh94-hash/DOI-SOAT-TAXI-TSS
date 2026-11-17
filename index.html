@@ -1077,7 +1077,7 @@
       if (!ws.length) return [];
       return priceItems.filter(it => it.kind === 'sb' && ws.some(w => wordsOf(it.ward).includes(wordsOf(w[1]))));
     }
-    const DEST_RULE_TEXT = 'BẮT BUỘC ghi Phường/Xã mới (hoặc Quận/Huyện cũ) — vd: "140/20 Võ Duy Ninh, Thạnh Mỹ Tây", "Đề Thám, Q1", "Tỉnh lộ 8, Củ Chi". Đi tỉnh ghi tên tỉnh — vd: "Vũng Tàu". Hoặc chọn gợi ý 📋 từ bảng giá.';
+    const DEST_RULE_TEXT = 'BẮT BUỘC ghi TÊN ĐƯỜNG + Phường/Xã mới (hoặc Quận/Huyện cũ) — vd: "140/20 Võ Duy Ninh, Thạnh Mỹ Tây", "Đề Thám, Q1", "Tỉnh lộ 8, Củ Chi". Chỉ ghi phường/quận là CHƯA ĐỦ. Bệnh viện, khách sạn, bến xe… ghi tên là được. Đi tỉnh ghi tên tỉnh — vd: "Vũng Tàu".';
     const HCM_DISTRICT_NAMES = ['thu duc', 'go vap', 'binh thanh', 'binh tan', 'tan binh', 'phu nhuan', 'tan phu',
       'binh chanh', 'can gio', 'hoc mon', 'cu chi', 'nha be'];
     const PROVINCE_EXTRA = ['vung tau', 'ba ria', 'da lat', 'phan thiet', 'mui ne', 'phan rang', 'nha trang', 'cam ranh', 'buon ma thuot', 'dak lak', 'daklak',
@@ -1133,13 +1133,41 @@
       return destKeys().some(k => t.includes(k)) || findNewWards(dest).length > 0;
     }
 
+    // (17/11, người dùng) Bên bán BẮT BUỘC ghi TÊN ĐƯỜNG (chỉ ghi phường/quận là chưa đủ). Tài xế không áp.
+    // Không bắt: Free nội bộ, đơn đặc biệt (hủy, về bãi...), địa danh (bệnh viện, khách sạn, bến xe...), đi tỉnh / tour.
+    const STREET_GENERIC = new Set(['phuong', 'p', 'f', 'quan', 'q', 'xa', 'huyen', 'tp', 'thanh', 'pho', 'hcm', 'tphcm', 'hcmc', 'ho', 'chi', 'minh', 'sai', 'gon', 'saigon',
+      'viet', 'nam', 'vn', 'district', 'ward', 'city', 'so', 'hem', 'ngo', 'kiet', 'to', 'khu', 'kp', 'tinh', 'thi', 'tran', 'nha', 'can', 'ho', 'block', 'lau', 'tang', 'phong']);
+    function destHasStreet(dest, priceId, payMethod) {
+      if (payMethod && paymentCategory({ paymentMethod: payMethod, role: 'pos' }) === 'FREE') return true;
+      let t = canonWords(dest).replace(/ xa lo ha noi /g, ' xa lo ');
+      if (DEST_EXEMPT.some(k => t.startsWith(' ' + k + ' '))) return true;
+      if (LANDMARKS.some(k => t.includes(' ' + canonWords(k).trim() + ' '))) return true;
+      const it = priceId ? priceById[priceId] : null;
+      if (it && it.kind === 'tinh') return true;   // đi tỉnh / tour theo bảng giá
+      // đi tỉnh / sân bay / city tour (Vũng Tàu, Bình Dương… dù đã sáp nhập vẫn tính là đi tỉnh) -> không bắt tên đường
+      if (PROVINCE_EXTRA.map(canonWords).some(k => t.includes(k))) return true;
+      const hcm = / (?:q|quan|district) ?(?:0?[1-9]|1[0-2]) /.test(t) || HCM_DISTRICT_NAMES.some(k => t.includes(' ' + k + ' ')) || findNewWards(dest).length > 0 || t.trim().split(' ').some(w => DISTRICT_ABBR.includes(w));
+      if (!hcm) {
+        const outKeys = PROVINCE_EXTRA.concat(VN_PLACES.split('|')).map(canonWords).filter(k => k.trim().length >= 2 && !PLACE_EXCLUDE.includes(k));
+        if (outKeys.some(k => t.includes(k))) return true;
+      }
+      // bỏ phần chữ của mục bảng giá đã chọn, quận/huyện, phường/xã (mới + cũ), chữ chung -> phần còn lại phải có chữ (tên đường)
+      if (it && it.label) t = t.replace(canonWords(it.label), ' ');
+      t = t.replace(/ (?:q|quan|district|p|phuong|f|ward) ?\d{1,2} /g, ' ');
+      NEW_WARD_KEYS.slice().sort((a, b) => b.key.length - a.key.length).forEach(x => { while (t.includes(x.key)) t = t.replace(x.key, ' '); });
+      HCM_DISTRICT_NAMES.forEach(k => { t = t.split(' ' + k + ' ').join(' '); });
+      const rest = t.trim().split(/\s+/).filter(w => w && /[a-z]/.test(w) && !STREET_GENERIC.has(w) && !DISTRICT_ABBR.includes(w));
+      return rest.length > 0;
+    }
+
     // Khung nhắc LỚN khi thiếu Quận (mẫu 3 người dùng chọn). CHỈ NHẮC, KHÔNG gợi ý (người dùng yêu cầu 09/11).
+    // (17/11) it.need = 'street' -> nhắc thiếu TÊN ĐƯỜNG
     function showDestFixModal(items) {
       let el = document.getElementById('dest-fix-modal');
       if (!el) { el = document.createElement('div'); el.id = 'dest-fix-modal'; document.body.appendChild(el); }
       const blocks = items.map(it => `
         <div class="rounded-2xl p-4 border-2 bg-amber-50 border-amber-400">
-          <p class="text-lg sm:text-xl font-extrabold text-slate-900 leading-snug">Vui lòng nhập thêm <span class="text-red-600 underline">PHƯỜNG / XÃ</span> (hoặc Quận cũ) cho điểm đến <span class="text-blue-700">"${escHtml(it.dest)}"</span> mới thực hiện lưu đơn được.</p>
+          <p class="text-lg sm:text-xl font-extrabold text-slate-900 leading-snug">Vui lòng nhập thêm ${it.need === 'street' ? '<span class="text-red-600 underline">TÊN ĐƯỜNG</span>' : '<span class="text-red-600 underline">PHƯỜNG / XÃ</span> (hoặc Quận cũ)'} cho điểm đến <span class="text-blue-700">"${escHtml(it.dest)}"</span> mới thực hiện lưu đơn được.</p>
         </div>`).join('');
       el.innerHTML = `<div class="fixed inset-0 bg-slate-900/80 z-[70] flex items-center justify-center p-3 backdrop-blur-sm">
         <div class="bg-white rounded-3xl w-full max-w-lg max-h-[92vh] flex flex-col overflow-hidden border-4 border-red-500 shadow-2xl">
@@ -2435,8 +2463,13 @@
       }
       if (usesPriceList() && destination !== String(trip.destination || '').trim()) {
         const dEl = document.getElementById('edit-modal-dest');
-        if (!destHasDistrict(destination, dEl && dEl.dataset.priceId && priceById[dEl.dataset.priceId] ? dEl.dataset.priceId : '', paymentMethod)) {
+        const pid = dEl && dEl.dataset.priceId && priceById[dEl.dataset.priceId] ? dEl.dataset.priceId : '';
+        if (!destHasDistrict(destination, pid, paymentMethod)) {
           showDestFixModal([{ label: 'đơn đang sửa', dest: destination }]);
+          return;
+        }
+        if (!destHasStreet(destination, pid, paymentMethod)) {
+          showDestFixModal([{ label: 'đơn đang sửa', need: 'street', dest: destination }]);
           return;
         }
       }
@@ -3445,12 +3478,13 @@
           const dest = dEl ? dEl.value.trim() : '';
           const filled = document.getElementById(`staff-${i}`).value.trim() && document.getElementById(`t-${i}`).value.trim() && (plateOpt || document.getElementById(`p-${i}`).value.trim()) && dest;
           if (!filled) continue;
-          const it = rowPriceItem(i);
-          if (!destHasDistrict(dest, it && it.id, (document.getElementById(`m-${i}`) || {}).value)) { noDistrict.push(i); dEl.classList.add('ring-2', 'ring-red-500'); }
+          const it = rowPriceItem(i), pay = (document.getElementById(`m-${i}`) || {}).value;
+          const need = !destHasDistrict(dest, it && it.id, pay) ? 'ward' : (!destHasStreet(dest, it && it.id, pay) ? 'street' : '');
+          if (need) { noDistrict.push({ i, need }); dEl.classList.add('ring-2', 'ring-red-500'); }
           else dEl.classList.remove('ring-2', 'ring-red-500');
         }
         if (noDistrict.length) {
-          showDestFixModal(noDistrict.map(i => ({ label: `dòng ${i+1}`, dest: document.getElementById(`d-${i}`).value.trim() })));
+          showDestFixModal(noDistrict.map(x => ({ label: `dòng ${x.i + 1}`, need: x.need, dest: document.getElementById(`d-${x.i}`).value.trim() })));
           return;
         }
       }

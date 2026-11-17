@@ -760,12 +760,12 @@
       const drop = document.getElementById(el.dataset.drop);
       if (drop) drop.innerHTML = '';
       if (typeof updateBatchPreview === 'function') setTimeout(updateBatchPreview, 60);
-      if (inp && /^staff-\d+$/.test(inp.id)) { inp.dataset.touched = '1'; focusNextBatchText(inp); }   // chọn tên gợi ý -> nhảy sang ô kế tiếp
+      if (inp && /^staff-\d+$/.test(inp.id)) { inp.dataset.touched = '1'; if (AUTO_NEXT) focusNextBatchText(inp); }   // chọn tên gợi ý -> nhảy sang ô kế tiếp
       const dm = inp && /^d-(\d+)$/.exec(inp.id);
       if (dm) {   // chọn điểm đến gợi ý: đã đủ tên đường + phường/quận -> sang ô Tổng tiền (thiếu thì đứng lại để gõ thêm)
         inp.dataset.touched = '1';
         const i = Number(dm[1]), it = rowPriceItem(i), pay = (document.getElementById(`m-${i}`) || {}).value, v = inp.value.trim();
-        if (!usesPriceList() || (destHasDistrict(v, it && it.id, pay) && destHasStreet(v, it && it.id, pay))) {
+        if (AUTO_NEXT && (!usesPriceList() || (destHasDistrict(v, it && it.id, pay) && destHasStreet(v, it && it.id, pay)))) {
           const f = document.getElementById(`f-${i}`);
           if (f) { f.focus(); ensureBatchFieldVisible(f); }   // ngay trong lúc bấm (iPhone giữ bàn phím)
         }
@@ -1738,8 +1738,8 @@
       const k = m[1], i = Number(m[2]);
       el.dataset.touched = '1';
       clearTimeout(onBatchRowInput._pv); onBatchRowInput._pv = setTimeout(updateBatchPreview, 250);
-      if (ev.type === 'input' && ['p', 't', 'staff', 'd'].includes(k)) autoNextAfterInput(el, k);
-      if (ev.type === 'change' && el.tagName === 'SELECT' && document.activeElement === el) focusNextBatchText(el);   // chọn xong ô chọn -> sang ô kế
+      if (AUTO_NEXT && ev.type === 'input' && ['p', 't', 'staff', 'd'].includes(k)) autoNextAfterInput(el, k);
+      if (AUTO_NEXT && ev.type === 'change' && el.tagName === 'SELECT' && document.activeElement === el) focusNextBatchText(el);   // chọn xong ô chọn -> sang ô kế
       if (k === 't') { const s = document.getElementById(`stt-t-${i}`); if (s) s.textContent = el.value.trim(); }
       if (['t', 'p', 'd', 'f', 'sf', 'note'].includes(k) && el.value.trim() && i > 0) {
         const st = document.getElementById(`staff-${i}`);
@@ -1942,6 +1942,8 @@
       const c = {}; tks.forEach(x => { c[x.length] = (c[x.length] || 0) + 1; });
       return Number(Object.entries(c).sort((a, b) => b[1] - a[1])[0][0]);
     }
+    // (17/11, người dùng: "Bỏ chức năng tự nhảy ô") TẮT tự nhảy ô. Phím Enter/"Tiếp" và tự kéo bảng tới ô đang nhập vẫn giữ. Bật lại: true.
+    const AUTO_NEXT = false;
     let autoNextNameT = 0;
     function autoNextAfterInput(el, k) {
       const v = String(el.value || '').trim();

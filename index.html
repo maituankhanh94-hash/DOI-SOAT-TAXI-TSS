@@ -694,6 +694,8 @@
     // fleet/<biển số chuẩn hóa> = {p: biển số như tài xế gõ, n: số lần báo, last: yyyy-mm-dd}. Chỉ tài xế / quản lý ghi (quy tắc).
     // Quy tắc cũ chưa có "fleet" -> đọc lỗi -> không cảnh báo biển số (app vẫn chạy bình thường).
     let fleetMap = {}, fleetLoaded = false;
+    // Tên tài xế người dùng báo trực tiếp (dùng khi Quản lý chưa đặt tay bằng nút "✏️ Đặt tên tài xế xe …"; tên đặt tay luôn ưu tiên hơn)
+    const PLATE_DRIVER_DEFAULTS = { '722': 'Trần An Khang' };   // 18/11: người đang chạy xe 722
     const fleetSynced = new Set();
     function loadFleet() {
       dbRef('fleet').on('value', s => { fleetMap = s.val() || {}; fleetLoaded = true; }, () => { fleetLoaded = false; });
@@ -3153,7 +3155,7 @@
       const plateName = {};   // 3 số cuối -> tên tài xế hay dùng
       dictTrips.forEach(t => { if (t.role !== 'driver') return; const n = String(t.staff || '').trim(); if (!n || /\d/.test(n)) return; const pk = plateKey(t.plateNumber); if (!pk) return; const c = plateName[pk] = plateName[pk] || {}; const v = nameCase(n); c[v] = (c[v] || 0) + 1; });
       // (18/11) tên tài xế Quản lý đặt tay cho xe (fleet/<xe>/nm + nmm) – ưu tiên trước; tên theo tài khoản: TK tài xế chỉ dùng ĐÚNG 1 tên (≥2 đơn)
-      const manualName = {}, fleetName = {};
+      const manualName = Object.assign({}, PLATE_DRIVER_DEFAULTS), fleetName = {};
       Object.entries(fleetMap || {}).forEach(([k, v]) => { if (!v || !v.nm) return; const pk = plateKey(k); if (v.nmm) manualName[pk] = nameCase(v.nm); else if (!fleetName[pk]) fleetName[pk] = nameCase(v.nm); });
       const accName = {};
       dictTrips.forEach(t => { if (t.role !== 'driver') return; const n = String(t.staff || '').trim(); if (!n || /\d/.test(n) || staffNamesOf(n).length > 1) return; const a = accName[t.createdBy || ''] = accName[t.createdBy || ''] || {}; const v = nameCase(n); a[v] = (a[v] || 0) + 1; });
@@ -4813,6 +4815,7 @@
       if (!tail) return '';
       const man = (fleetMap || {})[tail];
       if (man && man.nm && man.nmm) return nameCase(man.nm);   // tên Quản lý đặt cho xe
+      if (PLATE_DRIVER_DEFAULTS[tail]) return PLATE_DRIVER_DEFAULTS[tail];
       const cnt = {};
       personalTrips.forEach(t => {
         if (plateKey(t.plateNumber) !== tail) return;

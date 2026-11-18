@@ -1322,6 +1322,41 @@
     }
     // Đơn chia tiền (vd "-1/2"): so giá bảng với tổng tiền cả đơn
     function splitCountOf(ticket) { const m = /-(\d+)\/(\d+)$/.exec(String(ticket || '')); return m ? Number(m[2]) : 1; }
+    // (18/11, người dùng) Đơn 1 dòng mà ô Tên ghi nhiều người ("A + B") -> phải TÁCH như lúc nhập: mỗi người 1 dòng, chia đều tiền, phiếu 123-1/2, 123-2/2
+    function staffNamesOf(v) { return String(v || '').split(/\s*[+,&]\s*/).map(x => x.trim()).filter(Boolean); }
+    function needsStaffSplit(t) { return !!t && staffNamesOf(t.staff).length > 1 && splitCountOf(t.ticketNumber) <= 1; }
+    function splitTripByStaff(t) {
+      const names = staffNamesOf(t.staff), n = names.length;
+      const base = baseTicketOf(t.ticketNumber || t.originalTicket || '');
+      const total = Number(t.totalFare || 0), sign = Number(t.signFee || 0);
+      return names.map((nm, k) => {
+        const o = Object.assign({}, t, {
+          id: k === 0 ? t.id : `${t.id}_s${k + 1}`,
+          staff: nm, ticketNumber: `${base}-${k + 1}/${n}`, originalTicket: base,
+          totalFare: Math.round(total / n), originalTotalFare: total,
+          timestamp: Number(t.timestamp || Date.now()) + k
+        });
+        if (sign > 0) { o.signFee = Math.round(sign / n); o.originalSignFee = sign; }
+        return o;
+      });
+    }
+    // Quản lý: tự tách các đơn như vậy (ghi trips + bản sao users_trips nếu đơn gốc có ở đó), mỗi đơn 1 dòng nhật ký
+    async function autoSplitCombinedTrips(trips) {
+      const list = trips.filter(needsStaffSplit);
+      if (!list.length) return 0;
+      const accs = [...new Set(list.map(t => t.createdBy).filter(Boolean))];
+      const ut = {};
+      await Promise.all(accs.map(a => dbRef('users_trips/' + a).once('value').then(s => { ut[a] = s.val() || {}; }).catch(() => { ut[a] = {}; })));
+      const upd = {};
+      list.forEach(t => {
+        const parts = splitTripByStaff(t);
+        const inUt = t.createdBy && ut[t.createdBy] && ut[t.createdBy][t.id];
+        parts.forEach(p => { upd[`trips/${p.id}`] = p; if (inUt) upd[`users_trips/${t.createdBy}/${p.id}`] = p; });
+        upd['trip_log/' + dbRef('trip_log').push().key] = tripLogEntry('edit', parts[0], `Tự động tách đơn chia tiền: "${t.staff}" ${fmtMoney(Number(t.totalFare || 0))} → ${parts.map(p => `${p.ticketNumber} ${p.staff} ${fmtMoney(p.totalFare)}`).join('; ')}`);
+      });
+      await dbRoot().update(upd);
+      return list.length;
+    }
     function editModalFullFare() {
       const f = parseFloat(((document.getElementById('edit-modal-fare') || {}).value || '').replace(/[^0-9]/g, '')) || 0;
       return f * splitCountOf((document.getElementById('edit-modal-ticket') || {}).value);
@@ -2804,13 +2839,14 @@
       }
 
       let updates = {};
-      updates[`users_trips/${loggedInUser.user}/${id}`] = trip;
-      updates[`trips/${id}`] = trip;
+      const parts = needsStaffSplit(trip) ? splitTripByStaff(trip) : [trip];   // sửa thành "A + B" -> tách như lúc nhập
+      parts.forEach(p => { updates[`users_trips/${loggedInUser.user}/${p.id}`] = p; updates[`trips/${p.id}`] = p; });
 
       dbRoot().update(updates).then(() => {
-        const ch = changeText(before, trip);
-        if (ch) logTrips('edit', [trip], () => ch);
-        alert("Đã cập nhật đơn hàng thành công!");
+        const ch = changeText(before, parts[0]);
+        if (parts.length > 1) logTrips('edit', [parts[0]], () => `Tách đơn chia tiền ${parts.length} người: ${parts.map(p => p.ticketNumber + ' ' + p.staff).join('; ')}` + (ch ? ' | ' + ch : ''));
+        else if (ch) logTrips('edit', [trip], () => ch);
+        alert(parts.length > 1 ? `Đã cập nhật và TÁCH thành ${parts.length} đơn chia đều tiền (${parts.map(p => p.ticketNumber).join(', ')})!` : "Đã cập nhật đơn hàng thành công!");
         document.getElementById('edit-trip-modal').remove();
         updatePersonalSummary(role);
         renderActiveWorksheetTrips(role);
@@ -3225,14 +3261,25 @@
         if (full) { const ts = await dbRef('trips').once('value'); trips = Object.values(ts.val() || {}); autoFixDict = trips; }
         const dict = autoFixDict ? autoFixDict.concat(allCompanyTrips) : trips;
         const groups = buildFixNamesPlan(trips, dict);
-        if (!groups.length) return;
-        const n = await writeFixGroups(groups, `Tự động sửa tên NV trong ${groups.reduce((a, g) => a + g.trips.length, 0)} đơn: `);
-        if (autoFixDict) groups.forEach(g => g.trips.forEach(t => { t.staff = g.to; }));
-        showNameFixToast(n, groups);
+        if (groups.length) {
+          const n0 = await writeFixGroups(groups, `Tự động sửa tên NV trong ${groups.reduce((a, g) => a + g.trips.length, 0)} đơn: `);
+          if (autoFixDict) groups.forEach(g => g.trips.forEach(t => { t.staff = g.to; }));
+          showNameFixToast(n0, groups);
+        }
+        // sau khi tên đã đúng kiểu: đơn 1 dòng ghi nhiều người -> tách ra
+        const ns = await autoSplitCombinedTrips(trips);
+        if (ns) { if (autoFixDict === trips) autoFixDict = null; showSplitToast(ns); }
+        if (!groups.length && !ns) return;
         updateManagerAuditTable(); renderBizBox();
       } catch (e) {
         console.warn('autoFixNames', e && e.message);
       } finally { autoFixBusy = false; }
+    }
+    function showSplitToast(n) {
+      const d = document.createElement('div');
+      d.className = 'fixed left-3 bottom-24 z-[70] max-w-sm bg-indigo-700 text-white rounded-2xl shadow-2xl px-4 py-3 text-xs font-bold';
+      d.innerHTML = `✂️ Đã tự tách ${n} đơn ghi nhiều nhân viên ("A + B") thành đơn chia tiền<div class="font-semibold text-indigo-200 mt-1">(xem chi tiết ở Nhật ký)</div>`;
+      d.onclick = () => d.remove(); document.body.appendChild(d); setTimeout(() => d.remove(), 12000);
     }
     function scheduleAutoFixNames() { clearTimeout(autoFixTimer); autoFixTimer = setTimeout(() => autoFixNames(!autoFixDict), autoFixDict ? 3000 : 5000); }
     function showNameFixToast(n, groups) {

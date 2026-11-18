@@ -1175,7 +1175,10 @@
       const it = priceId ? priceById[priceId] : null;
       if (it && it.label) t = t.replace(canonWords(it.label), ' ');   // bỏ phần chữ của mục bảng giá đã chọn
       // Bước 1: bỏ quận/huyện, phường/xã (mới + cũ), chữ chung
-      t = t.replace(/ (?:q|quan|district|p|phuong|f|ward) ?\d{1,2} /g, ' ');
+      t = t.replace(/ (?:q|quan|district|p|phuong|f|ward) ?\d{1,2}(?= )/g, ' ');
+      // (18/11, người dùng: "1 Hoà Hưng, Hoà Hưng" bị chặn) Số nhà + chữ ngay sau -> có tên đường, kể cả tên đường TRÙNG tên phường/quận
+      // (Hòa Hưng, Phú Thọ, Nguyễn Cư Trinh...). Xét TRƯỚC khi bỏ tên phường; chữ ngay sau số không được là chữ chung (phường, quận...).
+      { const re = / \d+[a-z]?(?: \d+[a-z]?)* ([a-z]+)/g; let m; while ((m = re.exec(t))) { if (!STREET_GENERIC.has(m[1]) && !DISTRICT_ABBR.includes(m[1]) && !/^(?:q|p|f|quan|phuong|ward|district|xa|tp|thanh|huyen)$/.test(m[1])) return true; } }
       NEW_WARD_KEYS.slice().sort((a, b) => b.key.length - a.key.length).forEach(x => { while (t.includes(x.key)) t = t.replace(x.key, ' '); });
       HCM_DISTRICT_NAMES.forEach(k => { t = t.split(' ' + k + ' ').join(' '); });
       const words = s2 => s2.trim().split(/\s+/).filter(w => w && /[a-z]/.test(w) && !STREET_GENERIC.has(w) && !DISTRICT_ABBR.includes(w));

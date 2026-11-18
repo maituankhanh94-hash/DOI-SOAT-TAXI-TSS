@@ -1170,7 +1170,10 @@
       'viet', 'nam', 'vn', 'district', 'ward', 'city', 'so', 'hem', 'ngo', 'kiet', 'to', 'khu', 'kp', 'tinh', 'thi', 'tran', 'nha', 'can', 'block', 'lau', 'tang', 'phong',
       'benh', 'vien', 'khach', 'san', 'hotel', 'resort', 'ben', 'xe', 'cho', 'sieu', 'toa', 'chung', 'cu', 'apartment', 'tour', 'bay', 'ga', 'trung', 'tam', 'cong', 'ty', 'truong', 'dai', 'hoc']);
     let streetStripKeys = null;
+    // (18/11, người dùng: "chỉ cần nhập quận hoặc phường là được, bỏ hết các bắt buộc") TẮT bắt buộc tên đường. Bật lại: true.
+    const REQUIRE_STREET = false;
     function destHasStreet(dest, priceId, payMethod) {
+      if (!REQUIRE_STREET) return true;
       if (payMethod && paymentCategory({ paymentMethod: payMethod, role: 'pos' }) === 'FREE') return true;
       let t = canonWords(dest).replace(/ xa lo ha noi /g, ' xa lo ');
       if (DEST_EXEMPT.some(k => t.startsWith(' ' + k + ' '))) return true;

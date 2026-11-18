@@ -1332,9 +1332,35 @@
     document.addEventListener('focusin', e => { const f = e.target; if (f && /^f-\d+$/.test(f.id || '') && f.dataset.auto === '1' && f.value) setTimeout(() => { try { f.setSelectionRange(0, f.value.length); } catch (err) {} }, 0); }, true);
 
     // Gợi ý điểm đến: Bán vé thấy mục BẢNG GIÁ (📋, có giá) trước, sau đó là địa chỉ hay đi (📍)
+    // (18/11, người dùng) Ô Điểm đến gõ T1 / T2 / T3 (hoặc "ga t3", "nhà ga T2"...) -> tự đổi thành địa chỉ đầy đủ của nhà ga
+    const TERMINAL_ADDR = {
+      '1': 'Nhà ga T1 (Quốc nội) - Sân bay Tân Sơn Nhất, đường Trường Sơn, P. Tân Sơn Hòa, Q. Tân Bình',
+      '2': 'Nhà ga T2 (Quốc tế) - Sân bay Tân Sơn Nhất, đường Trường Sơn, P. Tân Sơn Hòa, Q. Tân Bình',
+      '3': 'Nhà ga T3 (Quốc nội) - Sân bay Tân Sơn Nhất, đường Trần Quốc Hoàn, P. Tân Sơn Hòa, Q. Tân Bình',
+    };
+    function expandTerminalDest(v) {
+      const q = removeAccents(String(v || '')).replace(/[.\-_,]/g, ' ').replace(/\s+/g, ' ').trim();
+      const m = /^(?:(?:nha )?ga |san bay |sb |tsn )?t ?([123])(?: (?:quoc noi|quoc te|qn|qt))?$/.exec(q);
+      return m ? TERMINAL_ADDR[m[1]] : null;
+    }
+    function applyTerminalDest(el) {
+      if (!el) return false;
+      const full = expandTerminalDest(el.value);
+      if (!full || el.value === full) return false;
+      el.value = full; el.dataset.touched = '1';
+      attachPriceToInput(el, null);
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+      if (typeof updateBatchPreview === 'function') setTimeout(updateBatchPreview, 60);
+      return true;
+    }
     function showDestSuggestions(input, dropId, rowIdx) {
       const drop = document.getElementById(dropId);
       if (!drop) return;
+      const term = expandTerminalDest(input.value);
+      if (term) {   // gõ T1/T2/T3 -> gợi ý đúng địa chỉ nhà ga (rời ô cũng tự đổi)
+        drop.innerHTML = `<div class="local-dropdown"><div class="local-item bg-blue-50" data-target="${escHtml(input.id)}" data-drop="${escHtml(dropId)}" data-v="${escHtml(term)}" data-pid="" data-row="${rowIdx == null ? '' : rowIdx}" onmousedown="event.preventDefault(); pickSuggest(this)">🛫 ${escHtml(term)}</div></div>`;
+        return;
+      }
       if (rowIdx != null) { rowPriceItem(rowIdx); updateRowPriceHint(rowIdx); }
       const priceHits = usesPriceList() ? findPriceMatches(input.value, 6) : [];
       if (!priceHits.length) { showPlaceSuggestions(input, dropId); return; }
@@ -1674,7 +1700,7 @@
               </select>
             </td>
             <td class="p-2.5 relative">
-              <input type="text" id="d-${i}" autocomplete="off" placeholder="${PRICE_ROLES.includes(role) ? 'Vd: Võ Duy Ninh, Thạnh Mỹ Tây (bắt buộc ghi Phường/Xã)' : 'Gõ điểm đến (vd: đề thám)...'}" class="w-full p-2 bg-amber-50 border border-amber-300 rounded-xl font-semibold text-xs" oninput="showDestSuggestions(this, 'dest-drop-${i}', ${i})" onkeydown="suggestKeydown(event, 'dest-drop-${i}')" onblur="hideSuggestLater('dest-drop-${i}'); autoMatchRowPrice(${i})">
+              <input type="text" id="d-${i}" autocomplete="off" placeholder="${PRICE_ROLES.includes(role) ? 'Vd: Võ Duy Ninh, Thạnh Mỹ Tây (bắt buộc ghi Phường/Xã)' : 'Gõ điểm đến (vd: đề thám)...'}" class="w-full p-2 bg-amber-50 border border-amber-300 rounded-xl font-semibold text-xs" oninput="showDestSuggestions(this, 'dest-drop-${i}', ${i})" onkeydown="suggestKeydown(event, 'dest-drop-${i}')" onblur="applyTerminalDest(this); hideSuggestLater('dest-drop-${i}'); autoMatchRowPrice(${i})">
               <div id="dest-drop-${i}"></div>
             </td>
             <td class="p-2.5"><input type="text" id="f-${i}" autocomplete="off" placeholder="Số tiền..." oninput="onRowFareInput(${i})" onblur="formatCurrSmartInput(this); updateRowPriceHint(${i})" class="w-full p-2 bg-emerald-50 border border-emerald-300 rounded-xl font-extrabold text-emerald-800 text-right text-xs"><div id="fh-${i}" class="text-[10px] leading-tight mt-0.5 text-right"></div></td>
@@ -2674,7 +2700,7 @@
               <div>
                 <label class="font-bold text-slate-600">Điểm Đến:</label>
                 <div class="relative">
-                  <input type="text" id="edit-modal-dest" autocomplete="off" value="${escHtml(trip.destination || '')}" data-price-id="${escHtml(trip.priceId || '')}" data-price-label="${escHtml(trip.priceId && priceById[trip.priceId] ? priceById[trip.priceId].label : '')}" class="w-full mt-1 p-2.5 bg-slate-50 border rounded-xl font-bold" oninput="showDestSuggestions(this, 'edit-dest-drop', null); applyEditModalPrice()" onkeydown="suggestKeydown(event, 'edit-dest-drop')" onblur="hideSuggestLater('edit-dest-drop')">
+                  <input type="text" id="edit-modal-dest" autocomplete="off" value="${escHtml(trip.destination || '')}" data-price-id="${escHtml(trip.priceId || '')}" data-price-label="${escHtml(trip.priceId && priceById[trip.priceId] ? priceById[trip.priceId].label : '')}" class="w-full mt-1 p-2.5 bg-slate-50 border rounded-xl font-bold" oninput="showDestSuggestions(this, 'edit-dest-drop', null); applyEditModalPrice()" onkeydown="suggestKeydown(event, 'edit-dest-drop')" onblur="applyTerminalDest(this); hideSuggestLater('edit-dest-drop')">
                   <div id="edit-dest-drop"></div>
                 </div>
               </div>
@@ -2715,6 +2741,7 @@
       const trip = personalTrips.find(x => x.id === id);
       if (!trip) return;
       const before = Object.assign({}, trip);   // để ghi nhật ký sửa
+      applyTerminalDest(document.getElementById('edit-modal-dest'));
 
       const rawDate = document.getElementById('edit-modal-date').value;
       const formattedDate = normalizeDateInput(rawDate);
@@ -3742,6 +3769,7 @@
     function plateOptional(role) { return isPlanRole(role); }
     async function submitBatch(role) {
       if (!loggedInUser) return;
+      for (let i = 0; i < BATCH_ROWS; i++) applyTerminalDest(document.getElementById(`d-${i}`));
       const plateOpt = plateOptional(loggedInUser.role);
       // Quy ước: địa chỉ nội thành bắt buộc ghi Quận (Bán vé + Kế hoạch). Có dòng thiếu -> chưa lưu dòng nào, để sửa lại.
       if (usesPriceList()) {

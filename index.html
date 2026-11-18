@@ -4527,6 +4527,27 @@
           return;
         }
       }
+      else if (field === 'staff') {
+        // (18/11, người dùng) Quản lý sửa TÊN tại Bảng Đối Soát: chuẩn hóa như lúc nhập; ghi "A + B" -> tách đơn chia tiền
+        const raw = String(value).trim();
+        if (!raw) { alert('Tên nhân sự không được để trống!'); updateManagerAuditTable(); return; }
+        value = normalizeStaffText(raw, trip.role).text || raw;
+        if (value === String(trip.staff || '')) { updateManagerAuditTable(); return; }
+        if (staffNamesOf(value).length > 1) {
+          if (splitCountOf(trip.ticketNumber) > 1) { alert('Đơn này đã được chia tiền (' + trip.ticketNumber + '), mỗi dòng chỉ ghi 1 tên.'); updateManagerAuditTable(); return; }
+          const before = Object.assign({}, trip);
+          const parts = splitTripByStaff(Object.assign({}, trip, { staff: value }));
+          (async () => {
+            let inUt = false;
+            try { inUt = !!trip.createdBy && (await dbRef(`users_trips/${trip.createdBy}/${trip.id}`).once('value')).exists(); } catch (e) {}
+            const upd = {};
+            parts.forEach(p => { upd[`trips/${p.id}`] = p; if (inUt) upd[`users_trips/${trip.createdBy}/${p.id}`] = p; });
+            await dbRoot().update(upd);
+            logTrips('edit', [parts[0]], () => `Quản lý sửa tên "${before.staff}" → "${value}", tách ${parts.length} đơn chia tiền: ${parts.map(p => p.ticketNumber + ' ' + p.staff).join('; ')}`);
+          })().catch(err => { alert('Lỗi cập nhật: ' + err.message); updateManagerAuditTable(); });
+          return;
+        }
+      }
       else value = String(value).trim();
       const oldVal = (field === 'totalFare' || field === 'signFee') ? Number(trip[field] || 0) : String(trip[field] == null ? '' : trip[field]);
       if (value === oldVal) return;
@@ -4548,7 +4569,7 @@
       dbRoot().update(updates).then(() => {
         logTrips('edit', [trip], () => changeText(before, changes) || `${field}: ${oldVal} → ${value}`);
         updateManagerRevenueSummary();
-        if (field === 'dateStr') updateManagerAuditTable();   // đổi ngày -> nhóm đối soát thay đổi
+        if (field === 'dateStr' || field === 'staff') updateManagerAuditTable();   // đổi ngày -> nhóm đối soát thay đổi; tên -> vẽ lại đúng kiểu
       }).catch(err => {
         alert("Lỗi cập nhật: " + err.message);
       });
@@ -5142,7 +5163,7 @@
               <td class="p-2.5"><input type="text" value="${escHtml(t.dateStr || '')}" placeholder="dd/mm/yyyy" class="inline-edit-input w-24" onblur="updateInlineTripField('${t.id}', 'dateStr', this.value)"></td>
               <td class="p-2.5 font-mono font-bold text-slate-600">${escHtml(t.timeStr || '--')}</td>
               <td class="p-2.5">${roleBadge}</td>
-              <td class="p-2.5 font-extrabold text-slate-800">${escHtml(nameCase(t.staff) || 'N/A')}${t.role === 'driver' && (looksLikePlate(String(t.staff || '')) || nameWithPlate(t.staff)) ? `<button type="button" onclick="setDriverNameForPlate('${escHtml(plateKey(t.plateNumber) || plateKey(t.staff))}')" class="block mt-1 px-2 py-1 bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 rounded-lg text-[11px] font-extrabold whitespace-nowrap">✏️ Đặt tên tài xế xe ${escHtml(plateKey(t.plateNumber) || plateKey(t.staff))}</button>` : ''}</td>
+              <td class="p-2.5 font-extrabold text-slate-800"><input type="text" value="${escHtml(nameCase(t.staff) || '')}" placeholder="Tên nhân sự" title="Sửa tên rồi bấm ra ngoài để lưu" class="inline-edit-input w-36 font-bold" onkeydown="if(event.key==='Enter')this.blur()" onblur="updateInlineTripField('${t.id}', 'staff', this.value)">${t.role === 'driver' && (looksLikePlate(String(t.staff || '')) || nameWithPlate(t.staff)) ? `<button type="button" onclick="setDriverNameForPlate('${escHtml(plateKey(t.plateNumber) || plateKey(t.staff))}')" class="block mt-1 px-2 py-1 bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 rounded-lg text-[11px] font-extrabold whitespace-nowrap">✏️ Đặt tên tài xế xe ${escHtml(plateKey(t.plateNumber) || plateKey(t.staff))}</button>` : ''}</td>
               <td class="p-2.5"><input type="text" value="${escHtml(t.ticketNumber || '')}" class="inline-edit-input w-24 text-blue-600" onblur="updateInlineTripField('${t.id}', 'ticketNumber', this.value)"></td>
               <td class="p-2.5"><input type="text" value="${escHtml(t.plateNumber || '')}" class="inline-edit-input w-28 uppercase" onblur="updateInlineTripField('${t.id}', 'plateNumber', this.value)"></td>
               ${auditCell}

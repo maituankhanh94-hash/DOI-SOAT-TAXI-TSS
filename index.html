@@ -2076,9 +2076,11 @@
         mainScrollTo(sectionTop(el)); last = m.scrollTop;
       }, ms));
     }
-    const GUIDE_VIDEO_SRC = 'huong-dan/kiem-tra-don.mp4?v=3';
+    const GUIDE_VIDEO_SRC = 'huong-dan/kiem-tra-don.mp4?v=4';
     // (18/11, người dùng: "video có giọng nói miêu tả kèm nhạc") Nhạc nền nằm sẵn trong video; GIỌNG ĐỌC = giọng tiếng Việt có sẵn trong điện thoại
     // (speechSynthesis), đọc theo mốc giây của video; đọc chưa xong mà tới mốc kế -> tạm dừng video chờ đọc xong.
+    // (18/11, người dùng gửi file giọng đọc "Duyên Hà My") GIỌNG ĐỌC + NHẠC đã ghép SẴN trong video -> không dùng giọng của điện thoại nữa.
+    const USE_DEVICE_VOICE = false;
     const GUIDE_VOICE = [   // mốc giây trong video -> câu đọc (phần màn hình TỰ CHẠY không đọc, chỉ hiện chữ)
       [4.1, 'Bước một. Nhập các đơn vào bảng.'],
       [8.0, 'Bước hai. Nhập xong, bấm nút Lưu đơn lên Cloud.'],
@@ -2124,12 +2126,13 @@
       if (!v) return;
       const btn = document.getElementById('guide-sound-btn'); if (btn) btn.remove();
       try { speechSynthesis.cancel(); } catch (e) {}
-      Object.assign(guideNarr, { on: true, idx: 0, speaking: false, heldByVoice: false });
+      Object.assign(guideNarr, { on: USE_DEVICE_VOICE, idx: 0, speaking: false, heldByVoice: false });
       v.loop = false; v.muted = false; v.controls = true;
       guideNarr.skipSeek = v.currentTime > 0.05;
       try { v.currentTime = 0; } catch (e) {}
       const hasTTS = typeof speechSynthesis !== 'undefined';
-      if (hasTTS) {
+      if (!USE_DEVICE_VOICE) { /* giọng có sẵn trong video */ }
+      else if (hasTTS) {
         // iPhone: lần đọc đầu phải nằm trong lúc bấm -> đọc ngay câu đầu
         try { const u0 = new SpeechSynthesisUtterance(' '); u0.volume = 0; u0.lang = 'vi-VN'; speechSynthesis.speak(u0); } catch (e) {}   // mở khóa giọng đọc trên iPhone (phải nằm trong lúc bấm); câu đầu đọc theo mốc giây
         setTimeout(() => { if (!viVoice()) { const n = document.getElementById('guide-voice-note'); if (n) n.classList.remove('hidden'); } }, 1500);

@@ -82,6 +82,13 @@
 - (17/11, người dùng) Tiêu đề bảng nhập đổi thành "📝 BẢNG NHẬP ĐƠN" (khung màu theo phân vùng, chữ to đậm trắng); ô Ngày bỏ font-mono, chữ 16px cho khỏi tràn trên iPhone.
 - (14/11, LÊN MAIN) Ô Số phiếu tự nhảy số kế tiếp khi bấm vào (`handleSmartTicketFocus`) — TẮT cho TÀI XẾ (`staffRole === 'driver'`), vì tài xế mỗi cuốc 1 phiếu không theo thứ tự. Bán vé / KH / KH2 vẫn giữ.
 
+## Hướng dẫn nhập & kiểm tra đơn (18/11, NHÁNH THỬ `huong-dan-nhap` – CHỜ người dùng duyệt mới lên main)
+- (T1) Bảng "Lịch Sử Đơn Hàng Theo Ngày" (nhân viên): cột Thao Tác (✏️ Sửa xanh đậm to hơn + 🗑️ Xóa) dời lên ĐẦU hàng (sau ô chọn).
+- (T2) Nhân viên đăng nhập → `scrollToBatchSectionOnLogin` cuộn #main-container tới `#batch-section` (BẢNG NHẬP ĐƠN), chạy lại 1,2s/2,5s nếu người dùng chưa tự kéo.
+- Lưu đơn thành công → `afterSaveGuide`: lên đầu trang + mũi tên 👆 vàng nhún dưới nút `#btn-snapshot` "Xem Lịch Sử…" (nút viền vàng nhấp nháy; mất khi bấm / 60 giây) + modal video `openSaveGuideVideo` (`huong-dan/kiem-tra-don.mp4`, 45 giây, muted autoplay loop playsinline; nút ✖ Tắt video; ô "Tôi đã biết cách làm – không tự hiện video nữa" lưu localStorage `tss_hide_save_guide_<TK>`; link "🎬 Xem video hướng dẫn kiểm tra đơn" dưới nút để xem lại).
+- Bảng xem lịch sử (snapshot để chụp) có nút vàng "✏️ Thấy sai… tới bảng SỬA ĐƠN" → `goFixFromSnapshot`: đóng, đặt ngày bảng Lịch Sử = ngày đang xem, cuộn tới `#history-section` (nháy viền).
+- Video quay bằng Playwright trên emulator (tài khoản giả NVA, script scratchpad emu/rec.cjs: chú thích vàng trên cùng, ngón tay 👆), crop 390x760 → mp4 H.264 586x1142 ~1,2MB.
+
 ## Tự cập nhật bản mới (15/11, LÊN MAIN)
 - Video người dùng (iPhone đời cũ, bảng nhập giật/nhảy ô): người dùng ĐÍNH CHÍNH video QUAY NGÀY 12/11 (gửi 15/11) → là lỗi khung cuộn lồng đã sửa 13/11 "nhập mượt", KHÔNG phải trang bị kẹt bản cũ. Đã nhờ người dùng thử lại máy đó với bản hiện tại; nếu còn lỗi cần video mới + phiên bản iOS. Tự cập nhật vẫn giữ (có ích để máy luôn chạy bản mới).
 - `api/version.js` trả `VERCEL_GIT_COMMIT_SHA` (no-store). Client `checkAppUpdate()`: lúc mở + mỗi 5 phút + visibilitychange/pageshow; mã khác lúc mở HOẶC đã sang ngày mới (`appLoadDay`) → `location.reload()` nếu `hasUnsavedWork()` = false (ô nhập hàng loạt có `dataset.touched` + giá trị, hoặc đang mở modal sửa/quét/đăng nhập/ảnh báo cáo/Baby Car đang chạy); nếu đang nhập dở → thanh xanh dưới đáy "🔄 … bấm để tải lại". Phiên đăng nhập giữ khi tải lại (Persistence.SESSION).

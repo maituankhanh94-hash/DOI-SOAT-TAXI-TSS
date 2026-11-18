@@ -22,6 +22,15 @@
     #batch-table input, #batch-table select { font-size: 17px !important; padding: 10px 12px !important; min-height: 48px; border-width: 2px; }
     #batch-table input::placeholder { font-size: 15px; }
     #batch-table thead th { font-size: 14px !important; }
+    /* (18/11) hướng dẫn sau khi lưu */
+    #guide-arrow { position: absolute; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; z-index: 30; cursor: pointer; }
+    #guide-arrow .guide-arrow-text { background: #facc15; color: #111827; font-weight: 900; font-size: 14px; padding: 6px 12px; border-radius: 12px; white-space: nowrap; box-shadow: 0 4px 12px rgba(0,0,0,.3); }
+    #guide-arrow .guide-arrow-icon { font-size: 40px; line-height: 1; animation: guideBounce .8s infinite; filter: drop-shadow(0 3px 4px rgba(0,0,0,.4)); }
+    @keyframes guideBounce { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-10px); } }
+    .guide-pulse { animation: guidePulse 1.2s infinite; outline: 4px solid #facc15; outline-offset: 2px; }
+    @keyframes guidePulse { 0%,100% { box-shadow: 0 0 0 0 rgba(250,204,21,.9); } 50% { box-shadow: 0 0 0 12px rgba(250,204,21,0); } }
+    .guide-flash { animation: guideFlash 0.8s 3; }
+    @keyframes guideFlash { 0%,100% { box-shadow: 0 0 0 0 rgba(245,158,11,0); } 50% { box-shadow: 0 0 0 6px rgba(245,158,11,.8); } }
     #batch-table td.bstt { font-size: 15px !important; padding-left: 4px !important; padding-right: 4px !important; }
     #tbody-batch td:not(.bstt) { padding-left: 6px !important; padding-right: 6px !important; }
     #batch-table thead th { padding: 10px 8px !important; line-height: 1.25; }
@@ -621,6 +630,7 @@
       document.getElementById('header-status').innerText = `${roleLabels[role] || role}: ${loggedInUser.user}`;
       staffRole = role;
       renderWorksheetView(role);
+      scrollToBatchSectionOnLogin();
       (async () => {
         const ok = await checkDataMeta();
         staffMode = ok === true ? 'window' : 'full';
@@ -1507,9 +1517,12 @@
               <h2 class="text-sm font-extrabold uppercase">📸 Báo Cáo Nhanh & Lịch Sử Hàng Ngày</h2>
               <p class="text-[11px] opacity-90">Bấm nút bên cạnh để mở bảng chụp hình báo cáo theo ngày tùy chọn.</p>
             </div>
-            <button onclick="openSnapshotReportModal('${role}')" class="px-5 py-2.5 bg-white text-blue-700 hover:bg-slate-100 font-extrabold text-xs rounded-xl shadow transition-all flex items-center space-x-2">
-              <span>📸 Xem Lịch Sử Đơn Hàng & Doanh Thu Theo Ngày</span>
-            </button>
+            <div class="flex flex-col items-center gap-1.5">
+              <button id="btn-snapshot" onclick="hideGuideArrow(); openSnapshotReportModal('${role}')" class="px-5 py-2.5 bg-white text-blue-700 hover:bg-slate-100 font-extrabold text-xs rounded-xl shadow transition-all flex items-center space-x-2">
+                <span>📸 Xem Lịch Sử Đơn Hàng & Doanh Thu Theo Ngày</span>
+              </button>
+              <button onclick="openSaveGuideVideo(true)" class="text-[11px] font-bold underline opacity-90 hover:opacity-100">🎬 Xem video hướng dẫn kiểm tra đơn</button>
+            </div>
           </div>
 
           <!-- BẢNG 1: TỔNG KẾT DOANH THU CÓ CHỌN NGÀY -->
@@ -1527,7 +1540,7 @@
           </div>
 
           <!-- BẢNG 2: LỊCH SỬ ĐƠN HÀNG (ĐÃ DỜI LÊN ĐÂY) -->
-          <div class="bg-white p-4 sm:p-6 rounded-3xl shadow-xl border border-slate-200 space-y-3">
+          <div id="history-section" class="bg-white p-4 sm:p-6 rounded-3xl shadow-xl border border-slate-200 space-y-3">
             <div class="flex flex-col sm:flex-row items-center justify-between border-b pb-3 gap-2">
               <div class="flex items-center space-x-3">
                 <h3 class="text-xs sm:text-sm font-extrabold text-slate-800 uppercase">📋 Lịch Sử Đơn Hàng Theo Ngày (${loggedInUser.user})</h3>
@@ -1544,6 +1557,7 @@
                 <thead class="sticky top-0 bg-slate-800 text-white z-10">
                   <tr>
                     <th class="p-2.5 text-center w-10"><input type="checkbox" id="select-all-personal" onclick="toggleSelectAllPersonal(this)"></th>
+                    <th class="p-2.5 text-center">Thao Tác</th>
                     <th class="p-2.5">Ngày</th>
                     <th class="p-2.5">Thời Gian</th>
                     <th class="p-2.5">Nhân Sự</th>
@@ -1556,7 +1570,6 @@
                     <th class="p-2.5">Thanh Toán</th>
                     <th class="p-2.5">Ghi Chú</th>
                     <th class="p-2.5 text-right">Tổng Tiền</th>
-                    <th class="p-2.5 text-center">Thao Tác</th>
                   </tr>
                 </thead>
                 <tbody id="tbody-personal-trips" class="divide-y divide-slate-200"></tbody>
@@ -1565,7 +1578,7 @@
           </div>
 
           <!-- BẢNG 3: BẢNG NHẬP ĐƠN (15 dòng) -->
-          <div class="bg-white p-4 sm:p-6 rounded-3xl shadow-xl border border-slate-200 space-y-4">
+          <div id="batch-section" class="bg-white p-4 sm:p-6 rounded-3xl shadow-xl border border-slate-200 space-y-4">
             <div class="flex flex-col sm:flex-row items-center justify-between gap-3 border-b pb-4">
               <h3 class="w-full sm:w-auto flex items-center justify-center sm:justify-start gap-3 px-5 py-3 rounded-2xl text-white shadow-lg ${role === 'plan2' ? 'bg-gradient-to-r from-pink-600 to-rose-500' : (isPlan ? 'bg-gradient-to-r from-purple-700 to-fuchsia-600' : (isPos ? 'bg-gradient-to-r from-blue-700 to-sky-500' : 'bg-gradient-to-r from-amber-600 to-orange-500'))}"><span class="text-2xl sm:text-3xl leading-none">📝</span><span class="text-xl sm:text-2xl font-black uppercase tracking-wide leading-none">Bảng Nhập Đơn</span></h3>
               <div class="flex flex-wrap items-center gap-2">
@@ -1981,6 +1994,91 @@
       }
     }
 
+    // ===== (18/11, người dùng) Hướng dẫn nhập & kiểm tra đơn =====
+    function mainScrollTo(top) { const m = document.getElementById('main-container'); if (m) m.scrollTop = Math.max(0, top); }
+    function sectionTop(el) { const m = document.getElementById('main-container'); return el && m ? el.getBoundingClientRect().top - m.getBoundingClientRect().top + m.scrollTop - 8 : 0; }
+    // Nhân viên vừa đăng nhập -> màn hình chạy ngay tới BẢNG NHẬP ĐƠN (chạy lại khi phần trên dài ra vì dữ liệu tải xong, nếu người dùng chưa tự kéo)
+    function scrollToBatchSectionOnLogin() {
+      let last = -1;
+      [300, 1200, 2500].forEach(ms => setTimeout(() => {
+        const m = document.getElementById('main-container'), el = document.getElementById('batch-section');
+        if (!m || !el) return;
+        if (last >= 0 && Math.abs(m.scrollTop - last) > 30) return;   // người dùng đã tự kéo -> thôi
+        mainScrollTo(sectionTop(el)); last = m.scrollTop;
+      }, ms));
+    }
+    const GUIDE_VIDEO_SRC = 'huong-dan/kiem-tra-don.mp4';
+    function guideHideKey() { return 'tss_hide_save_guide_' + (loggedInUser ? loggedInUser.user : ''); }
+    function guideHidden() { try { return localStorage.getItem(guideHideKey()) === '1'; } catch (e) { return false; } }
+    // Lưu đơn xong -> lên đầu trang + mũi tên chỉ nút "Xem Lịch Sử…" + video hướng dẫn (có nút tắt)
+    function afterSaveGuide(role, dateStr) {
+      lastSavedDateStr = dateStr || '';
+      mainScrollTo(0);
+      setTimeout(() => mainScrollTo(0), 300);
+      showGuideArrow();
+      if (!guideHidden()) openSaveGuideVideo(false);
+    }
+    let lastSavedDateStr = '';
+    function showGuideArrow() {
+      hideGuideArrow();
+      const btn = document.getElementById('btn-snapshot');
+      if (!btn) return;
+      btn.classList.add('guide-pulse');
+      const a = document.createElement('div');
+      a.id = 'guide-arrow';
+      a.innerHTML = `<div class="guide-arrow-icon">👆</div><div class="guide-arrow-text">Bấm vào đây để KIỂM TRA LẠI đơn vừa lưu</div>`;
+      a.onclick = () => { hideGuideArrow(); btn.click(); };
+      btn.parentElement.style.position = 'relative';
+      btn.insertAdjacentElement('afterend', a);
+      a.style.top = (btn.offsetTop + btn.offsetHeight + 2) + 'px';
+      clearTimeout(showGuideArrow.t);
+      showGuideArrow.t = setTimeout(hideGuideArrow, 60000);
+    }
+    function hideGuideArrow() {
+      const a = document.getElementById('guide-arrow'); if (a) a.remove();
+      const b = document.getElementById('btn-snapshot'); if (b) b.classList.remove('guide-pulse');
+    }
+    function openSaveGuideVideo(manual) {
+      const old = document.getElementById('save-guide-modal'); if (old) old.remove();
+      const hidden = guideHidden();
+      document.body.insertAdjacentHTML('beforeend', `
+        <div id="save-guide-modal" class="fixed inset-0 bg-slate-900/85 z-[60] flex items-center justify-center p-3 backdrop-blur-sm">
+          <div class="bg-white rounded-3xl shadow-2xl max-w-md w-full p-4 space-y-3 max-h-[94vh] overflow-y-auto">
+            <div class="flex items-center justify-between gap-2">
+              <h3 class="text-base font-black text-blue-800">🎬 ${manual ? 'Hướng dẫn kiểm tra đơn' : 'ĐÃ LƯU! Kiểm tra lại 1 lần nữa nhé'}</h3>
+              <button onclick="closeSaveGuideVideo()" class="shrink-0 px-3 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-sm font-extrabold">✖ Tắt video</button>
+            </div>
+            <video id="save-guide-video" src="${GUIDE_VIDEO_SRC}" class="w-full rounded-2xl border bg-slate-100" style="max-height:52vh" playsinline muted autoplay loop controls preload="auto"></video>
+            <ol class="text-sm text-slate-800 space-y-1.5 list-decimal pl-5 font-semibold">
+              <li>Bấm nút <b class="text-blue-700">📸 Xem Lịch Sử Đơn Hàng & Doanh Thu Theo Ngày</b> (có mũi tên 👆 chỉ).</li>
+              <li>Xem kỹ lại <b class="text-rose-700">SỐ PHIẾU</b> và <b class="text-rose-700">SỐ XE</b> từng đơn.</li>
+              <li>Nếu SAI: bấm <b>✏️ Thấy sai…</b> → tới bảng <b>Lịch Sử Đơn Hàng Theo Ngày</b> → bấm nút <b class="text-blue-700">✏️ Sửa</b> ở ĐẦU hàng → sửa → Lưu.</li>
+              <li>Đúng hết: mở lại bảng Lịch Sử và <b class="text-emerald-700">CHỤP MÀN HÌNH</b> gửi báo cáo.</li>
+            </ol>
+            <div class="flex flex-col gap-2">
+              <button onclick="closeSaveGuideVideo()" class="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl text-base font-black">👍 ĐÃ HIỂU, ĐI KIỂM TRA</button>
+              <label class="flex items-center gap-2 text-sm font-bold text-slate-600 justify-center py-1"><input type="checkbox" id="guide-hide-cb" class="w-5 h-5" ${hidden ? 'checked' : ''} onchange="setGuideHidden(this.checked)"> Tôi đã biết cách làm – không tự hiện video nữa</label>
+            </div>
+          </div>
+        </div>`);
+      const v = document.getElementById('save-guide-video');
+      if (v) { v.onerror = () => { v.replaceWith(Object.assign(document.createElement('div'), { className: 'p-3 text-center text-sm text-slate-500 border rounded-2xl', textContent: 'Chưa tải được video – xem các bước bên dưới.' })); }; try { v.play().catch(() => {}); } catch (e) {} }
+    }
+    function setGuideHidden(on) { try { on ? localStorage.setItem(guideHideKey(), '1') : localStorage.removeItem(guideHideKey()); } catch (e) {} }
+    function closeSaveGuideVideo() {
+      const m = document.getElementById('save-guide-modal');
+      if (m) { const v = m.querySelector('video'); if (v) try { v.pause(); } catch (e) {} m.remove(); }
+      mainScrollTo(0);
+    }
+    // Từ bảng xem lịch sử (để chụp) -> tới bảng Lịch Sử có nút Sửa, đúng ngày đang xem
+    function goFixFromSnapshot(role) {
+      const dp = document.getElementById('snapshot-date-picker'), hi = document.getElementById('filter-history-date');
+      if (dp && hi && dp.value) { hi.value = dp.value; renderActiveWorksheetTrips(role); }
+      const m = document.getElementById('snapshot-report-modal'); if (m) m.remove();
+      const sec = document.getElementById('history-section');
+      if (sec) { mainScrollTo(sectionTop(sec)); sec.classList.add('guide-flash'); setTimeout(() => sec.classList.remove('guide-flash'), 2500); }
+    }
+
     function openSnapshotReportModal(role) {
       const now = new Date();
       const yyyy = now.getFullYear();
@@ -2001,7 +2099,7 @@
                 </div>
               </div>
               <div class="flex items-center space-x-2">
-                <input type="date" id="snapshot-date-picker" value="${todayInputVal}" class="px-3 py-1.5 bg-slate-50 border rounded-xl font-mono text-xs font-bold" onchange="updateSnapshotModalData('${role}')">
+                <input type="date" id="snapshot-date-picker" value="${todayInputVal}" class="px-3 py-1.5 bg-slate-50 border rounded-xl text-sm font-bold" onchange="updateSnapshotModalData('${role}')">
                 <button onclick="document.getElementById('snapshot-report-modal').remove()" class="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold">Đóng</button>
               </div>
             </div>
@@ -2033,6 +2131,7 @@
                 <tbody id="snapshot-tbody" class="divide-y divide-slate-200"></tbody>
               </table>
             </div>
+            <button onclick="goFixFromSnapshot('${role}')" class="w-full py-2.5 bg-amber-100 hover:bg-amber-200 text-amber-900 border-2 border-amber-300 rounded-2xl text-sm font-extrabold">✏️ Thấy sai số phiếu / số xe? Bấm vào đây để tới bảng SỬA ĐƠN</button>
           </div>
         </div>
       `;
@@ -2403,12 +2502,13 @@
           : `<span class="text-slate-400 font-semibold italic text-[11px]">Đã Khóa</span>`;
         
         const editBtn = isDeletable
-          ? `<button type="button" onclick="openEditTripModal('${t.id}', '${role}')" class="px-2 py-1 bg-blue-50 hover:bg-blue-100 text-blue-600 font-bold rounded-lg text-[11px] cursor-pointer ml-1">✏️ Sửa</button>`
+          ? `<button type="button" onclick="openEditTripModal('${t.id}', '${role}')" class="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-extrabold rounded-lg text-xs cursor-pointer">✏️ Sửa</button>`
           : '';
 
         return `
           <tr class="hover:bg-slate-50">
             <td class="p-2.5 text-center">${checkboxHtml}</td>
+            <td class="p-2.5 text-center whitespace-nowrap">${editBtn} ${deleteBtn}</td>
             <td class="p-2.5">${escHtml(t.dateStr || '--')}</td>
             <td class="p-2.5 font-mono font-bold text-slate-600">${escHtml(t.timeStr || '--')}</td>
             <td class="p-2.5 font-extrabold text-slate-800">${escHtml(t.staff || '--')}</td>
@@ -2421,7 +2521,6 @@
             <td class="p-2.5 font-bold text-slate-700">${escHtml(t.paymentMethod || activePayments[0])}</td>
             <td class="p-2.5 text-slate-600">${escHtml(t.note || '--')}</td>
             <td class="p-2.5 text-right font-bold text-emerald-600">${Number(t.totalFare || 0).toLocaleString('vi-VN')} ₫${signFeeOf(t) ? `<div class="text-[10px] font-extrabold text-pink-700 whitespace-nowrap">🪧 Bảng đón ${signFeeOf(t).toLocaleString('vi-VN')} ₫</div>` : ''}</td>
-            <td class="p-2.5 text-center whitespace-nowrap">${editBtn} ${deleteBtn}</td>
           </tr>
         `;
       }).join('');
@@ -3728,6 +3827,7 @@
             if (parts) histInput.value = parts;
             renderActiveWorksheetTrips(role);
           }
+          afterSaveGuide(role, lastFormattedDate);
         }).catch(err => {
           alert("Lỗi lưu dữ liệu: " + err.message);
         });

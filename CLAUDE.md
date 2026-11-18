@@ -82,7 +82,7 @@
 - (17/11, người dùng) Tiêu đề bảng nhập đổi thành "📝 BẢNG NHẬP ĐƠN" (khung màu theo phân vùng, chữ to đậm trắng); ô Ngày bỏ font-mono, chữ 16px cho khỏi tràn trên iPhone.
 - (14/11, LÊN MAIN) Ô Số phiếu tự nhảy số kế tiếp khi bấm vào (`handleSmartTicketFocus`) — TẮT cho TÀI XẾ (`staffRole === 'driver'`), vì tài xế mỗi cuốc 1 phiếu không theo thứ tự. Bán vé / KH / KH2 vẫn giữ.
 
-## Hướng dẫn nhập & kiểm tra đơn (18/11, NHÁNH THỬ `huong-dan-nhap` – CHỜ người dùng duyệt mới lên main)
+## Hướng dẫn nhập & kiểm tra đơn (18/11, ĐÃ LÊN MAIN 18/11; nhánh `huong-dan-nhap`)
 - (T1) Bảng "Lịch Sử Đơn Hàng Theo Ngày" (nhân viên): cột Thao Tác (✏️ Sửa xanh đậm to hơn + 🗑️ Xóa) dời lên ĐẦU hàng (sau ô chọn).
 - (T2) Nhân viên đăng nhập → `scrollToBatchSectionOnLogin` cuộn #main-container tới `#batch-section` (BẢNG NHẬP ĐƠN), chạy lại 1,2s/2,5s nếu người dùng chưa tự kéo.
 - Lưu đơn thành công → `afterSaveGuide`: lên đầu trang + mũi tên 👆 vàng nhún dưới nút `#btn-snapshot` "Xem Lịch Sử…" (nút viền vàng nhấp nháy; mất khi bấm / 60 giây) + modal video `openSaveGuideVideo` (`huong-dan/kiem-tra-don.mp4`, 45 giây, muted autoplay loop playsinline; nút ✖ Tắt video; ô "Tôi đã biết cách làm – không tự hiện video nữa" lưu localStorage `tss_hide_save_guide_<TK>`; link "🎬 Xem video hướng dẫn kiểm tra đơn" dưới nút để xem lại).

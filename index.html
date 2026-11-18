@@ -2007,7 +2007,79 @@
         mainScrollTo(sectionTop(el)); last = m.scrollTop;
       }, ms));
     }
-    const GUIDE_VIDEO_SRC = 'huong-dan/kiem-tra-don.mp4';
+    const GUIDE_VIDEO_SRC = 'huong-dan/kiem-tra-don.mp4?v=2';
+    // (18/11, người dùng: "video có giọng nói miêu tả kèm nhạc") Nhạc nền nằm sẵn trong video; GIỌNG ĐỌC = giọng tiếng Việt có sẵn trong điện thoại
+    // (speechSynthesis), đọc theo mốc giây của video; đọc chưa xong mà tới mốc kế -> tạm dừng video chờ đọc xong.
+    const GUIDE_VOICE = [
+      [1.6, 'Đăng nhập xong, màn hình sẽ tự chạy tới Bảng nhập đơn.'],
+      [4.2, 'Bước một. Nhập các đơn vào bảng.'],
+      [9.0, 'Bước hai. Nhập xong, bấm nút Lưu đơn lên Cloud.'],
+      [12.6, 'Bước ba. Màn hình tự lên đầu trang. Bấm nút Xem lịch sử đơn hàng.'],
+      [17.1, 'Bước bốn. Kiểm tra lại thật kỹ số phiếu và số xe của từng đơn.'],
+      [20.6, 'Ví dụ, đơn này ghi sai số xe. Đúng phải là xe năm hai mốt.'],
+      [23.6, 'Bước năm. Thấy sai thì bấm nút màu vàng, để tới bảng sửa đơn.'],
+      [26.9, 'Bước sáu. Bấm nút Sửa ở đầu hàng của đơn bị sai.'],
+      [30.2, 'Bước bảy. Sửa lại số xe cho đúng, rồi bấm Lưu thay đổi.'],
+      [36.2, 'Bước tám. Mở lại bảng Xem lịch sử đơn hàng.'],
+      [39.8, 'Đúng hết rồi.'],
+      [41.8, 'Bước chín. Chụp màn hình bảng này, để gửi báo cáo.'],
+      [45.8, 'Xong rồi. Chúc anh chị làm việc vui vẻ!'],
+    ];
+    function viVoice() {
+      try { const vs = speechSynthesis.getVoices() || []; return vs.find(v => /^vi/i.test(v.lang) && /linh/i.test(v.name)) || vs.find(v => /^vi/i.test(v.lang)) || null; } catch (e) { return null; }
+    }
+    const guideNarr = { on: false, idx: 0, speaking: false, heldByVoice: false };
+    function guideSpeak(text, v) {
+      const u = new SpeechSynthesisUtterance(text);
+      const voice = viVoice(); if (voice) u.voice = voice;
+      u.lang = 'vi-VN'; u.rate = 1; u.pitch = 1; u.volume = 1;
+      guideNarr.speaking = true;
+      const done = () => { if (!guideNarr.speaking) return; guideNarr.speaking = false; if (guideNarr.heldByVoice && guideNarr.on && v.isConnected) { guideNarr.heldByVoice = false; v.play().catch(() => {}); } };
+      u.onend = done; u.onerror = done;
+      clearTimeout(guideNarr.safety); guideNarr.safety = setTimeout(done, 12000);   // phòng máy không báo đọc xong
+      try { speechSynthesis.speak(u); } catch (e) { done(); }
+    }
+    function guideNarrTick() {
+      const v = document.getElementById('save-guide-video');
+      if (!v || !guideNarr.on) return;
+      const next = GUIDE_VOICE[guideNarr.idx];
+      if (!next || v.currentTime < next[0]) return;
+      if (guideNarr.speaking) { if (!v.paused) { guideNarr.heldByVoice = true; v.pause(); } return; }
+      guideNarr.idx++;
+      guideSpeak(next[1], v);
+    }
+    function startGuideWithSound() {
+      const v = document.getElementById('save-guide-video');
+      if (!v) return;
+      const btn = document.getElementById('guide-sound-btn'); if (btn) btn.remove();
+      try { speechSynthesis.cancel(); } catch (e) {}
+      Object.assign(guideNarr, { on: true, idx: 0, speaking: false, heldByVoice: false });
+      v.loop = false; v.muted = false; v.controls = true;
+      guideNarr.skipSeek = v.currentTime > 0.05;
+      try { v.currentTime = 0; } catch (e) {}
+      const hasTTS = typeof speechSynthesis !== 'undefined';
+      if (hasTTS) {
+        // iPhone: lần đọc đầu phải nằm trong lúc bấm -> đọc ngay câu đầu
+        guideNarr.idx = 1; guideSpeak(GUIDE_VOICE[0][1], v);
+        setTimeout(() => { if (!viVoice()) { const n = document.getElementById('guide-voice-note'); if (n) n.classList.remove('hidden'); } }, 1500);
+      } else { const n = document.getElementById('guide-voice-note'); if (n) n.classList.remove('hidden'); }
+      v.play().catch(() => {});
+      v.ontimeupdate = guideNarrTick;
+      clearInterval(guideNarr.timer); guideNarr.timer = setInterval(guideNarrTick, 200);
+      v.onplay = () => { if (guideNarr.on && !guideNarr.heldByVoice) try { speechSynthesis.resume(); } catch (e) {} };
+      v.onpause = () => { if (guideNarr.on && !guideNarr.heldByVoice && !v.ended) try { speechSynthesis.pause(); } catch (e) {} };
+      v.onseeked = () => { if (!guideNarr.on) return; if (guideNarr.skipSeek) { guideNarr.skipSeek = false; return; } try { speechSynthesis.cancel(); } catch (e) {} guideNarr.speaking = false; guideNarr.idx = GUIDE_VOICE.findIndex(x => x[0] >= v.currentTime - 0.3); if (guideNarr.idx < 0) guideNarr.idx = GUIDE_VOICE.length; };
+      v.onended = () => { stopGuideNarration(false); showGuideSoundBtn('🔁 XEM LẠI CÓ TIẾNG'); };
+    }
+    function stopGuideNarration(silence) {
+      guideNarr.on = false; clearInterval(guideNarr.timer); clearTimeout(guideNarr.safety);
+      if (silence !== false) try { speechSynthesis.cancel(); } catch (e) {}
+    }
+    function showGuideSoundBtn(label) {
+      const box = document.getElementById('guide-video-box');
+      if (!box || document.getElementById('guide-sound-btn')) return;
+      box.insertAdjacentHTML('beforeend', `<button id="guide-sound-btn" onclick="startGuideWithSound()" class="absolute inset-0 m-auto w-[85%] h-fit py-4 px-3 bg-blue-600/95 hover:bg-blue-700 text-white rounded-2xl text-lg font-black shadow-2xl">${label}</button>`);
+    }
     function guideHideKey() { return 'tss_hide_save_guide_' + (loggedInUser ? loggedInUser.user : ''); }
     function guideHidden() { try { return localStorage.getItem(guideHideKey()) === '1'; } catch (e) { return false; } }
     // Lưu đơn xong -> lên đầu trang + mũi tên chỉ nút "Xem Lịch Sử…" + video hướng dẫn (có nút tắt)
@@ -2040,6 +2112,7 @@
     }
     function openSaveGuideVideo(manual) {
       const old = document.getElementById('save-guide-modal'); if (old) old.remove();
+      stopGuideNarration();
       const hidden = guideHidden();
       document.body.insertAdjacentHTML('beforeend', `
         <div id="save-guide-modal" class="fixed inset-0 bg-slate-900/85 z-[60] flex items-center justify-center p-3 backdrop-blur-sm">
@@ -2048,7 +2121,10 @@
               <h3 class="text-base font-black text-blue-800">🎬 ${manual ? 'Hướng dẫn kiểm tra đơn' : 'ĐÃ LƯU! Kiểm tra lại 1 lần nữa nhé'}</h3>
               <button onclick="closeSaveGuideVideo()" class="shrink-0 px-3 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-sm font-extrabold">✖ Tắt video</button>
             </div>
-            <video id="save-guide-video" src="${GUIDE_VIDEO_SRC}" class="w-full rounded-2xl border bg-slate-100" style="max-height:52vh" playsinline muted autoplay loop controls preload="auto"></video>
+            <div id="guide-video-box" class="relative">
+              <video id="save-guide-video" src="${GUIDE_VIDEO_SRC}" class="w-full rounded-2xl border bg-slate-100" style="max-height:52vh" playsinline muted autoplay loop preload="auto"></video>
+            </div>
+            <div id="guide-voice-note" class="hidden text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-xl p-2 font-semibold">Máy này chưa có giọng đọc tiếng Việt → chỉ nghe nhạc + đọc chữ trong video. (iPhone: Cài đặt → Trợ năng → Nội dung được đọc → Giọng nói → Tiếng Việt)</div>
             <ol class="text-sm text-slate-800 space-y-1.5 list-decimal pl-5 font-semibold">
               <li>Bấm nút <b class="text-blue-700">📸 Xem Lịch Sử Đơn Hàng & Doanh Thu Theo Ngày</b> (có mũi tên 👆 chỉ).</li>
               <li>Xem kỹ lại <b class="text-rose-700">SỐ PHIẾU</b> và <b class="text-rose-700">SỐ XE</b> từng đơn.</li>
@@ -2061,12 +2137,14 @@
             </div>
           </div>
         </div>`);
+      showGuideSoundBtn('🔊 BẤM ĐỂ XEM CÓ GIỌNG ĐỌC + NHẠC');
       const v = document.getElementById('save-guide-video');
       if (v) { v.onerror = () => { v.replaceWith(Object.assign(document.createElement('div'), { className: 'p-3 text-center text-sm text-slate-500 border rounded-2xl', textContent: 'Chưa tải được video – xem các bước bên dưới.' })); }; try { v.play().catch(() => {}); } catch (e) {} }
     }
     function setGuideHidden(on) { try { on ? localStorage.setItem(guideHideKey(), '1') : localStorage.removeItem(guideHideKey()); } catch (e) {} }
     function closeSaveGuideVideo() {
       const m = document.getElementById('save-guide-modal');
+      stopGuideNarration();
       if (m) { const v = m.querySelector('video'); if (v) try { v.pause(); } catch (e) {} m.remove(); }
       mainScrollTo(0);
     }

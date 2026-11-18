@@ -3149,14 +3149,24 @@
       dictTrips.forEach(t => { const k = placeSlug(t.staff); if (!k) return; const a = accUse[t.createdBy || ''] = accUse[t.createdBy || ''] || {}; a[k] = (a[k] || 0) + 1; });
       const plateName = {};   // 3 số cuối -> tên tài xế hay dùng
       dictTrips.forEach(t => { if (t.role !== 'driver') return; const n = String(t.staff || '').trim(); if (!n || /\d/.test(n)) return; const pk = plateKey(t.plateNumber); if (!pk) return; const c = plateName[pk] = plateName[pk] || {}; const v = nameCase(n); c[v] = (c[v] || 0) + 1; });
+      // (18/11) tên tài xế Quản lý đặt tay cho xe (fleet/<xe>/nm + nmm) – ưu tiên trước; tên theo tài khoản: TK tài xế chỉ dùng ĐÚNG 1 tên (≥2 đơn)
+      const manualName = {}, fleetName = {};
+      Object.entries(fleetMap || {}).forEach(([k, v]) => { if (!v || !v.nm) return; const pk = plateKey(k); if (v.nmm) manualName[pk] = nameCase(v.nm); else if (!fleetName[pk]) fleetName[pk] = nameCase(v.nm); });
+      const accName = {};
+      dictTrips.forEach(t => { if (t.role !== 'driver') return; const n = String(t.staff || '').trim(); if (!n || /\d/.test(n) || staffNamesOf(n).length > 1) return; const a = accName[t.createdBy || ''] = accName[t.createdBy || ''] || {}; const v = nameCase(n); a[v] = (a[v] || 0) + 1; });
+      const accOnly = acc => { const e = Object.entries(accName[acc || ''] || {}); return e.length === 1 && e[0][1] >= 2 ? e[0][0] : ''; };
       const groups = {};
       trips.forEach(t => {
         const cur = String(t.staff || '').trim();
         if (!cur) return;
         let nv = '', kind = '';
         if (t.role === 'driver' && looksLikePlate(cur)) {
+          const pk = plateKey(t.plateNumber) || plateKey(cur);
           const c = plateName[plateKey(cur)] || plateName[plateKey(t.plateNumber)];
-          if (c) { nv = Object.entries(c).sort((a, b) => b[1] - a[1])[0][0]; kind = 'Số xe → tên tài xế'; }
+          if (manualName[pk]) { nv = manualName[pk]; kind = 'Số xe → tên tài xế'; }
+          else if (c) { nv = Object.entries(c).sort((a, b) => b[1] - a[1])[0][0]; kind = 'Số xe → tên tài xế'; }
+          else if (fleetName[pk]) { nv = fleetName[pk]; kind = 'Số xe → tên tài xế'; }
+          else if (accOnly(t.createdBy)) { nv = accOnly(t.createdBy); kind = 'Số xe → tên tài xế'; }
         } else if (!/\d/.test(cur)) {
           nv = nameCase(cur); kind = 'Viết hoa đúng';
           const slug = placeSlug(nv), w = slug.split('_');
@@ -3274,6 +3284,31 @@
       } catch (e) {
         console.warn('autoFixNames', e && e.message);
       } finally { autoFixBusy = false; }
+    }
+    // (18/11, người dùng: xe 722 ghi số xe ở ô tên mà không tự sửa được – chưa đơn nào có tên tài xế) Quản lý đặt tên 1 lần cho xe
+    async function setDriverNameForPlate(pk) {
+      if (!isManager() || !pk) return;
+      const cur = ((fleetMap[pk] || {}).nm) || '';
+      let nm = prompt(`Tên tài xế của xe ${pk} là gì?\n(App sẽ sửa tất cả đơn tài xế ghi "${pk}" ở ô tên thành tên này, và nhớ cho các lần sau)`, cur);
+      if (nm == null) return;
+      nm = nameCase(String(nm).trim());
+      if (!nm || /\d/.test(nm)) { alert('Vui lòng nhập tên (chữ), không nhập số.'); return; }
+      try {
+        const upd = {};
+        upd[`fleet/${pk}/nm`] = nm; upd[`fleet/${pk}/nmm`] = true;
+        if (!(fleetMap[pk] && fleetMap[pk].p)) upd[`fleet/${pk}/p`] = pk;
+        await dbRoot().update(upd);
+        fleetMap[pk] = Object.assign({}, fleetMap[pk] || {}, { p: (fleetMap[pk] || {}).p || pk, nm, nmm: true });
+        const ts = await dbRef('trips').once('value');
+        const all = Object.values(ts.val() || {});
+        const list = all.filter(t => t.role === 'driver' && looksLikePlate(String(t.staff || '')) && (plateKey(t.plateNumber) || plateKey(t.staff)) === pk);
+        const byFrom = {};
+        list.forEach(t => { const f = String(t.staff).trim(); (byFrom[f] = byFrom[f] || { from: f, to: nm, kind: 'Số xe → tên tài xế', trips: [], accs: new Set() }).trips.push(t); if (t.createdBy) byFrom[f].accs.add(t.createdBy); });
+        const groups = Object.values(byFrom);
+        const n = groups.length ? await writeFixGroups(groups, `Quản lý đặt tên tài xế xe ${pk} = ${nm}; sửa ${list.length} đơn: `) : 0;
+        alert(`Đã lưu tên tài xế xe ${pk}: ${nm}.` + (n ? `\nĐã sửa ${n} đơn ghi số xe ở ô tên.` : ''));
+        updateManagerAuditTable(); renderBizBox();
+      } catch (e) { alert('Lỗi khi lưu: ' + authErrorText(e)); }
     }
     function showSplitToast(n) {
       const d = document.createElement('div');
@@ -4773,6 +4808,8 @@
     }
     function driverNameForPlate(tail) {
       if (!tail) return '';
+      const man = (fleetMap || {})[tail];
+      if (man && man.nm && man.nmm) return nameCase(man.nm);   // tên Quản lý đặt cho xe
       const cnt = {};
       personalTrips.forEach(t => {
         if (plateKey(t.plateNumber) !== tail) return;
@@ -5073,7 +5110,7 @@
               <td class="p-2.5"><input type="text" value="${escHtml(t.dateStr || '')}" placeholder="dd/mm/yyyy" class="inline-edit-input w-24" onblur="updateInlineTripField('${t.id}', 'dateStr', this.value)"></td>
               <td class="p-2.5 font-mono font-bold text-slate-600">${escHtml(t.timeStr || '--')}</td>
               <td class="p-2.5">${roleBadge}</td>
-              <td class="p-2.5 font-extrabold text-slate-800">${escHtml(nameCase(t.staff) || 'N/A')}</td>
+              <td class="p-2.5 font-extrabold text-slate-800">${escHtml(nameCase(t.staff) || 'N/A')}${t.role === 'driver' && looksLikePlate(String(t.staff || '')) ? `<button type="button" onclick="setDriverNameForPlate('${escHtml(plateKey(t.plateNumber) || plateKey(t.staff))}')" class="block mt-1 px-2 py-1 bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 rounded-lg text-[11px] font-extrabold whitespace-nowrap">✏️ Đặt tên tài xế xe ${escHtml(plateKey(t.plateNumber) || plateKey(t.staff))}</button>` : ''}</td>
               <td class="p-2.5"><input type="text" value="${escHtml(t.ticketNumber || '')}" class="inline-edit-input w-24 text-blue-600" onblur="updateInlineTripField('${t.id}', 'ticketNumber', this.value)"></td>
               <td class="p-2.5"><input type="text" value="${escHtml(t.plateNumber || '')}" class="inline-edit-input w-28 uppercase" onblur="updateInlineTripField('${t.id}', 'plateNumber', this.value)"></td>
               ${auditCell}

@@ -2007,23 +2007,25 @@
         mainScrollTo(sectionTop(el)); last = m.scrollTop;
       }, ms));
     }
-    const GUIDE_VIDEO_SRC = 'huong-dan/kiem-tra-don.mp4?v=2';
+    const GUIDE_VIDEO_SRC = 'huong-dan/kiem-tra-don.mp4?v=3';
     // (18/11, người dùng: "video có giọng nói miêu tả kèm nhạc") Nhạc nền nằm sẵn trong video; GIỌNG ĐỌC = giọng tiếng Việt có sẵn trong điện thoại
     // (speechSynthesis), đọc theo mốc giây của video; đọc chưa xong mà tới mốc kế -> tạm dừng video chờ đọc xong.
-    const GUIDE_VOICE = [
-      [1.6, 'Đăng nhập xong, màn hình sẽ tự chạy tới Bảng nhập đơn.'],
-      [4.2, 'Bước một. Nhập các đơn vào bảng.'],
-      [9.0, 'Bước hai. Nhập xong, bấm nút Lưu đơn lên Cloud.'],
-      [12.6, 'Bước ba. Màn hình tự lên đầu trang. Bấm nút Xem lịch sử đơn hàng.'],
-      [17.1, 'Bước bốn. Kiểm tra lại thật kỹ số phiếu và số xe của từng đơn.'],
-      [20.6, 'Ví dụ, đơn này ghi sai số xe. Đúng phải là xe năm hai mốt.'],
-      [23.6, 'Bước năm. Thấy sai thì bấm nút màu vàng, để tới bảng sửa đơn.'],
-      [26.9, 'Bước sáu. Bấm nút Sửa ở đầu hàng của đơn bị sai.'],
-      [30.2, 'Bước bảy. Sửa lại số xe cho đúng, rồi bấm Lưu thay đổi.'],
-      [36.2, 'Bước tám. Mở lại bảng Xem lịch sử đơn hàng.'],
-      [39.8, 'Đúng hết rồi.'],
-      [41.8, 'Bước chín. Chụp màn hình bảng này, để gửi báo cáo.'],
-      [45.8, 'Xong rồi. Chúc anh chị làm việc vui vẻ!'],
+    const GUIDE_VOICE = [   // mốc giây trong video -> câu đọc (phần màn hình TỰ CHẠY không đọc, chỉ hiện chữ)
+      [4.1, 'Bước một. Nhập các đơn vào bảng.'],
+      [8.0, 'Bước hai. Nhập xong, bấm nút Lưu đơn lên Cloud.'],
+      [17.4, 'Bước ba. Bấm nút Xem lịch sử đơn hàng, chỗ có mũi tên màu vàng.'],
+      [25.7, 'Bước bốn. Dò lại thật kỹ số phiếu của từng đơn.'],
+      [29.7, 'Và số xe của từng đơn.'],
+      [33.7, 'Ví dụ, đơn này ghi sai số xe. Đúng phải là xe năm hai mốt.'],
+      [37.7, 'Bước năm. Thấy sai thì bấm nút màu vàng, để tới bảng sửa đơn.'],
+      [45.8, 'Bước sáu. Bấm nút Sửa, ở đầu hàng của đơn bị sai.'],
+      [54.1, 'Bước bảy. Xóa số xe sai, rồi gõ lại số đúng.'],
+      [61.2, 'Rồi bấm nút Lưu thay đổi.'],
+      [68.8, 'Bước tám. Mở lại bảng Xem lịch sử đơn hàng.'],
+      [76.4, 'Số xe đã đúng rồi.'],
+      [79.4, 'Bước chín. Chụp màn hình bảng này, để gửi báo cáo.'],
+      [81.9, 'Với iPhone, bấm cùng lúc nút nguồn và nút tăng âm lượng.'],
+      [87.9, 'Xong rồi. Chúc anh chị làm việc vui vẻ!'],
     ];
     function viVoice() {
       try { const vs = speechSynthesis.getVoices() || []; return vs.find(v => /^vi/i.test(v.lang) && /linh/i.test(v.name)) || vs.find(v => /^vi/i.test(v.lang)) || null; } catch (e) { return null; }
@@ -2060,7 +2062,7 @@
       const hasTTS = typeof speechSynthesis !== 'undefined';
       if (hasTTS) {
         // iPhone: lần đọc đầu phải nằm trong lúc bấm -> đọc ngay câu đầu
-        guideNarr.idx = 1; guideSpeak(GUIDE_VOICE[0][1], v);
+        try { const u0 = new SpeechSynthesisUtterance(' '); u0.volume = 0; u0.lang = 'vi-VN'; speechSynthesis.speak(u0); } catch (e) {}   // mở khóa giọng đọc trên iPhone (phải nằm trong lúc bấm); câu đầu đọc theo mốc giây
         setTimeout(() => { if (!viVoice()) { const n = document.getElementById('guide-voice-note'); if (n) n.classList.remove('hidden'); } }, 1500);
       } else { const n = document.getElementById('guide-voice-note'); if (n) n.classList.remove('hidden'); }
       v.play().catch(() => {});

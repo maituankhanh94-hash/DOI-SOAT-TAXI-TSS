@@ -61,6 +61,44 @@
       animation: rainbow-border 3s infinite alternate, bounce-gentle 2s infinite ease-in-out;
       border: 3px solid #3b82f6;
     }
+
+    /* (19/11) TRANG CHỦ kiểu điện ảnh: video tua theo cuộn (trang-chu/v1..v5.mp4) */
+    #landing { position: fixed; inset: 0; z-index: 40; overflow-y: auto; overflow-x: hidden; background: #08111f; color: #fff; -webkit-overflow-scrolling: touch; }
+    #landing .ld-top { position: fixed; top: 0; left: 0; right: 0; z-index: 6; display: flex; align-items: center; gap: 10px; padding: 10px 16px; background: linear-gradient(to bottom, rgba(8,17,31,.92), rgba(8,17,31,0)); pointer-events: none; }
+    #landing .ld-top img { width: 46px; height: 46px; border-radius: 50%; box-shadow: 0 0 0 2px rgba(255,255,255,.85), 0 4px 14px rgba(0,0,0,.5); }
+    #landing .ld-scene { position: relative; height: 260vh; }
+    #landing .ld-sticky { position: sticky; top: 0; height: 100vh; height: 100dvh; overflow: hidden; display: flex; align-items: flex-end; }
+    #landing .ld-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; background: #08111f;
+      -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 14%, #000 72%, transparent 100%); mask-image: linear-gradient(to bottom, transparent 0, #000 14%, #000 72%, transparent 100%); }
+    /* điện thoại: video vật thể (vé, máy tính bảng, phiếu) nằm nửa trên, chữ nửa dưới -> không đè nhau */
+    #landing .ld-video.ld-obj { top: 54px; bottom: auto; height: 58%; }
+    #landing .ld-shade { position: absolute; left: 0; right: 0; bottom: 0; height: 62%; z-index: 1; background: linear-gradient(to bottom, rgba(8,17,31,0), rgba(8,17,31,.82) 38%, #08111f 78%); pointer-events: none; }
+    #landing .ld-copy { position: relative; z-index: 2; width: 100%; padding: 0 22px 120px; will-change: opacity, transform; }
+    #landing .ld-tag { display: inline-block; font-size: 13px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: #4ade80; background: rgba(74,222,128,.12); border: 1px solid rgba(74,222,128,.35); padding: 5px 12px; border-radius: 999px; }
+    #landing .ld-title { font-size: 36px; line-height: 1.12; font-weight: 800; margin: 12px 0 10px; text-shadow: 0 4px 24px rgba(0,0,0,.6); }
+    #landing .ld-text { font-size: 17px; line-height: 1.5; color: #cbd5e1; max-width: 520px; text-shadow: 0 2px 12px rgba(0,0,0,.8); }
+    #landing .ld-btn { display: inline-flex; align-items: center; gap: 8px; margin: 18px 10px 0 0; padding: 14px 22px; font-size: 17px; font-weight: 800; color: #08111f; background: #4ade80; border-radius: 16px; box-shadow: 0 0 0 0 rgba(74,222,128,.6), 0 10px 30px rgba(74,222,128,.25); }
+    #landing .ld-btn.ld-btn2 { background: rgba(255,255,255,.1); color: #fff; border: 2px solid rgba(255,255,255,.35); box-shadow: none; }
+    #landing .ld-hint { position: absolute; left: 0; right: 0; bottom: 92px; text-align: center; font-size: 14px; font-weight: 700; color: #94a3b8; z-index: 2; animation: ldHint 1.6s infinite; }
+    @keyframes ldHint { 0%,100% { transform: translateY(0); opacity: .6; } 50% { transform: translateY(6px); opacity: 1; } }
+    #landing .ld-bar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 7; padding: 8px 8px calc(8px + env(safe-area-inset-bottom)); background: rgba(8,17,31,.88); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border-top: 1px solid rgba(255,255,255,.1); }
+    #landing .ld-bar-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; max-width: 760px; margin: 0 auto; }
+    #landing .ld-bar button { padding: 8px 2px; border-radius: 12px; font-size: 12px; font-weight: 800; line-height: 1.2; color: #fff; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.14); }
+    #landing .ld-bar button span { display: block; font-size: 20px; margin-bottom: 2px; }
+    #landing .ld-end { position: relative; padding: 70px 22px 140px; text-align: center; background: radial-gradient(ellipse at top, rgba(74,222,128,.12), transparent 60%); }
+    #landing .ld-end-grid { display: grid; grid-template-columns: 1fr; gap: 12px; max-width: 520px; margin: 26px auto 0; }
+    #landing .ld-end-grid button { padding: 18px; font-size: 19px; font-weight: 800; border-radius: 18px; color: #fff; text-align: left; border: 1px solid rgba(255,255,255,.15); }
+    @media (min-width: 900px) {
+      #landing .ld-sticky { align-items: center; }
+      #landing .ld-shade { display: none; }
+      #landing .ld-video.ld-obj { top: 0; height: 100%; }
+      #landing .ld-video { left: auto; right: 6vw; width: calc(100vh * 9 / 16); width: calc(100dvh * 9 / 16);
+        -webkit-mask-image: radial-gradient(ellipse 50% 50% at 50% 50%, #000 72%, transparent 100%); mask-image: radial-gradient(ellipse 50% 50% at 50% 50%, #000 72%, transparent 100%); }
+      #landing .ld-copy { padding: 0 0 0 8vw; max-width: 56vw; }
+      #landing .ld-title { font-size: 58px; }
+      #landing .ld-text { font-size: 20px; }
+      #landing .ld-end-grid { grid-template-columns: 1fr 1fr; max-width: 760px; }
+    }
   </style>
 </head>
 <body class="h-full bg-slate-100 flex flex-col overflow-hidden">
@@ -355,7 +393,105 @@
       }
     }
 
+    // ===== (19/11) TRANG CHỦ KIỂU ĐIỆN ẢNH =====
+    // 5 video AI (Google Flow) ở trang-chu/: cuộn xuống thì video TUA theo cuộn (mã hóa mỗi khung là khung chính nên tua mượt).
+    // Thanh đăng nhập 5 nút luôn nằm dưới đáy -> nhân viên bấm vào làm việc ngay, không cần xem hết.
+    const LANDING_VER = 1;
+    const LANDING_SCENES = [
+      { v: 1, scene: true, tag: 'Sân bay Tân Sơn Nhất', title: 'Đón khách tận nhà ga', text: 'Xe TSS chờ sẵn ở ga T1, T2, T3 – đúng giờ, đúng bảng giá công ty.' },
+      { v: 2, tag: 'Bán vé tại quầy', title: 'Nhập đơn nhanh, giá tự điền', text: 'Nhân viên quầy nhập nhiều đơn một lần. Gõ điểm đến là có giá theo bảng giá.', btns: [['pos', '🚖 Vào Bán Vé']] },
+      { v: 3, scene: true, tag: 'Chủ xe – Tài xế', title: 'Chạy xong là báo cuốc', text: 'Tài xế báo số phiếu, số xe, điểm đến, tiền ngay trên điện thoại.', btns: [['driver', '🚗 Vào Cổng Chủ Xe']] },
+      { v: 4, tag: 'Team Kế hoạch', title: 'Lịch đón đối tác rõ ràng', text: 'Đơn kế hoạch, công nợ, bảng đón – mỗi team một danh sách thanh toán riêng.', btns: [['plan', '📋 Team Kế Hoạch'], ['plan2', '📋 Kế Hoạch 2']] },
+      { v: 5, tag: 'Quản lý', title: 'Đối soát khớp từng phiếu', text: 'Tự ghép bán vé với tài xế. Báo ngay đơn lệch tiền, lệch ngày, chưa báo cáo.', btns: [['manager', '📊 Trang Quản Lý']] }
+    ];
+    const LANDING_ROLES = [['pos', '🚖', 'Bán Vé', 'bg-blue-600'], ['driver', '🚗', 'Chủ Xe', 'bg-amber-600'], ['plan', '📋', 'Kế Hoạch', 'bg-purple-600'], ['plan2', '📋', 'Kế Hoạch 2', 'bg-pink-600'], ['manager', '📊', 'Quản Lý', 'bg-slate-700']];
+    let landingRaf = 0;
+    function renderLanding() {
+      hideLanding();
+      const vsrc = n => `trang-chu/v${n}.mp4?v=${LANDING_VER}`;
+      const scenes = LANDING_SCENES.map((sc, i) => `
+        <section class="ld-scene" data-i="${i}">
+          <div class="ld-sticky">
+            <video class="ld-video ${sc.scene ? '' : 'ld-obj'}" muted playsinline preload="${i === 0 ? 'auto' : 'none'}" poster="trang-chu/p${sc.v}.jpg?v=${LANDING_VER}" data-src="${vsrc(sc.v)}"></video>
+            <div class="ld-shade"></div>
+            <div class="ld-copy">
+              <span class="ld-tag">${sc.tag}</span>
+              <h2 class="ld-title">${sc.title}</h2>
+              <p class="ld-text">${sc.text}</p>
+              ${(sc.btns || []).map((b, k) => `<button class="ld-btn ${k ? 'ld-btn2' : ''}" onclick="promptLogin('${b[0]}')">${b[1]} →</button>`).join('')}
+            </div>
+            ${i === 0 ? '<div class="ld-hint">Kéo xuống để xem ↓</div>' : ''}
+          </div>
+        </section>`).join('');
+      const el = document.createElement('div');
+      el.id = 'landing';
+      el.innerHTML = `
+        <div class="ld-top">
+          <img src="trang-chu/logo-tss.png?v=${LANDING_VER}" alt="TSS">
+          <div><div style="font-weight:800;font-size:17px;letter-spacing:.04em">TSS TAXI</div><div style="font-size:12px;color:#94a3b8;font-weight:600">Hệ thống điều xe sân bay</div></div>
+          ${IS_TEST_ENV ? '<span style="margin-left:auto;background:#fbbf24;color:#111827;font-size:11px;font-weight:800;padding:4px 8px;border-radius:8px">🧪 BẢN THỬ</span>' : ''}
+        </div>
+        ${scenes}
+        <section class="ld-end">
+          <img src="trang-chu/logo-tss.png?v=${LANDING_VER}" alt="TSS" style="width:110px;height:110px;border-radius:50%;margin:0 auto;box-shadow:0 0 0 3px #fff,0 0 40px rgba(74,222,128,.35)">
+          <h2 class="ld-title" style="font-size:30px">Chọn nơi làm việc của bạn</h2>
+          <p class="ld-text" style="margin:0 auto">Công ty CP Dịch Vụ Hàng Không TSS</p>
+          <div class="ld-end-grid">
+            ${LANDING_ROLES.map(r => `<button class="${r[3]}" onclick="promptLogin('${r[0]}')">${r[1]} ${escHtml(ROLE_LABELS[r[0]] || r[2])}</button>`).join('')}
+          </div>
+        </section>
+        <div class="ld-bar"><div class="ld-bar-grid">
+          ${LANDING_ROLES.map(r => `<button onclick="promptLogin('${r[0]}')"><span>${r[1]}</span>${r[2]}</button>`).join('')}
+        </div></div>`;
+      document.body.appendChild(el);
+      el.addEventListener('scroll', () => { if (!landingRaf) landingRaf = requestAnimationFrame(updateLanding); }, { passive: true });
+      window.addEventListener('resize', updateLanding);
+      el.querySelectorAll('.ld-video').forEach(v => {
+        v.addEventListener('loadedmetadata', () => {
+          // iPhone: phải "chạy" 1 lần (tắt tiếng) thì mới vẽ khung hình khi tua
+          const pr = v.play(); if (pr && pr.then) pr.then(() => { v.pause(); updateLanding(); }).catch(() => {});
+        });
+        v.addEventListener('seeked', () => { if (v._want != null && Math.abs(v.currentTime - v._want) > 0.04) seekLandingVideo(v, v._want); });
+      });
+      updateLanding();
+    }
+    function seekLandingVideo(v, t) {
+      v._want = t;
+      if (v.seeking || !(v.readyState >= 1)) return;
+      if (Math.abs(v.currentTime - t) > 0.03) { try { v.currentTime = t; } catch (e) {} }
+    }
+    function updateLanding() {
+      landingRaf = 0;
+      const el = document.getElementById('landing');
+      if (!el) return;
+      const vh = el.clientHeight;
+      el.querySelectorAll('.ld-scene').forEach(sec => {
+        const r = sec.getBoundingClientRect();
+        const span = Math.max(1, r.height - vh);
+        const p = Math.min(1, Math.max(0, -r.top / span));
+        const v = sec.querySelector('.ld-video');
+        // tải video khi sắp cuộn tới (đỡ tốn mạng)
+        if (v && !v.src && r.top < vh * 2) { v.src = v.dataset.src; v.preload = 'auto'; v.load(); }
+        if (v && v.duration) seekLandingVideo(v, p * Math.max(0, v.duration - 0.08));
+        const c = sec.querySelector('.ld-copy');
+        if (c) {
+          const first = sec.dataset.i === '0';
+          const a = first ? 1 - Math.max(0, (p - 0.75) / 0.25) : Math.min(1, Math.max(0, (p - 0.12) / 0.2)) * (1 - Math.max(0, (p - 0.88) / 0.12));
+          c.style.opacity = a.toFixed(3);
+          c.style.transform = `translateY(${((1 - a) * 30).toFixed(1)}px)`;
+        }
+        const h = sec.querySelector('.ld-hint');
+        if (h) h.style.opacity = p > 0.05 ? '0' : '';
+      });
+    }
+    function hideLanding() {
+      const el = document.getElementById('landing');
+      if (el) { el.querySelectorAll('video').forEach(v => { try { v.pause(); v.removeAttribute('src'); v.load(); } catch (e) {} }); el.remove(); }
+      window.removeEventListener('resize', updateLanding);
+    }
+
     function renderHomeSelection() {
+      renderLanding();
       loggedInUser = null;
       document.getElementById('header-status').innerText = "Chọn phân vùng đăng nhập";
       document.getElementById('btn-logout').classList.add('hidden');
@@ -575,6 +711,7 @@
 
     let mgrMode = null, mgrWinKey = null, mgrWinRef = null, mgrWinCb = null;
     async function startManagerSession() {
+      hideLanding();
       document.getElementById('header-status').innerText = `Quản Lý: ${loggedInUser.user}`;
       renderManagerDashboard();
       let ok = await checkDataMeta();
@@ -626,6 +763,7 @@
     let staffMode = null, staffWinFrom = null, staffRef = null, staffCb = null, staffRole = null;
     function monthStartKey(dateKey) { return dateKey.slice(0, 8) + '01'; }
     function startWorkerSession(role) {
+      hideLanding();
       const roleLabels = { 'pos': 'Bán Vé', 'driver': 'Tài Xế', 'plan': 'Team Kế Hoạch', 'plan2': 'Team Kế Hoạch 2' };
       document.getElementById('header-status').innerText = `${roleLabels[role] || role}: ${loggedInUser.user}`;
       staffRole = role;

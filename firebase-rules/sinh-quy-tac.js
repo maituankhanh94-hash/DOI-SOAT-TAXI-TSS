@@ -36,6 +36,12 @@ function strict(B){
     "fleet": { ".read": active,
       "$k": { ".write": `${mgr} || (${active} && ${R}+'/role').val() === 'driver')`,
         ".validate": "newData.child('p').isString() && newData.child('p').val().length <= 30" } },
+    // Sổ số phiếu (19/11): chặn nhập trùng số phiếu giữa các tài khoản. Mọi tài khoản đọc; nhân viên chỉ ghi/xóa mục của CHÍNH MÌNH
+    // hoặc thêm mục chưa có; quản lý dựng lại toàn bộ.
+    "ticket_index": { ".read": active,
+      "$side": { "$t": {
+        ".write": `${mgr} || (${active} && (!data.exists() || data.child('u').val() === ${me}) && (!newData.exists() || newData.child('u').val() === ${me}))`,
+        ".validate": "($side === 'sell' || $side === 'drv') && newData.child('u').isString() && newData.child('d').isString() && newData.child('id').isString()" } } },
     "drivers": { ".read": mgr, ".write": mgr }
   };
 }

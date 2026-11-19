@@ -191,7 +191,7 @@
     let appVersion = null, appLoadDay = localDateKey(new Date()), updateBannerShown = false;
     function hasUnsavedWork() {
       const typed = [...document.querySelectorAll('#tbody-batch input, #tbody-batch select')].some(e => e.dataset.touched && String(e.value || '').trim());
-      const modal = document.querySelector('#edit-trip-modal, #scan-modal, #login-modal, #snapshot-report-modal, #bc-modal:not(.hidden)');
+      const modal = document.querySelector('#edit-trip-modal, #scan-modal, #login-modal, #snapshot-report-modal, #big-warn-modal, #bc-modal:not(.hidden)');
       return typed || !!modal || (typeof bcBusy !== 'undefined' && bcBusy);
     }
     function showUpdateBanner(reason) {
@@ -1199,6 +1199,46 @@
 
     // Khung nhắc LỚN khi thiếu Quận (mẫu 3 người dùng chọn). CHỈ NHẮC, KHÔNG gợi ý (người dùng yêu cầu 09/11).
     // (17/11) it.need = 'street' -> nhắc thiếu TÊN ĐƯỜNG
+    // (19/11, người dùng: "cảnh báo chưa nổi bật") Khung cảnh báo LỚN thay hộp confirm/alert nhỏ của trình duyệt
+    function bigModalShell(headCls, title, bodyHtml, btnsHtml) {
+      const el = document.createElement('div');
+      el.id = 'big-warn-modal';
+      el.className = 'fixed inset-0 z-[9999] bg-slate-900/80 flex items-center justify-center p-3';
+      el.innerHTML = `<div class="bg-white rounded-3xl shadow-2xl w-full max-w-lg max-h-[92vh] flex flex-col overflow-hidden border-4 ${headCls.border}">
+        <div class="${headCls.bg} text-white px-5 py-4 text-center"><div class="text-4xl leading-none mb-1">${headCls.icon}</div><div class="text-[21px] font-black leading-tight">${title}</div></div>
+        <div class="p-4 overflow-y-auto space-y-2">${bodyHtml}</div>
+        <div class="p-4 pt-2 space-y-2 border-t border-slate-200">${btnsHtml}</div></div>`;
+      document.body.appendChild(el);
+      return el;
+    }
+    function showSaveWarnModal(rows) {
+      rows = rows.slice().sort((a, b) => (b.red ? 1 : 0) - (a.red ? 1 : 0) || a.i - b.i);   // cảnh báo đỏ lên đầu
+      return new Promise(resolve => {
+        const anyRed = rows.some(w => w.red);
+        const body = rows.map(w => w.red
+          ? `<div class="bg-red-50 border-2 border-red-500 rounded-2xl p-3"><div class="text-[13px] font-black text-red-700 mb-0.5">⛔ DÒNG ${w.i + 1}</div><div class="text-[17px] font-extrabold text-red-800 leading-snug">${escHtml(w.text)}</div></div>`
+          : `<div class="bg-orange-50 border-2 border-orange-300 rounded-2xl p-3"><div class="text-[13px] font-black text-orange-700 mb-0.5">⚠️ DÒNG ${w.i + 1}</div><div class="text-[16px] font-bold text-orange-900 leading-snug">${escHtml(w.text)}</div></div>`).join('');
+        const el = bigModalShell(anyRed ? { bg: 'bg-red-600', border: 'border-red-600', icon: '⛔' } : { bg: 'bg-orange-500', border: 'border-orange-500', icon: '⚠️' },
+          'KIỂM TRA LẠI TRƯỚC KHI LƯU', body,
+          `<button id="bw-fix" class="w-full py-4 bg-blue-600 hover:bg-blue-700 text-white rounded-2xl text-[19px] font-black shadow-lg">✏️ QUAY LẠI SỬA</button>
+           <button id="bw-ok" class="w-full py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-2xl text-[15px] font-bold border border-slate-300">Đã kiểm tra, đúng rồi – VẪN LƯU</button>`);
+        el.querySelector('#bw-ok').onclick = () => { el.remove(); resolve(true); };
+        el.querySelector('#bw-fix').onclick = () => {
+          el.remove(); resolve(false);
+          const w = rows.find(x => x.red) || rows[0], inp = document.getElementById(`${w.f || 't'}-${w.i}`);
+          if (inp) { try { inp.focus(); inp.select && inp.select(); } catch (e) {} if (typeof ensureBatchFieldVisible === 'function') ensureBatchFieldVisible(inp); }
+        };
+      });
+    }
+    function showBigNotice(title, lines, note) {
+      return new Promise(resolve => {
+        const body = lines.map(t => `<div class="bg-red-50 border-2 border-red-500 rounded-2xl p-3 text-[17px] font-extrabold text-red-800 leading-snug">⛔ ${escHtml(t)}</div>`).join('') +
+          (note ? `<div class="text-[14px] font-semibold text-slate-700 pt-1">${escHtml(note)}</div>` : '');
+        const el = bigModalShell({ bg: 'bg-red-600', border: 'border-red-600', icon: '🚫' }, escHtml(title), body,
+          `<button id="bn-ok" class="w-full py-4 bg-red-600 hover:bg-red-700 text-white rounded-2xl text-[19px] font-black shadow-lg">ĐÃ HIỂU, TÔI SẼ SỬA</button>`);
+        el.querySelector('#bn-ok').onclick = () => { el.remove(); resolve(); };
+      });
+    }
     function showDestFixModal(items) {
       let el = document.getElementById('dest-fix-modal');
       if (!el) { el = document.createElement('div'); el.id = 'dest-fix-modal'; document.body.appendChild(el); }
@@ -1947,7 +1987,7 @@
           const pool = recent.filter(x => x.length === base.length && x !== base);
           for (let j = 0; j < i; j++) { const b2 = baseTicketOf(v(`t-${j}`)); if (/^\d{3,}$/.test(b2) && b2.length === base.length && b2 !== base) pool.push(b2); }
           const near = pool.sort((a, b) => Math.abs(a - n) - Math.abs(b - n))[0];
-          if (near && Math.abs(Number(near) - n) > TICKET_JUMP_WARN) out.push({ f: 't', text: `Số phiếu ${ticket} NHẢY XA phiếu gần nhất ${near} (cách ${Math.abs(Number(near) - n).toLocaleString('vi-VN')} số) – kiểm tra lại số phiếu` });
+          if (near && Math.abs(Number(near) - n) > TICKET_JUMP_WARN) out.push({ f: 't', red: true, text: `Số phiếu ${ticket} NHẢY XA phiếu gần nhất ${near} (cách ${Math.abs(Number(near) - n).toLocaleString('vi-VN')} số) – kiểm tra lại số phiếu` });
         }
       }
       // (19/11, người dùng) BÊN BÁN: phiếu viết theo thứ tự -> BỎ SÓT số (vd đã nhập 1-2-3, lần sau nhập 5) thì cảnh báo
@@ -1968,7 +2008,7 @@
           const missing = gap.filter((x, k) => !ticketIdxEntry('sell', keys[k]));
           if (missing.length) {
             const pad = x => String(x).padStart(base.length, '0');
-            out.push({ f: 't', text: `SAI THỨ TỰ PHIẾU: phiếu trước là ${pad(L)}, phiếu tiếp theo phải là ${pad(L + 1)}` +
+            out.push({ f: 't', red: true, text: `SAI THỨ TỰ PHIẾU: phiếu trước là ${pad(L)}, phiếu tiếp theo phải là ${pad(L + 1)}` +
               ` – đang BỎ SÓT phiếu ${missing.length <= 5 ? missing.map(pad).join(', ') : pad(missing[0]) + ' … ' + pad(missing[missing.length - 1]) + ' (' + missing.length + ' phiếu)'}. Kiểm tra lại (phiếu hủy thì bỏ qua)` });
           }
         }
@@ -1979,8 +2019,8 @@
         const own = personalTrips.find(t => ticketSideOf(t.role) === side && ticketIdxKey(t.originalTicket || t.ticketNumber) === key);
         const e = own ? { u: loggedInUser.user, d: tripDateKey(own) } : ticketIdxEntry(side, key);
         const dupRow = [...Array(i).keys()].some(j => ticketIdxKey(v(`t-${j}`)) === key);
-        if (dupRow) out.unshift({ f: 't', text: `Phiếu ${ticket} bị gõ 2 lần trong bảng – sẽ KHÔNG lưu được` });
-        else if (e) out.unshift({ f: 't', text: `Phiếu ${ticket} ĐÃ ĐƯỢC ${e.u === loggedInUser.user ? 'bạn' : 'tài khoản ' + e.u} nhập ngày ${dkText(e.d)} – sẽ KHÔNG lưu được` });
+        if (dupRow) out.unshift({ f: 't', red: true, text: `Phiếu ${ticket} bị gõ 2 lần trong bảng – sẽ KHÔNG lưu được` });
+        else if (e) out.unshift({ f: 't', red: true, text: `Phiếu ${ticket} ĐÃ ĐƯỢC ${e.u === loggedInUser.user ? 'bạn' : 'tài khoản ' + e.u} nhập ngày ${dkText(e.d)} – sẽ KHÔNG lưu được` });
         else if (!((side + '|' + key) in ticketIdxCache)) fetchTicketIdx(side, [key]).then(() => { if (ticketIdxEntry(side, key)) updateBatchPreview(); });
       }
       ['p', 't'].forEach(f => { const el = document.getElementById(`${f}-${i}`); if (el) el.classList.toggle('batch-warn', out.some(w => w.f === f)); });
@@ -2003,7 +2043,9 @@
         const fare = Number(String(f).replace(/[^0-9]/g, '')) || 0;
         const parts = [v(`staff-${i}`) || '(chưa có tên)', t ? 'Phiếu ' + t : '(chưa có phiếu)', p ? 'Xe ' + p : '', d, fare ? fare.toLocaleString('vi-VN') + 'đ' : '', v(`m-${i}`)].filter(Boolean);
         lines.push(`<div class="py-0.5">✅ <b>Dòng ${i + 1}:</b> ${parts.map(escHtml).join(' • ')}</div>` +
-          warns.map(w => `<div class="ml-5 mb-0.5 px-2 py-0.5 bg-orange-100 border border-orange-300 rounded-lg text-orange-800 font-extrabold">⚠️ ${escHtml(w.text)}</div>`).join(''));
+          warns.map(w => w.red
+            ? `<div class="ml-5 mb-1 px-3 py-2 bg-red-600 border-2 border-red-800 rounded-xl text-white text-[14px] font-black shadow">⛔ ${escHtml(w.text)}</div>`
+            : `<div class="ml-5 mb-0.5 px-2 py-0.5 bg-orange-100 border border-orange-300 rounded-lg text-orange-800 font-extrabold">⚠️ ${escHtml(w.text)}</div>`).join(''));
       }
       if (warnBubbleFor && !warnBubbleFor.classList.contains('batch-warn')) hideWarnBubble();   // đã sửa hết -> tắt bong bóng
       if (!lines.length) { box.className = 'hidden'; box.innerHTML = ''; return; }
@@ -3965,9 +4007,9 @@
       for (let i = 0; i < BATCH_ROWS; i++) {
         const g = id => String((document.getElementById(id) || {}).value || '').trim();
         if (!(g(`staff-${i}`) && g(`t-${i}`) && (plateOpt || g(`p-${i}`)) && g(`d-${i}`))) continue;
-        batchRowWarnings(i).forEach(w => warnRows.push(`• Dòng ${i + 1}: ${w.text}`));
+        batchRowWarnings(i).forEach(w => warnRows.push(Object.assign({ i }, w)));
       }
-      if (warnRows.length && !confirm(`⚠️ KIỂM TRA LẠI TRƯỚC KHI LƯU:\n\n${warnRows.join('\n')}\n\nĐã đúng → bấm OK để LƯU.\nGõ sai → bấm Hủy để sửa (ô sai có viền cam).`)) return;
+      if (warnRows.length && !(await showSaveWarnModal(warnRows))) return;
       // Đơn nhập cho ngày cũ hơn khoảng đã tải: tải thêm đơn của đúng ngày đó để kiểm tra trùng
       let dupPool = personalTrips;
       if (staffMode === 'window' && staffWinFrom) {
@@ -4091,7 +4133,8 @@
       }
 
       if (duplicateDetails.length > 0) {
-        alert(`⛔ ${duplicateDetails.length} ĐƠN TRÙNG SỐ PHIẾU – KHÔNG LƯU:\n\n${duplicateDetails.join('\n')}\n\nSố phiếu không bao giờ trùng. Kiểm tra lại số phiếu trên giấy rồi sửa.\nNếu đúng là phiếu của bạn mà tài khoản khác nhập nhầm, báo Quản lý.` + (count > 0 ? `\n\n(Các dòng khác vẫn được lưu bình thường.)` : ''));
+        await showBigNotice(`⛔ ${duplicateDetails.length} ĐƠN TRÙNG SỐ PHIẾU – KHÔNG LƯU`, duplicateDetails.map(x => x.replace(/^•\s*/, '')),
+          'Số phiếu không bao giờ trùng. Kiểm tra lại số phiếu trên giấy rồi sửa. Nếu đúng là phiếu của bạn mà tài khoản khác nhập nhầm, báo Quản lý.' + (count > 0 ? ' (Các dòng khác vẫn được lưu bình thường.)' : ''));
       }
 
       if (count > 0) {

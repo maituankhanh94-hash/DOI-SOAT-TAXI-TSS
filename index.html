@@ -72,6 +72,7 @@
       -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 14%, #000 72%, transparent 100%); mask-image: linear-gradient(to bottom, transparent 0, #000 14%, #000 72%, transparent 100%); }
     /* điện thoại: video vật thể (vé, máy tính bảng, phiếu) nằm nửa trên, chữ nửa dưới -> không đè nhau */
     #landing .ld-video.ld-obj { top: 54px; bottom: auto; height: 58%; }
+    #landing .ld-video.ld-lift { top: -13%; }   /* cảnh xe: đẩy xe lên trên, chữ không đè thân xe */
     #landing .ld-shade { position: absolute; left: 0; right: 0; bottom: 0; height: 62%; z-index: 1; background: linear-gradient(to bottom, rgba(8,17,31,0), rgba(8,17,31,.82) 38%, #08111f 78%); pointer-events: none; }
     #landing .ld-copy { position: relative; z-index: 2; width: 100%; padding: 0 22px 120px; will-change: opacity, transform; }
     #landing .ld-tag { display: inline-block; font-size: 13px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: #4ade80; background: rgba(74,222,128,.12); border: 1px solid rgba(74,222,128,.35); padding: 5px 12px; border-radius: 999px; }
@@ -91,7 +92,7 @@
     @media (min-width: 900px) {
       #landing .ld-sticky { align-items: center; }
       #landing .ld-shade { display: none; }
-      #landing .ld-video.ld-obj { top: 0; height: 100%; }
+      #landing .ld-video.ld-obj, #landing .ld-video.ld-lift { top: 0; height: 100%; }
       #landing .ld-video { left: auto; right: 6vw; width: calc(100vh * 9 / 16); width: calc(100dvh * 9 / 16);
         -webkit-mask-image: radial-gradient(ellipse 50% 50% at 50% 50%, #000 72%, transparent 100%); mask-image: radial-gradient(ellipse 50% 50% at 50% 50%, #000 72%, transparent 100%); }
       #landing .ld-copy { padding: 0 0 0 8vw; max-width: 56vw; }
@@ -396,13 +397,13 @@
     // ===== (19/11) TRANG CHỦ KIỂU ĐIỆN ẢNH =====
     // 5 video AI (Google Flow) ở trang-chu/: cuộn xuống thì video TUA theo cuộn (mã hóa mỗi khung là khung chính nên tua mượt).
     // Thanh đăng nhập 5 nút luôn nằm dưới đáy -> nhân viên bấm vào làm việc ngay, không cần xem hết.
-    const LANDING_VER = 1;
+    const LANDING_VER = 2;
     const LANDING_SCENES = [
-      { v: 1, scene: true, tag: 'Sân bay Tân Sơn Nhất', title: 'Đón khách tận nhà ga', text: 'Xe TSS chờ sẵn ở ga T1, T2, T3 – đúng giờ, đúng bảng giá công ty.' },
+      { v: 1, scene: true, lift: true, tag: 'Sân bay Tân Sơn Nhất', title: 'Đón khách tận nhà ga', text: 'Xe TSS chờ sẵn ở ga T1, T2, T3 – đúng giờ, đúng bảng giá công ty.' },
       { v: 2, tag: 'Bán vé tại quầy', title: 'Nhập đơn nhanh, giá tự điền', text: 'Nhân viên quầy nhập nhiều đơn một lần. Gõ điểm đến là có giá theo bảng giá.', btns: [['pos', '🚖 Vào Bán Vé']] },
-      { v: 3, scene: true, tag: 'Chủ xe – Tài xế', title: 'Chạy xong là báo cuốc', text: 'Tài xế báo số phiếu, số xe, điểm đến, tiền ngay trên điện thoại.', btns: [['driver', '🚗 Vào Cổng Chủ Xe']] },
+      { v: 3, scene: true, lift: true, tag: 'Chủ xe – Tài xế', title: 'Chạy xong là báo cuốc', text: 'Tài xế báo số phiếu, số xe, điểm đến, tiền ngay trên điện thoại.', btns: [['driver', '🚗 Vào Cổng Chủ Xe']] },
       { v: 4, tag: 'Team Kế hoạch', title: 'Lịch đón đối tác rõ ràng', text: 'Đơn kế hoạch, công nợ, bảng đón – mỗi team một danh sách thanh toán riêng.', btns: [['plan', '📋 Team Kế Hoạch'], ['plan2', '📋 Kế Hoạch 2']] },
-      { v: 5, tag: 'Quản lý', title: 'Đối soát khớp từng phiếu', text: 'Tự ghép bán vé với tài xế. Báo ngay đơn lệch tiền, lệch ngày, chưa báo cáo.', btns: [['manager', '📊 Trang Quản Lý']] }
+      { v: 5, scene: true, tag: 'Quản lý', title: 'Đối soát khớp từng phiếu', text: 'Bán vé và tài xế khớp nhau từng cuốc. Báo ngay đơn lệch tiền, lệch ngày, chưa báo cáo.', btns: [['manager', '📊 Trang Quản Lý']] }
     ];
     const LANDING_ROLES = [['pos', '🚖', 'Bán Vé', 'bg-blue-600'], ['driver', '🚗', 'Chủ Xe', 'bg-amber-600'], ['plan', '📋', 'Kế Hoạch', 'bg-purple-600'], ['plan2', '📋', 'Kế Hoạch 2', 'bg-pink-600'], ['manager', '📊', 'Quản Lý', 'bg-slate-700']];
     let landingRaf = 0;
@@ -412,7 +413,7 @@
       const scenes = LANDING_SCENES.map((sc, i) => `
         <section class="ld-scene" data-i="${i}">
           <div class="ld-sticky">
-            <video class="ld-video ${sc.scene ? '' : 'ld-obj'}" muted playsinline preload="${i === 0 ? 'auto' : 'none'}" poster="trang-chu/p${sc.v}.jpg?v=${LANDING_VER}" data-src="${vsrc(sc.v)}"></video>
+            <video class="ld-video ${sc.scene ? '' : 'ld-obj'} ${sc.lift ? 'ld-lift' : ''}" muted playsinline preload="${i === 0 ? 'auto' : 'none'}" poster="trang-chu/p${sc.v}.jpg?v=${LANDING_VER}" data-src="${vsrc(sc.v)}"></video>
             <div class="ld-shade"></div>
             <div class="ld-copy">
               <span class="ld-tag">${sc.tag}</span>

@@ -1950,6 +1950,29 @@
           if (near && Math.abs(Number(near) - n) > TICKET_JUMP_WARN) out.push({ f: 't', text: `Số phiếu ${ticket} NHẢY XA phiếu gần nhất ${near} (cách ${Math.abs(Number(near) - n).toLocaleString('vi-VN')} số) – kiểm tra lại số phiếu` });
         }
       }
+      // (19/11, người dùng) BÊN BÁN: phiếu viết theo thứ tự -> BỎ SÓT số (vd đã nhập 1-2-3, lần sau nhập 5) thì cảnh báo
+      // "phiếu tiếp theo phải là 4". Số bị bỏ mà đồng nghiệp đã nhập (sổ chung) thì không tính là sót. Vẫn cho lưu (phiếu hủy…).
+      if (staffRole !== 'driver' && /^\d+$/.test(base) && !out.some(w => w.f === 't')) {
+        const n = Number(base);
+        const cutoff2 = shiftDateKey(localDateKey(new Date()), -30);
+        const have = new Set(personalTrips.filter(t => ticketSideOf(t.role) === 'sell' && (tripDateKey(t) || '') >= cutoff2).map(t => tkOf(t)).filter(x => /^\d+$/.test(x)).map(Number));
+        for (let j = 0; j < BATCH_ROWS; j++) { if (j === i) continue; const b2 = baseTicketOf(v(`t-${j}`)); if (/^\d+$/.test(b2)) have.add(Number(b2)); }
+        const below = [...have].filter(x => x < n && n - x <= TICKET_JUMP_WARN);
+        if (below.length) {
+          const L = Math.max(...below);
+          const gap = [];
+          for (let x = L + 1; x < n; x++) gap.push(x);
+          const keys = gap.map(x => ticketIdxKey(String(x)));
+          const unknown = keys.filter(k => !(('sell|' + k) in ticketIdxCache));
+          if (unknown.length) fetchTicketIdx('sell', unknown).then(() => updateBatchPreview());
+          const missing = gap.filter((x, k) => !ticketIdxEntry('sell', keys[k]));
+          if (missing.length) {
+            const pad = x => String(x).padStart(base.length, '0');
+            out.push({ f: 't', text: `SAI THỨ TỰ PHIẾU: phiếu trước là ${pad(L)}, phiếu tiếp theo phải là ${pad(L + 1)}` +
+              ` – đang BỎ SÓT phiếu ${missing.length <= 5 ? missing.map(pad).join(', ') : pad(missing[0]) + ' … ' + pad(missing[missing.length - 1]) + ' (' + missing.length + ' phiếu)'}. Kiểm tra lại (phiếu hủy thì bỏ qua)` });
+          }
+        }
+      }
       // (19/11) phiếu đã có người nhập (cùng bên) -> báo ngay lúc nhập (khi lưu sẽ bị chặn)
       if (ticket && loggedInUser) {
         const side = ticketSideOf(staffRole || loggedInUser.role), key = ticketIdxKey(ticket);
@@ -3435,10 +3458,27 @@
       });
     }
 
+    // Phiếu kế tiếp của tài khoản (bên bán): phiếu gốc của đơn nhập GẦN NHẤT (theo giờ lưu) + 1, giữ số 0 đầu; bỏ qua số đã có
+    function nextOwnTicket() {
+      const own = personalTrips.filter(t => ticketSideOf(t.role) === 'sell' && /^\d+$/.test(tkOf(t)))
+        .sort((a, b) => (Number(b.timestamp) || 0) - (Number(a.timestamp) || 0));
+      if (!own.length) return '';
+      const last = tkOf(own[0]);
+      const used = new Set(own.map(t => ticketIdxKey(tkOf(t))));
+      let n = parseInt(last, 10) + 1;
+      while (used.has(String(n))) n++;
+      return String(n).padStart(last.length, '0');
+    }
     function handleSmartTicketFocus(currentIndex) {
       // (14/11) Tài xế: mỗi cuốc 1 số phiếu khác nhau, không theo thứ tự -> KHÔNG tự nhảy số, để tài xế tự nhập
       if (staffRole === 'driver') return;
       const currentInput = document.getElementById(`t-${currentIndex}`);
+      // (19/11, người dùng) chưa có phiếu nào ở các dòng trên -> lấy phiếu NHẬP GẦN NHẤT của tài khoản + 1 (nối tiếp lần nhập trước)
+      if (currentInput && !currentInput.value.trim() && ![...Array(currentIndex).keys()].some(j => String((document.getElementById(`t-${j}`) || {}).value || '').trim())) {
+        const nx = nextOwnTicket();
+        if (nx) currentInput.value = nx;
+        return;
+      }
       if (currentInput && !currentInput.value.trim() && currentIndex > 0) {
         for (let j = currentIndex - 1; j >= 0; j--) {
           const prevInput = document.getElementById(`t-${j}`);

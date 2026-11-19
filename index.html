@@ -6622,13 +6622,16 @@
       const clean = v => String(v == null ? '' : v).replace(/[\r\n\t]+/g, ' ').replace(/\s{2,}/g, ' ').trim();
       const MONEY = '#,##0';
       groups.forEach(g => {
-        // Mỗi cuốc chỉ ghi 1 lần: có bên Bán vé/Kế hoạch thì lấy bên đó; chỉ có bên Chủ xe thì mới lấy bên Chủ xe (tránh trùng doanh thu)
-        const sale = g.trips.filter(t => t.role !== 'driver');
+        // (19/11, người dùng) CHỈ lấy đơn bên ĐH (Bán vé / Kế hoạch / Kế hoạch 2). Đơn chỉ có bên Chủ xe/Tài xế KHÔNG đưa vào:
+        // trước đây nhóm chỉ có tài xế cũng được ghi -> khi tài xế/bán vé gõ lệch phiếu hoặc xe, cùng 1 cuốc thành 2 dòng (dư đơn).
+        // Trang Đối Soát vẫn giữ đủ hai bên như cũ.
+        const sale = g.trips.filter(t => t.role !== 'driver');   // như bên bán ở trang Đối Soát (đơn cũ thiếu role vẫn tính bên bán)
+        if (!sale.length) return;
         // (13/11) Cột F "Mã khách hàng" = 3 SỐ CUỐI BIỂN SỐ xe của đúng cuốc này (lấy theo bên tài xế trong cùng nhóm đối soát;
         //         tài xế chưa báo thì lấy biển số bên bán), ghi kiểu SỐ như công thức file đẩy MISA.
         //         Cột O "Mã nhân viên bán hàng" = tên nhân viên BÁN VÉ / KẾ HOẠCH (đơn chỉ có bên tài xế thì để trống)
         const drvPlate = (g.trips.find(t => t.role === 'driver' && plate3Num(t.plateNumber) !== '') || {}).plateNumber;
-        (sale.length ? sale : g.trips).forEach(t => {
+        sale.forEach(t => {
           const dk = tripDateKey(t);
           const p = dk ? dk.split('-').map(Number) : null;
           // Dùng giờ UTC để Excel không lệch sang ngày hôm trước

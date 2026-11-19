@@ -154,6 +154,15 @@
           ".validate": "newData.child('p').isString() && newData.child('p').val().length <= 30"
         }
       },
+      "ticket_index": {
+        ".read": "(auth != null && root.child('test_env/roles/'+auth.uid+'/active').val() === true)",
+        "$side": {
+          "$t": {
+            ".write": "((auth != null && root.child('test_env/roles/'+auth.uid+'/active').val() === true) && root.child('test_env/roles/'+auth.uid+'/role').val() === 'manager') || ((auth != null && root.child('test_env/roles/'+auth.uid+'/active').val() === true) && (!data.exists() || data.child('u').val() === root.child('test_env/roles/'+auth.uid+'/user').val()) && (!newData.exists() || newData.child('u').val() === root.child('test_env/roles/'+auth.uid+'/user').val()))",
+            ".validate": "($side === 'sell' || $side === 'drv') && newData.child('u').isString() && newData.child('d').isString() && newData.child('id').isString()"
+          }
+        }
+      },
       "drivers": {
         ".read": "((auth != null && root.child('test_env/roles/'+auth.uid+'/active').val() === true) && root.child('test_env/roles/'+auth.uid+'/role').val() === 'manager')",
         ".write": "((auth != null && root.child('test_env/roles/'+auth.uid+'/active').val() === true) && root.child('test_env/roles/'+auth.uid+'/role').val() === 'manager')"

@@ -4497,6 +4497,8 @@
                   <input type="date" id="audit-end-date" class="px-2 py-1.5 bg-slate-50 border rounded-xl font-mono text-xs font-bold" onchange="updateManagerAuditTable()">
                 </div>
                 <button onclick="setAuditToday()" class="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-sm">Hôm Nay</button>
+                <button onclick="setAuditQuick('yesterday')" class="px-3 py-1.5 bg-sky-600 hover:bg-sky-700 text-white rounded-xl text-xs font-bold shadow-sm">Hôm Qua</button>
+                <button onclick="setAuditQuick('month')" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-sm">Tháng Này</button>
                 <button onclick="resetAuditDateToAll()" class="px-2.5 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl text-xs font-bold">Xem Tất Cả</button>
                 
                 <select id="audit-role-filter" class="px-3 py-1.5 bg-slate-50 border rounded-xl font-bold text-xs text-slate-800" onchange="updateManagerAuditTable()">
@@ -4653,6 +4655,18 @@
       const endInp = document.getElementById('audit-end-date');
       if(startInp) startInp.value = todayFormatted;
       if(endInp) endInp.value = todayFormatted;
+      updateManagerAuditTable();
+    }
+
+    // (20/11, người dùng) nút Hôm Qua / Tháng Này ở Bảng Đối Soát (giờ địa phương)
+    function setAuditQuick(kind) {
+      const today = localDateKey(new Date());
+      let from = today, to = today;
+      if (kind === 'yesterday') { from = to = shiftDateKey(today, -1); }
+      else if (kind === 'month') { from = today.slice(0, 8) + '01'; }
+      const startInp = document.getElementById('audit-start-date'), endInp = document.getElementById('audit-end-date');
+      if (startInp) startInp.value = from;
+      if (endInp) endInp.value = to;
       updateManagerAuditTable();
     }
 

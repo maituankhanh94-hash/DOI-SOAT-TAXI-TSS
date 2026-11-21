@@ -4,7 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>TSS POS - Hệ Thống Điều Xe Sân Bay</title>
-  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- (21/11) Tailwind dựng sẵn (app.css) thay cho cdn.tailwindcss.com để app nhẹ, không lag. Thêm class mới thì chạy lại lệnh trong tailwind/tailwind.config.cjs -->
+  <link rel="stylesheet" href="app.css?v=1">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
@@ -4166,9 +4167,40 @@
       return '';
     }
 
+    // (21/11, người dùng) Thanh nút chuyển nhanh đầu trang Quản lý: bấm -> cuộn tới đúng bảng (tìm theo tiêu đề)
+    const MGR_NAV = [
+      ['⬆️ Đầu trang', null, 'bg-slate-700 text-white hover:bg-slate-800'],
+      ['🔍 Đối Soát', /Bảng Đối Soát Đơn Hàng/i, 'bg-blue-600 text-white hover:bg-blue-700'],
+      ['📋 Nhắc Báo Cáo', /Nhắc Báo Cáo & Giảm Giá/i, 'bg-amber-500 text-white hover:bg-amber-600'],
+      ['🏆 Lời / Âm NV', /Doanh Thu & Lời/i, 'bg-emerald-600 text-white hover:bg-emerald-700'],
+      ['💰 Doanh Thu Ngày', /Tổng Doanh Thu Theo Ngày/i, 'bg-teal-600 text-white hover:bg-teal-700'],
+      ['👤 Nhân Sự', /Danh Sách Tên Nhân Sự/i, 'bg-white text-slate-800 border border-slate-300 hover:bg-slate-50'],
+      ['🏢 Nguồn Đơn', /Quản Lý Nguồn Đơn/i, 'bg-white text-slate-800 border border-slate-300 hover:bg-slate-50'],
+      ['🚗 Loại Xe', /Quản Lý Loại Xe/i, 'bg-white text-slate-800 border border-slate-300 hover:bg-slate-50'],
+      ['💳 Thanh Toán', /Hình Thức Thanh Toán \(Bán Vé\)/i, 'bg-white text-slate-800 border border-slate-300 hover:bg-slate-50'],
+      ['📋 TT Kế Hoạch', /THANH TOÁN Team kế hoạch$/i, 'bg-white text-purple-800 border border-purple-300 hover:bg-purple-50'],
+      ['📋 TT Kế Hoạch 2', /THANH TOÁN Team kế hoạch 2/i, 'bg-white text-pink-800 border border-pink-300 hover:bg-pink-50'],
+      ['🔑 Tài Khoản', /Cấp Phát Tài Khoản/i, 'bg-white text-slate-800 border border-slate-300 hover:bg-slate-50'],
+      ['⏰ Giờ Khóa', /Giờ Khóa Sửa/i, 'bg-white text-slate-800 border border-slate-300 hover:bg-slate-50']
+    ];
+    function mgrJump(i) {
+      const n = MGR_NAV[i];
+      if (!n || !n[1]) { mainScrollTo(0); return; }
+      const h = [...document.querySelectorAll('#main-container h3, #main-container h4')].find(e => n[1].test(e.textContent.trim()));
+      if (!h) return;
+      const card = h.closest('.rounded-3xl') || h;
+      const nav = document.getElementById('mgr-nav');
+      mainScrollTo(sectionTop(card) - (nav ? nav.offsetHeight : 0));
+      card.classList.remove('guide-flash'); void card.offsetWidth; card.classList.add('guide-flash');
+    }
     function renderManagerDashboard() {
       document.getElementById('main-container').innerHTML = `
         <button onclick="openBabyCar()" title="Hỏi Baby Car" class="fixed z-[60] right-4 bottom-4 w-14 h-14 rounded-full bg-indigo-600 hover:bg-indigo-700 text-white text-2xl shadow-xl border-4 border-white" style="bottom:max(1rem, env(safe-area-inset-bottom))">🤖</button>
+        <div id="mgr-nav" class="sticky top-0 z-40 -mx-3 sm:-mx-6 -mt-3 sm:-mt-6 mb-4 px-3 sm:px-6 py-2 bg-slate-100/95 backdrop-blur border-b border-slate-300 shadow-sm">
+          <div class="flex gap-2 overflow-x-auto whitespace-nowrap custom-scrollbar pb-1">
+            ${MGR_NAV.map((n, i) => `<button onclick="mgrJump(${i})" class="shrink-0 px-3 py-2 rounded-xl text-xs font-extrabold shadow-sm ${n[2]}">${n[0]}</button>`).join('')}
+          </div>
+        </div>
         <div class="space-y-6 pb-24 w-full">
           <div class="bg-white p-4 sm:p-5 rounded-3xl shadow-md border border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-3">
             <h3 class="text-xs sm:text-sm font-extrabold text-slate-900 uppercase">📊 Quản Lý Hệ Thống & Cấu Hình</h3>
@@ -4233,7 +4265,8 @@
               </div>
             </div>
             <div class="flex flex-wrap gap-2 pt-2" id="staff-tag-list"></div>
-            <div class="pt-2 border-t"><button onclick="openFixNamesModal()" class="px-3 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-extrabold text-xs">🔤 Sửa Tên Nhân Viên Sai Kiểu Trong Đơn Cũ</button>
+            <!-- (21/11, người dùng: "nên tự động hoàn toàn") ẩn nút tay; app tự sửa lúc nhân viên nhập + khi Quản lý mở app. Hiện lại: bỏ class hidden -->
+            <div class="hidden pt-2 border-t"><button onclick="openFixNamesModal()" class="px-3 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-extrabold text-xs">🔤 Sửa Tên Nhân Viên Sai Kiểu Trong Đơn Cũ</button>
               <span class="text-[11px] text-slate-500 ml-1">App ĐÃ TỰ SỬA mỗi khi mở Trang Quản lý (viết hoa đúng, tên tắt → tên đầy đủ, tài xế ghi số xe → tên tài xế). Nút này để kiểm tra lại.</span></div>
           </div>
 
@@ -4382,7 +4415,7 @@
                   <option value="overdue_pos">⏰ Bán Vé / Kế Hoạch Chưa Báo Cáo</option>
                 </select>
 
-                <input type="text" id="audit-search-input" autocomplete="off" placeholder="🔍 Lọc từ khóa..." class="px-3 py-1.5 bg-slate-50 border rounded-xl font-bold text-xs w-44" oninput="updateManagerAuditTable()">
+                <input type="text" id="audit-search-input" autocomplete="off" placeholder="🔍 Lọc từ khóa..." class="px-3 py-1.5 bg-slate-50 border rounded-xl font-bold text-xs w-44" oninput="onAuditSearchInput()">
               </div>
             </div>
             <div class="overflow-x-auto custom-scrollbar max-h-[550px]">
@@ -5335,7 +5368,11 @@
         return auditNearCands(g, nearPool);
       };
       const nUnmatched = groupList.filter(g => g.status === 'unmatched').length;
-      groupList.forEach(g => {
+      // (21/11, người dùng: app chậm/lag) KHÔNG vẽ hết hàng nghìn dòng (mỗi dòng ~10 ô nhập) -> vẽ AUDIT_PAGE nhóm đầu, nút "Xem thêm"
+      const sig = JSON.stringify(fAud);
+      if (sig !== auditShowSig) { auditShowSig = sig; auditShowN = AUDIT_PAGE; }
+      const totalGroups = groupList.length;
+      groupList.slice(0, auditShowN).forEach(g => {
         const group = g.trips, status = g.status;
         let statusHtml = statusBadge[status];
         if (status === 'mismatch') statusHtml += `<div class="text-[10px] font-bold text-rose-700 mt-1">${escHtml(getMismatchReason(group))}</div>`;
@@ -5411,8 +5448,22 @@
         });
       });
 
+      if (totalGroups > auditShowN) {
+        const more = Math.min(AUDIT_PAGE, totalGroups - auditShowN);
+        rowsHtml += `<tr><td colspan="15" class="p-3 text-center bg-slate-50">
+          <div class="text-xs font-bold text-slate-600 mb-2">Đang hiện ${auditShowN.toLocaleString('vi-VN')} / ${totalGroups.toLocaleString('vi-VN')} nhóm đơn (mới nhất trước). Xuất Excel vẫn lấy ĐỦ tất cả.</div>
+          <button onclick="auditShowMore(${AUDIT_PAGE})" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-extrabold">⬇️ Xem thêm ${more.toLocaleString('vi-VN')} nhóm</button>
+          <button onclick="auditShowMore(${totalGroups})" class="ml-2 px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl text-xs font-bold">Hiện tất cả (có thể chậm)</button>
+        </td></tr>`;
+      }
       tb.innerHTML = rowsHtml;
     }
+    const AUDIT_PAGE = 150;
+    let auditShowN = AUDIT_PAGE, auditShowSig = '';
+    function auditShowMore(n) { auditShowN += n; updateManagerAuditTable(); }
+    // gõ từ khóa: chờ ngừng gõ 300ms mới lọc (trước đây mỗi chữ vẽ lại cả bảng)
+    let auditSearchTimer = null;
+    function onAuditSearchInput() { clearTimeout(auditSearchTimer); auditSearchTimer = setTimeout(updateManagerAuditTable, 300); }
 
     // Khung NHẮC BÁO CÁO (bảng riêng): chọn Từ ngày – Đến ngày; liệt kê xe chưa báo, phiếu bán vé chưa nhập, đơn giảm giá vượt mức
     function localDateKey(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }

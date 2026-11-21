@@ -10,7 +10,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="TSS POS">
   <!-- (21/11) Tailwind dựng sẵn (app.css) thay cho cdn.tailwindcss.com để app nhẹ, không lag. Thêm class mới thì chạy lại lệnh trong tailwind/tailwind.config.cjs -->
-  <link rel="stylesheet" href="app.css?v=2">
+  <link rel="stylesheet" href="app.css?v=3">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
@@ -20,6 +20,8 @@
     body { font-family: 'Plus Jakarta Sans', sans-serif; touch-action: pan-x pan-y; }
     /* (21/11, ảnh người dùng: đầu trang bị khuất) trang KHÔNG được tự cuộn cả khung (chỉ #main-container cuộn) */
     html, body { overflow: hidden; overscroll-behavior: none; }
+    /* (21/11, video người dùng Chrome Mac: thanh đầu vẫn khuất, bấm không được) máy tính: GHIM cả khung trang vào cửa sổ -> không thể dịch lên */
+    @media (hover: hover) and (pointer: fine) { body { position: fixed; top: 0; left: 0; right: 0; bottom: 0; height: auto !important; } }
     header { padding-top: max(0.75rem, env(safe-area-inset-top)); }
     /* (13/11) Bảng nhập hàng loạt trên điện thoại: chỉ cuộn NGANG (lên xuống theo cả trang) để iPhone không giật khi bàn phím mở */
     #batch-table td.bstt { position: sticky; left: 0; z-index: 5; background: #fff; box-shadow: 2px 0 4px -2px rgba(15,23,42,.25); }
@@ -2160,7 +2162,9 @@
       if (document.documentElement.scrollTop) document.documentElement.scrollTop = 0;
       if (document.body.scrollTop) document.body.scrollTop = 0;
     }
+    if ('scrollRestoration' in history) history.scrollRestoration = 'manual';   // F5 không khôi phục vị trí lệch cũ
     window.addEventListener('scroll', pinPageTop, { passive: true });
+    window.addEventListener('load', () => { pinPageTop(); setTimeout(pinPageTop, 300); });
     document.addEventListener('scroll', pinPageTop, { passive: true, capture: true });
     // Nút ⛶ Toàn Màn Hình: máy tính / Android dùng Fullscreen; iPhone không hỗ trợ -> hướng dẫn "Thêm vào Màn hình chính"
     function toggleFullScreen() {

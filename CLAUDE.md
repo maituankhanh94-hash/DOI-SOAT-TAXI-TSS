@@ -36,7 +36,7 @@
   - Khác với lời người dùng 13/11 (KIOT 3%): file tính KIOT 7%.
 - Khác với nhánh thử `hieu-qua-kinh-doanh` (đang để % tài xế 64%, nhóm QT/QN 3% 160k, C10/T1/T3/KH 7% 320k, CTV 15% 0đ, KIOT 3% 160k) → khi làm tiếp nhánh đó phải sửa theo số mới (tài xế 66%).
 
-## Tăng tốc + thanh chuyển nhanh Quản lý (21/11, BẢN THỬ nhánh `tang-toc`)
+## Tăng tốc + thanh chuyển nhanh Quản lý (21/11, ĐÃ LÊN MAIN 21/11; nhánh `tang-toc`)
 - Người dùng: "app phản ứng chậm, lag". Đo emulator (4.000 đơn): Bảng Đối Soát "Xem Tất Cả" vẽ 1,3 s mỗi lần (vẽ HẾT mọi nhóm, mỗi dòng ~10 ô nhập; mỗi lần có người lưu đơn lại vẽ lại) + Tailwind CDN chạy trong trình duyệt (MutationObserver tạo CSS mỗi lần DOM đổi).
 - Sửa: (1) `updateManagerAuditTable` chỉ vẽ `AUDIT_PAGE` = 150 nhóm đầu (mới nhất), dòng cuối "⬇️ Xem thêm 150 nhóm" / "Hiện tất cả" (`auditShowMore`); đổi bộ lọc (chữ ký `getAuditFilters`) → về 150. Excel/MISA vẫn lấy đủ. (2) Ô từ khóa lọc chờ ngừng gõ 300 ms (`onAuditSearchInput`). (3) BỎ cdn.tailwindcss.com → `app.css` dựng sẵn (Tailwind 3.4.17, 40 KB): `tailwind/tailwind.config.cjs` (content index.html) + `tailwind/input.css`. THÊM CLASS TAILWIND MỚI vào index.html → PHẢI chạy lại `npx tailwindcss@3.4.17 -c tailwind/tailwind.config.cjs -i tailwind/input.css -o app.css --minify` (không thì class mới không có kiểu) và tăng `app.css?v=`. Không dùng tên class ghép động. Nhánh `trang-chu` khi gộp phải dựng lại app.css.
 - Kết quả emulator: vẽ bảng đối soát 1.319 ms → 107 ms; dữ liệu đầu tiên 1.083 → 408 ms.

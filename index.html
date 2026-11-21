@@ -10,7 +10,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="TSS POS">
   <!-- (21/11) Tailwind dựng sẵn (app.css) thay cho cdn.tailwindcss.com để app nhẹ, không lag. Thêm class mới thì chạy lại lệnh trong tailwind/tailwind.config.cjs -->
-  <link rel="stylesheet" href="app.css?v=3">
+  <link rel="stylesheet" href="app.css?v=4">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
@@ -90,7 +90,6 @@
     <div class="flex items-center space-x-2">
       <button onclick="logoutSession()" id="btn-logout" class="px-3 py-1.5 bg-rose-500 hover:bg-rose-600 text-white rounded-lg text-xs font-bold hidden">Đăng Xuất</button>
       <button onclick="openChangeOwnPasswordModal()" id="btn-change-pass" class="px-2.5 py-1.5 bg-blue-500 hover:bg-blue-700 text-white rounded-lg text-xs font-bold hidden">🔑 Đổi Mật Khẩu</button>
-      <button onclick="toggleFullScreen()" id="btn-fullscreen" title="Toàn màn hình" class="px-2.5 py-1.5 bg-blue-500 hover:bg-blue-700 text-white rounded-lg text-xs font-bold">⛶<span class="hidden sm:inline"> Toàn Màn Hình</span></button>
       <button onclick="logoutSession()" class="px-2.5 py-1.5 bg-slate-700 hover:bg-slate-800 text-white rounded-lg text-xs font-bold">Thoát App</button>
     </div>
   </header>
@@ -2186,7 +2185,7 @@
     }
     function updateFsButton() {
       const b = document.getElementById('btn-fullscreen'); if (!b) return;
-      b.innerHTML = (document.fullscreenElement || document.webkitFullscreenElement) ? '🗗<span class="hidden sm:inline"> Thu Nhỏ</span>' : '⛶<span class="hidden sm:inline"> Toàn Màn Hình</span>';
+      b.textContent = (document.fullscreenElement || document.webkitFullscreenElement) ? '🗗 Thu Nhỏ' : '⛶ Toàn Màn Hình';
     }
     document.addEventListener('fullscreenchange', updateFsButton);
     document.addEventListener('webkitfullscreenchange', updateFsButton);
@@ -4239,6 +4238,7 @@
       card.classList.remove('guide-flash'); void card.offsetWidth; card.classList.add('guide-flash');
     }
     function renderManagerDashboard() {
+      setTimeout(updateFsButton, 0);
       document.getElementById('main-container').innerHTML = `
         <button onclick="openBabyCar()" title="Hỏi Baby Car" class="fixed z-[60] right-4 bottom-4 w-14 h-14 rounded-full bg-indigo-600 hover:bg-indigo-700 text-white text-2xl shadow-xl border-4 border-white" style="bottom:max(1rem, env(safe-area-inset-bottom))">🤖</button>
         <div id="mgr-nav" class="sticky top-0 z-40 -mx-3 sm:-mx-6 -mt-3 sm:-mt-6 mb-4 px-3 sm:px-6 py-2 bg-slate-100/95 backdrop-blur border-b border-slate-300 shadow-sm">
@@ -4251,6 +4251,7 @@
             <h3 class="text-xs sm:text-sm font-extrabold text-slate-900 uppercase">📊 Quản Lý Hệ Thống & Cấu Hình</h3>
             <div class="flex flex-wrap gap-2 justify-center">
               ${IS_TEST_ENV ? `<button onclick="copyRealDataToTest()" class="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-slate-900 rounded-xl text-xs font-extrabold shadow-sm">🧪 Chép Dữ Liệu Thật Vào Bản Thử</button>` : ''}
+              <button onclick="toggleFullScreen()" id="btn-fullscreen" title="Toàn màn hình" class="px-4 py-2 bg-sky-600 hover:bg-sky-700 text-white rounded-xl text-xs font-extrabold shadow-sm">⛶ Toàn Màn Hình</button>
               <button onclick="openBabyCar()" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-extrabold shadow-sm">🤖 Hỏi Baby Car</button>
               <button id="btn-export-excel" onclick="exportCustomExcel()" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-sm">📥 Xuất Excel Đối Soát (Có Màu, Kẻ Ô)</button>
             </div>

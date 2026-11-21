@@ -4,8 +4,13 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>TSS POS - Hệ Thống Điều Xe Sân Bay</title>
+  <!-- (21/11) mở từ biểu tượng ở Màn hình chính (iPhone/Android) -> chạy toàn màn hình, không thanh địa chỉ -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="TSS POS">
   <!-- (21/11) Tailwind dựng sẵn (app.css) thay cho cdn.tailwindcss.com để app nhẹ, không lag. Thêm class mới thì chạy lại lệnh trong tailwind/tailwind.config.cjs -->
-  <link rel="stylesheet" href="app.css?v=1">
+  <link rel="stylesheet" href="app.css?v=2">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
@@ -13,6 +18,9 @@
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap');
     body { font-family: 'Plus Jakarta Sans', sans-serif; touch-action: pan-x pan-y; }
+    /* (21/11, ảnh người dùng: đầu trang bị khuất) trang KHÔNG được tự cuộn cả khung (chỉ #main-container cuộn) */
+    html, body { overflow: hidden; overscroll-behavior: none; }
+    header { padding-top: max(0.75rem, env(safe-area-inset-top)); }
     /* (13/11) Bảng nhập hàng loạt trên điện thoại: chỉ cuộn NGANG (lên xuống theo cả trang) để iPhone không giật khi bàn phím mở */
     #batch-table td.bstt { position: sticky; left: 0; z-index: 5; background: #fff; box-shadow: 2px 0 4px -2px rgba(15,23,42,.25); }
     #batch-table th.bstt { position: sticky; left: 0; z-index: 25; }
@@ -80,6 +88,7 @@
     <div class="flex items-center space-x-2">
       <button onclick="logoutSession()" id="btn-logout" class="px-3 py-1.5 bg-rose-500 hover:bg-rose-600 text-white rounded-lg text-xs font-bold hidden">Đăng Xuất</button>
       <button onclick="openChangeOwnPasswordModal()" id="btn-change-pass" class="px-2.5 py-1.5 bg-blue-500 hover:bg-blue-700 text-white rounded-lg text-xs font-bold hidden">🔑 Đổi Mật Khẩu</button>
+      <button onclick="toggleFullScreen()" id="btn-fullscreen" title="Toàn màn hình" class="px-2.5 py-1.5 bg-blue-500 hover:bg-blue-700 text-white rounded-lg text-xs font-bold">⛶<span class="hidden sm:inline"> Toàn Màn Hình</span></button>
       <button onclick="logoutSession()" class="px-2.5 py-1.5 bg-slate-700 hover:bg-slate-800 text-white rounded-lg text-xs font-bold">Thoát App</button>
     </div>
   </header>
@@ -2145,6 +2154,38 @@
     }
 
     // ===== (18/11, người dùng) Hướng dẫn nhập & kiểm tra đơn =====
+    // (21/11) Trình duyệt đôi khi tự đẩy CẢ TRANG lên (khi bấm ô nhập / cuộn tới phần tử) -> thanh đầu trang bị khuất. Luôn kéo về 0.
+    function pinPageTop() {
+      if (window.scrollY || window.scrollX) window.scrollTo(0, 0);
+      if (document.documentElement.scrollTop) document.documentElement.scrollTop = 0;
+      if (document.body.scrollTop) document.body.scrollTop = 0;
+    }
+    window.addEventListener('scroll', pinPageTop, { passive: true });
+    document.addEventListener('scroll', pinPageTop, { passive: true, capture: true });
+    // Nút ⛶ Toàn Màn Hình: máy tính / Android dùng Fullscreen; iPhone không hỗ trợ -> hướng dẫn "Thêm vào Màn hình chính"
+    function toggleFullScreen() {
+      const d = document, el = d.documentElement;
+      const isFs = d.fullscreenElement || d.webkitFullscreenElement;
+      const req = el.requestFullscreen || el.webkitRequestFullscreen;
+      const exit = d.exitFullscreen || d.webkitExitFullscreen;
+      if (isFs && exit) { exit.call(d); return; }
+      if (req) { try { const r = req.call(el); if (r && r.catch) r.catch(() => fullScreenHelp()); } catch (e) { fullScreenHelp(); } return; }
+      fullScreenHelp();
+    }
+    function fullScreenHelp() {
+      if (window.navigator.standalone || matchMedia('(display-mode: standalone)').matches) { alert('App đang chạy toàn màn hình rồi.'); return; }
+      showBigNotice('Mở app TOÀN MÀN HÌNH trên iPhone', [
+        'Bước 1: Mở app bằng Safari, bấm nút Chia sẻ (ô vuông có mũi tên ↑) ở dưới màn hình.',
+        'Bước 2: Kéo xuống, chọn "Thêm vào MH chính" (Add to Home Screen), bấm "Thêm".',
+        'Bước 3: Từ nay mở app bằng biểu tượng TSS POS trên màn hình chính – app sẽ chạy toàn màn hình, không còn thanh địa chỉ.'
+      ], 'iPhone không cho trang web tự phóng toàn màn hình, nên phải thêm vào Màn hình chính 1 lần.');
+    }
+    function updateFsButton() {
+      const b = document.getElementById('btn-fullscreen'); if (!b) return;
+      b.innerHTML = (document.fullscreenElement || document.webkitFullscreenElement) ? '🗗<span class="hidden sm:inline"> Thu Nhỏ</span>' : '⛶<span class="hidden sm:inline"> Toàn Màn Hình</span>';
+    }
+    document.addEventListener('fullscreenchange', updateFsButton);
+    document.addEventListener('webkitfullscreenchange', updateFsButton);
     function mainScrollTo(top) { const m = document.getElementById('main-container'); if (m) m.scrollTop = Math.max(0, top); }
     function sectionTop(el) { const m = document.getElementById('main-container'); return el && m ? el.getBoundingClientRect().top - m.getBoundingClientRect().top + m.scrollTop - 8 : 0; }
     // Nhân viên vừa đăng nhập -> màn hình chạy ngay tới BẢNG NHẬP ĐƠN (chạy lại khi phần trên dài ra vì dữ liệu tải xong, nếu người dùng chưa tự kéo)

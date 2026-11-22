@@ -10,7 +10,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="TSS POS">
   <!-- (21/11) Tailwind dựng sẵn (app.css) thay cho cdn.tailwindcss.com để app nhẹ, không lag. Thêm class mới thì chạy lại lệnh trong tailwind/tailwind.config.cjs -->
-  <link rel="stylesheet" href="app.css?v=4">
+  <link rel="stylesheet" href="app.css?v=5">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
@@ -1118,6 +1118,127 @@
       if (!ws.length) return [];
       return priceItems.filter(it => it.kind === 'sb' && ws.some(w => wordsOf(it.ward).includes(wordsOf(w[1]))));
     }
+    // ===== (22/11, người dùng) TỰ CHUẨN HÓA ĐIỂM ĐẾN theo PHƯỜNG/XÃ MỚI (từ 01/7/2025 bỏ cấp Quận/Huyện) =====
+    // vd "123 Nguyễn Trãi P2 Q5" -> "123 Nguyễn Trãi, Phường Chợ Quán, Thành phố Hồ Chí Minh". Chỉ bên bán, chỉ ô Điểm đến.
+    // Chắc chắn (ok) mới sửa chữ; còn lại giữ nguyên chữ, ghi addrConf 'kiem' (+ addrCands) / 'khong'. Chữ cũ lưu ở destGoc.
+    // Bảng đổi: npm vietnam-address-database 1.0.0 (ward_mappings, Nghị quyết 202/2025/QH15), dạng "Quận cũ:phường cũ=phường mới,...;..."
+    const OLD_WARD_MAP_SRC = '1:Bến Thành=Bến Thành,Phạm Ngũ Lão=Bến Thành,Nguyễn Thái Bình=Bến Thành,Nguyễn Cư Trinh=Cầu Ông Lãnh,Cầu Kho=Cầu Ông Lãnh,Cô Giang=Cầu Ông Lãnh,Cầu Ông Lãnh=Cầu Ông Lãnh,Bến Nghé=Sài Gòn,Tân Định=Tân Định,Đa Kao=Tân Định;3:1=Bàn Cờ,2=Bàn Cờ,3=Bàn Cờ,5=Bàn Cờ,4=Bàn Cờ,9=Nhiêu Lộc,11=Nhiêu Lộc,12=Nhiêu Lộc,14=Nhiêu Lộc,Võ Thị Sáu=Xuân Hòa,10=Nhiêu Lộc,13=Nhiêu Lộc;4:8=Khánh Hội,9=Khánh Hội,15=Khánh Hội,1=Vĩnh Hội,3=Vĩnh Hội,2=Vĩnh Hội,4=Vĩnh Hội,13=Xóm Chiếu,16=Xóm Chiếu,18=Xóm Chiếu,10=Khánh Hội,6=Khánh Hội,14=Khánh Hội;5:5=An Đông,7=An Đông,9=An Đông,11=Chợ Lớn,12=Chợ Lớn,13=Chợ Lớn,14=Chợ Lớn,1=Chợ Quán,2=Chợ Quán,4=Chợ Quán,6=An Đông,8=An Đông,10=Chợ Lớn,3=Chợ Quán;6:10=Bình Phú,11=Bình Phú,1=Bình Tiên,7=Bình Tiên,8=Bình Tiên,2=Bình Tây,9=Bình Tây,12=Phú Lâm,13=Phú Lâm,14=Phú Lâm,10=Bình Phú,3=Bình Tiên,4=Bình Tiên,6=Bình Tây,5=Bình Tây,5=Bình Tây,13=Phú Lâm;7:Phú Thuận=Phú Thuận,Tân Phong=Tân Hưng,Tân Hưng=Tân Hưng,Tân Kiểng=Tân Hưng,Tân Quy=Tân Hưng,Tân Phú=Tân Mỹ,Phú Mỹ=Tân Mỹ,Bình Thuận=Tân Thuận,Tân Thuận Đông=Tân Thuận,Tân Thuận Tây=Tân Thuận;8:6=Bình Đông,7=Bình Đông,Rạch Ông=Chánh Hưng,Hưng Phú=Chánh Hưng,4=Chánh Hưng,5=Chánh Hưng,Xóm Củi=Phú Định,14=Phú Định,15=Phú Định,16=Phú Định,1=Chánh Hưng,2=Chánh Hưng,3=Chánh Hưng,8=Chánh Hưng,9=Chánh Hưng,10=Chánh Hưng,11=Phú Định,12=Phú Định,13=Phú Định;10:6=Diên Hồng,8=Diên Hồng,14=Diên Hồng,12=Hòa Hưng,13=Hòa Hưng,15=Hòa Hưng,1=Vườn Lài,2=Vườn Lài,4=Vườn Lài,9=Vườn Lài,10=Vườn Lài,7=Diên Hồng,5=Diên Hồng,11=Vườn Lài;11:3=Bình Thới,10=Bình Thới,8=Bình Thới,5=Hòa Bình,14=Hòa Bình,1=Minh Phụng,7=Minh Phụng,16=Minh Phụng,11=Phú Thọ,15=Phú Thọ,9=Bình Thới,12=Bình Thới,2=Minh Phụng,4=Minh Phụng,6=Minh Phụng,13=Phú Thọ;12:An Phú Đông=An Phú Đông,Thạnh Lộc=An Phú Đông,Thới An=Thới An,Thạnh Xuân=Thới An,Trung Mỹ Tây=Trung Mỹ Tây,Tân Chánh Hiệp=Trung Mỹ Tây,Hiệp Thành=Tân Thới Hiệp,Tân Thới Hiệp=Tân Thới Hiệp,Tân Thới Nhất=Đông Hưng Thuận,Tân Hưng Thuận=Đông Hưng Thuận,Đông Hưng Thuận=Đông Hưng Thuận;Gò Vấp:12=An Hội Tây,14=An Hội Tây,15=An Hội Đông,16=An Hội Đông,5=An Nhơn,6=An Nhơn,10=Gò Vấp,17=Gò Vấp,1=Hạnh Thông,3=Hạnh Thông,8=Thông Tây Hội,11=Thông Tây Hội,13=An Hội Tây,13=An Hội Đông,4=Hạnh Thông,7=Hạnh Thông,9=Thông Tây Hội;Bình Tân:An Lạc=An Lạc,An Lạc A=An Lạc,Bình Trị Đông B=An Lạc,Bình Hưng Hòa=Bình Hưng Hòa,Bình Hưng Hoà A=Bình Hưng Hòa,Bình Trị Đông=Bình Trị Đông,Bình Trị Đông A=Bình Trị Đông,Bình Hưng Hoà B=Bình Tân,Tân Tạo A=Tân Tạo,Tân Tạo=Tân Tạo;Tân Bình:10=Bảy Hiền,11=Bảy Hiền,12=Bảy Hiền,13=Tân Bình,14=Tân Bình,6=Tân Hòa,8=Tân Hòa,9=Tân Hòa,15=Tân Sơn,1=Tân Sơn Hòa,2=Tân Sơn Hòa,3=Tân Sơn Hòa,4=Tân Sơn Nhất,5=Tân Sơn Nhất,7=Tân Sơn Nhất;Thủ Đức:An Khánh=An Khánh,An Lợi Đông=An Khánh,Thảo Điền=An Khánh,Thủ Thiêm=An Khánh,Bình Trưng Đông=Bình Trưng,Bình Trưng Tây=Bình Trưng,An Phú=Bình Trưng,Cát Lái=Cát Lái,Thạnh Mỹ Lợi=Cát Lái,Hiệp Bình Chánh=Hiệp Bình,Hiệp Bình Phước=Hiệp Bình,Linh Đông=Hiệp Bình,Linh Trung=Linh Xuân,Linh Xuân=Linh Xuân,Linh Tây=Linh Xuân,Long Bình=Long Bình,Long Thạnh Mỹ=Long Bình,Long Phước=Long Phước,Trường Thạnh=Long Phước,Long Trường=Long Trường,Phú Hữu=Long Trường,Phước Bình=Phước Long,Phước Long A=Phước Long,Phước Long B=Phước Long,Bình Chiểu=Tam Bình,Tam Bình=Tam Bình,Tam Phú=Tam Bình,Bình Thọ=Thủ Đức,Linh Chiểu=Thủ Đức,Trường Thọ=Thủ Đức,Hiệp Phú=Tăng Nhơn Phú,Tân Phú=Tăng Nhơn Phú,Tăng Nhơn Phú A=Tăng Nhơn Phú,Tăng Nhơn Phú B=Tăng Nhơn Phú;Thuận An:An Phú=An Phú,Bình Hòa=Bình Hòa,Vĩnh Phú=Bình Hòa,Lái Thiêu=Lái Thiêu,Bình Nhâm=Lái Thiêu,Hưng Định=Thuận An,An Thạnh=Thuận An,An Sơn=Thuận An,Thuận Giao=Thuận Giao,Bình Chuẩn=Thuận Giao;Bà Rịa:Phước Trung=Bà Rịa,Phước Nguyên=Bà Rịa,Long Toàn=Bà Rịa,Phước Hưng=Bà Rịa,Kim Dinh=Long Hương,Long Hương=Long Hương,Tân Hưng=Long Hương,Long Tâm=Tam Long,Hoà Long=Tam Long,Long Phước=Tam Long,Phước Hiệp=Bà Rịa;Bắc Tân Uyên:Bình Mỹ=Bình Cơ,Tân Lập=Tân Uyên,Tân Mỹ=Tân Uyên,Tân Bình=Vĩnh Tân,Đất Cuốc=Bắc Tân Uyên,Tân Định=Bắc Tân Uyên,Tân Thành=Bắc Tân Uyên,Thường Tân=Thường Tân,Lạc An=Thường Tân,Hiếu Liêm=Thường Tân;Tân Uyên:Hội Nghĩa=Bình Cơ,Phú Chánh=Bình Dương,Khánh Bình=Tân Hiệp,Tân Hiệp=Tân Hiệp,Thạnh Hội=Tân Khánh,Thạnh Phước=Tân Khánh,Tân Phước Khánh=Tân Khánh,Tân Vĩnh Hiệp=Tân Khánh,Thái Hòa=Tân Khánh,Uyên Hưng=Tân Uyên,Bạch Đằng=Tân Uyên,Vĩnh Tân=Vĩnh Tân;Thủ Dầu Một:Hoà Phú=Bình Dương,Phú Mỹ=Bình Dương,Phú Tân=Bình Dương,Định Hoà=Chánh Hiệp,Tương Bình Hiệp=Chánh Hiệp,Chánh Mỹ=Chánh Hiệp,Tân An=Phú An,Hiệp An=Phú An,Phú Lợi=Phú Lợi,Phú Hòa=Phú Lợi,Hiệp Thành=Phú Lợi,Phú Cường=Thủ Dầu Một,Phú Thọ=Thủ Dầu Một,Chánh Nghĩa=Thủ Dầu Một;Bình Thạnh:5=Bình Lợi Trung,11=Bình Lợi Trung,13=Bình Lợi Trung,27=Bình Quới,28=Bình Quới,12=Bình Thạnh,14=Bình Thạnh,26=Bình Thạnh,1=Gia Định,2=Gia Định,7=Gia Định,17=Gia Định,19=Thạnh Mỹ Tây,22=Thạnh Mỹ Tây,25=Thạnh Mỹ Tây,6=Bình Lợi Trung,13=Bình Lợi Trung,24=Bình Thạnh,3=Gia Định,15=Gia Định,6=Gia Định,21=Thạnh Mỹ Tây;Bàu Bàng:Lai Hưng=Bến Cát,Tân Hưng=Bến Cát,Hưng Hòa=Chánh Phú Hòa,Long Nguyên=Long Nguyên,Lai Uyên=Bàu Bàng,Trừ Văn Thố=Trừ Văn Thố,Cây Trường II=Trừ Văn Thố;Bến Cát:Mỹ Phước=Bến Cát,Chánh Phú Hòa=Chánh Phú Hòa,Tân Định=Hòa Lợi,Hòa Lợi=Hòa Lợi,An Điền=Long Nguyên,Phú An=Phú An,Thới Hòa=Thới Hòa,An Tây=Tây Nam;Phú Nhuận:1=Cầu Kiệu,2=Cầu Kiệu,7=Cầu Kiệu,15=Cầu Kiệu,8=Phú Nhuận,10=Phú Nhuận,11=Phú Nhuận,13=Phú Nhuận,4=Đức Nhuận,5=Đức Nhuận,9=Đức Nhuận,17=Cầu Kiệu,3=Đức Nhuận;Dĩ An:Dĩ An=Dĩ An,An Bình=Dĩ An,Tân Bình=Tân Đông Hiệp,Tân Đông Hiệp=Tân Đông Hiệp,Bình An=Đông Hòa,Bình Thắng=Đông Hòa,Đông Hòa=Đông Hòa;Phú Mỹ:Mỹ Xuân=Phú Mỹ,Phú Mỹ=Phú Mỹ,Tân Hoà=Tân Hải,Tân Hải=Tân Hải,Tân Phước=Tân Phước,Phước Hoà=Tân Phước,Hắc Dịch=Tân Thành,Sông Xoài=Tân Thành,Tóc Tiên=Châu Pha,Châu Pha=Châu Pha;Tân Phú:Phú Thạnh=Phú Thạnh,Hiệp Tân=Phú Thạnh,Tân Thới Hòa=Phú Thạnh,Phú Thọ Hòa=Phú Thọ Hòa,Tân Thành=Phú Thọ Hòa,Phú Trung=Tân Phú,Hòa Thạnh=Tân Phú,Tân Sơn Nhì=Tân Sơn Nhì,Sơn Kỳ=Tân Sơn Nhì,Tân Quý=Tân Sơn Nhì,Tây Thạnh=Tây Thạnh;Vũng Tàu:11=Phước Thắng,12=Phước Thắng,10=Rạch Dừa,Thắng Nhất=Rạch Dừa,Rạch Dừa=Rạch Dừa,7=Tam Thắng,8=Tam Thắng,9=Tam Thắng,Nguyễn An Ninh=Tam Thắng,1=Vũng Tàu,2=Vũng Tàu,3=Vũng Tàu,4=Vũng Tàu,5=Vũng Tàu,Thắng Nhì=Vũng Tàu,Thắng Tam=Vũng Tàu,Long Sơn=Long Sơn;Dầu Tiếng:Thanh Tuyền=Tây Nam,Dầu Tiếng=Dầu Tiếng,Định An=Dầu Tiếng,Định Thành=Dầu Tiếng,Long Tân=Long Hòa,Long Hoà=Long Hòa,Minh Hoà=Minh Thạnh,Minh Tân=Minh Thạnh,Minh Thạnh=Minh Thạnh,Thanh An=Thanh An,Định Hiệp=Thanh An,An Lập=Thanh An;Phú Giáo:An Linh=An Long,An Long=An Long,Tân Long=An Long,An Bình=Phú Giáo,Phước Vĩnh=Phú Giáo,Tam Lập=Phú Giáo,Vĩnh Hoà=Phước Hòa,Phước Hoà=Phước Hòa,An Thái=Phước Thành,Phước Sang=Phước Thành,Tân Hiệp=Phước Thành;Củ Chi:Phú Mỹ Hưng=An Nhơn Tây,An Phú=An Nhơn Tây,An Nhơn Tây=An Nhơn Tây,Bình Mỹ=Bình Mỹ,Trung An=Bình Mỹ,Hòa Phú=Bình Mỹ,Tân Phú Trung=Củ Chi,Tân Thông Hội=Củ Chi,Phước Vĩnh An=Củ Chi,Nhuận Đức=Nhuận Đức,Trung Lập Hạ=Nhuận Đức,Phạm Văn Cội=Nhuận Đức,Tân Thạnh Tây=Phú Hòa Đông,Tân Thạnh Đông=Phú Hòa Đông,Phú Hòa Đông=Phú Hòa Đông,Trung Lập Thượng=Thái Mỹ,Thái Mỹ=Thái Mỹ,Phước Thạnh=Thái Mỹ,Phước Hiệp=Tân An Hội,Tân An Hội=Tân An Hội,Củ Chi=Tân An Hội;Cần Giờ:Lý Nhơn=An Thới Đông,An Thới Đông=An Thới Đông,Bình Khánh=Bình Khánh,Tam Thôn Hiệp=Bình Khánh,Long Hòa=Cần Giờ,Cần Thạnh=Cần Giờ,Thạnh An=Thạnh An;Hóc Môn:Xuân Thới Thượng=Bà Điểm,Bà Điểm=Bà Điểm,Trung Chánh=Bà Điểm,Tân Xuân=Hóc Môn,Tân Hiệp=Hóc Môn,Hóc Môn=Hóc Môn,Xuân Thới Đông=Xuân Thới Sơn,Xuân Thới Sơn=Xuân Thới Sơn,Tân Thới Nhì=Xuân Thới Sơn,Đông Thạnh=Đông Thạnh,Nhị Bình=Đông Thạnh,Thới Tam Thôn=Đông Thạnh;Xuyên Mộc:Tân Lâm=Bàu Lâm,Bàu Lâm=Bàu Lâm,Bình Châu=Bình Châu,Hòa Hiệp=Hòa Hiệp,Hòa Hội=Hòa Hội,Hòa Hưng=Hòa Hội,Hòa Bình=Hòa Hội,Phước Bửu=Hồ Tràm,Phước Tân=Hồ Tràm,Phước Thuận=Hồ Tràm,Bông Trang=Xuyên Mộc,Xuyên Mộc=Xuyên Mộc,Bưng Riềng=Xuyên Mộc;Bình Chánh:Bình Chánh=Bình Chánh,Tân Quý Tây=Bình Chánh,An Phú Tây=Bình Chánh,Bình Hưng=Bình Hưng,Phong Phú=Bình Hưng,Bình Lợi=Bình Lợi,Lê Minh Xuân=Bình Lợi,Hưng Long=Hưng Long,Quy Đức=Hưng Long,Đa Phước=Hưng Long,Tân Nhựt=Tân Nhựt,Tân Túc=Tân Nhựt,Tân Kiên=Tân Nhựt,Vĩnh Lộc B=Tân Vĩnh Lộc,Phạm Văn Hai=Tân Vĩnh Lộc,Vĩnh Lộc A=Vĩnh Lộc;Châu Đức:Bình Trung=Bình Giã,Bình Giã=Bình Giã,Quảng Thành=Bình Giã,Cù Bị=Châu Đức,Xà Bang=Châu Đức,Kim Long=Kim Long,Bàu Chinh=Kim Long,Láng Lớn=Kim Long,Đá Bạc=Nghĩa Thành,Nghĩa Thành=Nghĩa Thành,Ngãi Giao=Ngãi Giao,Bình Ba=Ngãi Giao,Suối Nghệ=Ngãi Giao,Suối Rao=Xuân Sơn,Xuân Sơn=Xuân Sơn,Sơn Bình=Xuân Sơn;Nhà Bè:Nhơn Đức=Hiệp Phước,Long Thới=Hiệp Phước,Hiệp Phước=Hiệp Phước,Nhà Bè=Nhà Bè,Phú Xuân=Nhà Bè,Phước Kiển=Nhà Bè,Phước Lộc=Nhà Bè;Long Đất:Long Hải=Long Hải,Phước Tỉnh=Long Hải,Phước Hưng=Long Hải,Long Điền=Long Điền,Tam An=Long Điền,Phước Hải=Phước Hải,Phước Hội=Phước Hải,Đất Đỏ=Đất Đỏ,Láng Dài=Đất Đỏ,Long Tân=Đất Đỏ,Phước Long Thọ=Đất Đỏ,An Nhứt=Long Điền,An Ngãi=Long Điền,Tam Phước=Long Điền,Lộc An=Phước Hải';
+    const ADDR_CITY = 'Thành phố Hồ Chí Minh';
+    const DIST_ABBR_NAME = { bt: 'Bình Thạnh', tb: 'Tân Bình', pn: 'Phú Nhuận', gv: 'Gò Vấp', td: 'Thủ Đức', bc: 'Bình Chánh', hm: 'Hóc Môn', cc: 'Củ Chi', nb: 'Nhà Bè', cg: 'Cần Giờ', btan: 'Bình Tân' };
+    let oldWardDists = null;
+    function oldWardData() {
+      if (oldWardDists) return oldWardDists;
+      oldWardDists = OLD_WARD_MAP_SRC.split(';').map(part => {
+        const [d, list] = part.split(':');
+        const num = /^\d+$/.test(d) ? +d : null;
+        return { d, num, key: num ? null : canonWords(d), wards: list.split(',').map(x => { const [o, n] = x.split('='); return { o, key: /^\d+$/.test(o) ? null : canonWords(o), n }; }) };
+      });
+      return oldWardDists;
+    }
+    const wardLabelOf = name => { const w = NEW_WARDS.find(x => x[1] === name); return (w && w[0] === 'X' ? 'Xã ' : w && w[0] === 'ĐK' ? 'Đặc khu ' : 'Phường ') + name; };
+    // Tách chữ gõ thành từ (giữ vị trí) để bỏ phần Phường/Quận/TP cũ mà vẫn giữ nguyên chữ có dấu của số nhà, tên đường
+    function addrTokens(s) { const out = []; const re = /[\p{L}\p{M}\p{N}]+/gu; let m; while ((m = re.exec(s))) out.push({ s: m.index, e: m.index + m[0].length, c: canonWords(m[0]).trim() }); return out; }
+    function normalizeDestAddr(dest) {
+      const raw = String(dest || '').normalize('NFC').trim();
+      if (!raw) return null;
+      const t = canonWords(raw);
+      if (DEST_EXEMPT.some(k => t.startsWith(' ' + k + ' '))) return null;
+      const toks = addrTokens(raw), C = toks.map(x => x.c), del = new Array(toks.length).fill(false);
+      const seqAt = (words, from) => { const out = []; for (let i = from; i + words.length <= C.length; i++) if (words.every((w, j) => C[i + j] === w)) out.push(i); return out; };
+      // xóa lần xuất hiện CUỐI của cụm (kèm chữ đứng trước như "phường", "quận", "tp"); bỏ qua nếu ngay trước là số nhà (= tên đường)
+      const PFX = ['p', 'phuong', 'f', 'xa', 'tt', 'dac khu', 'thi tran', 'q', 'quan', 'huyen', 'h', 'tp', 'thanh pho', 'tx', 'thi xa', 'district', 'ward'];
+      const killLast = (phrase, allowAfterNum) => {
+        const w = canonWords(phrase).trim().split(' ');
+        const hits = seqAt(w, 0).filter(i => !del[i]);
+        for (let k = hits.length - 1; k >= 0; k--) {
+          const i = hits[k];
+          let p = i;
+          for (const pf of PFX) { const pw = pf.split(' '); if (p - pw.length >= 0 && pw.every((x, j) => C[p - pw.length + j] === x)) { p -= pw.length; break; } }
+          // tên phường dính liền chữ đứng trước (vd "Chợ Bến Thành") -> là tên địa điểm, giữ nguyên
+          if (!allowAfterNum && p === i && i > 0 && (/^\d/.test(C[i - 1]) || !/[,;\-–(]/.test(raw.slice(toks[i - 1].e, toks[i].s)))) continue;
+          for (let j = p; j < i + w.length; j++) del[j] = true;
+          return true;
+        }
+        return false;
+      };
+      const dists = oldWardData();
+      // 1. Phường/xã MỚI ghi rõ chữ "Phường/Xã" đứng trước -> chắc chắn
+      let prefNew = NEW_WARDS.filter(w => new RegExp(' (?:p|phuong|xa|dac khu) ' + canonWords(w[1]).trim() + ' ').test(t));
+      prefNew = prefNew.filter(w => !prefNew.some(o => o !== w && o[1].length > w[1].length && canonWords(o[1]).includes(canonWords(w[1]))));   // "P. Tân Sơn Hòa" không phải "Tân Sơn"
+      // Tên TỈNH cũ (Bình Dương, Bà Rịa - Vũng Tàu) không phải tên phường (trừ khi ghi "Phường ...")
+      const PROV_OLD = [' tinh binh duong ', ' binh duong ', ' tinh ba ria vung tau ', ' ba ria vung tau ', ' brvt '];
+      const tw = PROV_OLD.reduce((a, k) => prefNew.some(w => k.includes(canonWords(w[1]))) ? a : a.split(k).join(' '), t);
+      // 2. Quận/Huyện cũ
+      let dist = null;
+      const mq = / (?:q|quan|district) ?0?(\d{1,2}) /.exec(t);
+      if (mq) { const n = +mq[1]; dist = dists.find(x => x.num === n) || ((n === 2 || n === 9) ? dists.find(x => x.d === 'Thủ Đức') : null); }
+      if (!dist) {
+        const named = dists.filter(x => x.key && t.includes(x.key) && !prefNew.some(w => canonWords(w[1]) === x.key)).sort((a, b) => b.key.length - a.key.length);
+        if (named.length) dist = named[0];
+      }
+      if (!dist) { const ab = C.find(c => DIST_ABBR_NAME[c]); if (ab) dist = dists.find(x => x.d === DIST_ABBR_NAME[ab]); }
+      // 3. Phường cũ có số (P5, F.12, Phường 03)
+      const mp = / (?:p|phuong|f|ward) ?0?(\d{1,2}) /.exec(t);
+      let cands = [];
+      if (prefNew.length === 1) cands = [prefNew[0][1]];
+      else if (dist) {
+        if (mp) cands = dist.wards.filter(w => w.o === String(+mp[1])).map(w => w.n);
+        const tt = dist.key ? tw.split(dist.key).join(' ') : tw;   // bỏ chữ trùng tên quận (vd Bình Thạnh, Hóc Môn)
+        if (!cands.length) { const nw = dist.wards.filter(w => w.key && tt.includes(w.key)).sort((a, b) => b.key.length - a.key.length); if (nw.length) cands = nw.filter(w => w.key === nw[0].key).map(w => w.n); }
+        if (!cands.length) {
+          // tên phường mới (không ghi chữ "Phường") nằm trong quận cũ này
+          const inD = new Set(dist.wards.map(w => w.n));
+          cands = findNewWards(tt).map(w => w[1]).filter(n => inD.has(n));
+        }
+        if (!cands.length) cands = [...new Set(dist.wards.map(w => w.n))];
+      } else {
+        cands = findNewWards(tw).filter(w => w[0] !== 'ĐK').map(w => w[1]);
+        if (!cands.length && !mp) {   // phường cũ có tên, ghi rõ "P./Phường" mà không ghi quận
+          dists.forEach(d => d.wards.forEach(w => { if (w.key && new RegExp(' (?:p|phuong|xa|tt|thi tran) ' + w.key.trim() + ' ').test(t)) cands.push(w.n); }));
+        }
+      }
+      cands = [...new Set(cands)];
+      if (cands.length !== 1) {
+        if (cands.length > 1) return { conf: 'kiem', cands, why: (dist ? (dist.num ? 'Quận ' + dist.d : dist.d) + ' cũ' : 'Tên') + ' thuộc nhiều phường mới' };
+        if (mp) return { conf: 'kiem', cands: [], why: 'Có số phường nhưng thiếu quận cũ' };
+        if (LANDMARKS.some(k => t.includes(' ' + k + ' '))) return { conf: 'kiem', cands: [], why: 'Chỉ có tên địa điểm' };
+        if (destHasDistrict(raw)) return { conf: 'kiem', cands: [], why: 'Chỉ có tỉnh / địa điểm, chưa rõ phường' };
+        return { conf: 'khong', cands: [], why: 'Không đọc được phường/quận' };
+      }
+      const ward = cands[0];
+      // Không ghi chữ "Phường", không có quận, tên phường chỉ đứng sau số nhà -> có thể là TÊN ĐƯỜNG trùng tên phường -> xem lại
+      if (!prefNew.length && !dist && !mp) {
+        const w = canonWords(ward).trim().split(' ');
+        const hits = seqAt(w, 0);
+        if (hits.length && hits.every(i => i > 0 && /^\d/.test(C[i - 1]))) return { conf: 'kiem', cands, why: 'Tên phường trùng tên đường' };
+      }
+      // Bỏ phần hành chính cũ khỏi chữ gõ
+      toks.forEach((x, i) => { if (/^(?:q|p|f)\d{1,2}$/.test(x.c)) del[i] = true; });
+      toks.forEach((x, i) => { if (i + 1 < toks.length && /^(?:q|quan|district|p|phuong|f|ward)$/.test(x.c) && /^\d{1,2}$/.test(C[i + 1])) { del[i] = del[i + 1] = true; } });
+      if (dist && dist.key) killLast(dist.d, true);
+      if (dist) C.forEach((c, i) => { if (DIST_ABBR_NAME[c] === dist.d) del[i] = true; });
+      killLast(ward, false);
+      dist && dist.wards.forEach(w => { if (w.n === ward && w.key) killLast(w.o, false); });
+      ['tp hcm', 'tphcm', 'hcm', 'hcmc', 'ho chi minh', 'sai gon city', 'viet nam', 'vietnam', 'vn', 'tinh binh duong', 'binh duong', 'ba ria vung tau', 'brvt'].forEach(p => { while (killLast(p, true)); });
+      let out = '', last = 0;
+      toks.forEach((x, i) => { if (del[i]) { out += raw.slice(last, x.s); last = x.e; } });
+      out += raw.slice(last);
+      let street = out.replace(/\(\s*\)/g, ' ').replace(/\s*([,;])\s*/g, ', ').replace(/(?:,\s*){2,}/g, ', ').replace(/\s{2,}/g, ' ')
+        .replace(/^[\s,;.\-–]+|[\s,;.\-–]+$/g, '').replace(/\s+([.,])/g, '');
+      const full = ((street ? street + ', ' : '') + wardLabelOf(ward) + ', ' + ADDR_CITY).normalize('NFC');
+      return { conf: 'ok', addr: full, ward, cands };
+    }
+    // Áp vào 1 đơn (đối tượng sẽ ghi): sửa destination nếu chắc chắn, ghi addrConf / addrCands / destGoc
+    function applyAddrNorm(trip) {
+      if (!trip || !PRICE_ROLES.includes(trip.role)) return trip;
+      const r = normalizeDestAddr(trip.destination);
+      delete trip.addrConf; delete trip.addrCands;
+      if (!r) return trip;
+      if (r.conf === 'ok') {
+        if (r.addr !== trip.destination) { if (!trip.destGoc) trip.destGoc = trip.destination; trip.destination = r.addr; }
+      } else { trip.addrConf = r.conf; if (r.cands.length) trip.addrCands = r.cands.slice(0, 6).join(', '); }
+      return trip;
+    }
     const DEST_RULE_TEXT = 'BẮT BUỘC ghi TÊN ĐƯỜNG + Phường/Xã (hoặc Quận/Huyện). Số nhà có hay không đều được — vd: "Võ Duy Ninh, Thạnh Mỹ Tây", "140/20 Võ Duy Ninh, Thạnh Mỹ Tây", "Đề Thám, Q1". Chỉ ghi phường/quận là CHƯA ĐỦ. Bệnh viện, khách sạn, bến xe, đi tỉnh cũng phải có tên đường — vd: "Bệnh viện Chợ Rẫy, Nguyễn Chí Thanh, Q5", "Thùy Vân, Vũng Tàu".';
     const HCM_DISTRICT_NAMES = ['thu duc', 'go vap', 'binh thanh', 'binh tan', 'tan binh', 'phu nhuan', 'tan phu',
       'binh chanh', 'can gio', 'hoc mon', 'cu chi', 'nha be'];
@@ -1274,6 +1395,7 @@
     // Khớp 1 khu vực -> giá đó; khớp nhiều khu vực -> lấy GIÁ THẤP NHẤT (không bắt lỗi oan). Không khớp -> không xét.
     const inferCache = new Map();
     function inferListPrice(t) {
+      if (t && t.destGoc) t = Object.assign({}, t, { destination: t.destGoc });   // (22/11) đơn đã đổi sang phường mới: ước tính giá theo chữ GỐC như trước
       if (!priceItems.length || !t.destination) return null;
       const key = `${t.destination}|${t.carType}`;
       if (inferCache.has(key)) return inferCache.get(key);
@@ -2053,7 +2175,9 @@
         const warns = batchRowWarnings(i);
         const fare = Number(String(f).replace(/[^0-9]/g, '')) || 0;
         const parts = [v(`staff-${i}`) || '(chưa có tên)', t ? 'Phiếu ' + t : '(chưa có phiếu)', p ? 'Xe ' + p : '', d, fare ? fare.toLocaleString('vi-VN') + 'đ' : '', v(`m-${i}`)].filter(Boolean);
+        const na = d && usesPriceList() ? normalizeDestAddr(d) : null;   // (22/11) xem trước địa chỉ phường/xã mới sẽ lưu
         lines.push(`<div class="py-0.5">✅ <b>Dòng ${i + 1}:</b> ${parts.map(escHtml).join(' • ')}</div>` +
+          (na && na.conf === 'ok' && na.addr !== d ? `<div class="ml-5 text-[11px] text-sky-800 font-bold">📍 Sẽ lưu địa chỉ mới: ${escHtml(na.addr)}</div>` : '') +
           warns.map(w => w.red
             ? `<div class="ml-5 mb-1 px-3 py-2 bg-red-600 border-2 border-red-800 rounded-xl text-white text-[14px] font-black shadow">⛔ ${escHtml(w.text)}</div>`
             : `<div class="ml-5 mb-0.5 px-2 py-0.5 bg-orange-100 border border-orange-300 rounded-lg text-orange-800 font-extrabold">⚠️ ${escHtml(w.text)}</div>`).join(''));
@@ -2871,7 +2995,7 @@
               <div>
                 <label class="font-bold text-slate-600">Điểm Đến:</label>
                 <div class="relative">
-                  <input type="text" id="edit-modal-dest" autocomplete="off" value="${escHtml(trip.destination || '')}" data-price-id="${escHtml(trip.priceId || '')}" data-price-label="${escHtml(trip.priceId && priceById[trip.priceId] ? priceById[trip.priceId].label : '')}" class="w-full mt-1 p-2.5 bg-slate-50 border rounded-xl font-bold" oninput="showDestSuggestions(this, 'edit-dest-drop', null); applyEditModalPrice()" onkeydown="suggestKeydown(event, 'edit-dest-drop')" onblur="applyTerminalDest(this); hideSuggestLater('edit-dest-drop')">
+                  <input type="text" id="edit-modal-dest" autocomplete="off" value="${escHtml(trip.destination || '')}" data-price-id="${escHtml(trip.priceId || '')}" data-price-label="${escHtml(trip.priceId && priceById[trip.priceId] && String(trip.destination || '').includes(priceById[trip.priceId].label) ? priceById[trip.priceId].label : '')}" class="w-full mt-1 p-2.5 bg-slate-50 border rounded-xl font-bold" oninput="showDestSuggestions(this, 'edit-dest-drop', null); applyEditModalPrice()" onkeydown="suggestKeydown(event, 'edit-dest-drop')" onblur="applyTerminalDest(this); hideSuggestLater('edit-dest-drop')">
                   <div id="edit-dest-drop"></div>
                 </div>
               </div>
@@ -2965,6 +3089,7 @@
       trip.source = source;
       trip.pickup = pickup;
       trip.destination = destination;
+      applyAddrNorm(trip);   // (22/11) điểm đến -> phường/xã mới
       trip.totalFare = totalFare;
       trip.paymentMethod = paymentMethod;
       trip.note = note;
@@ -3411,6 +3536,62 @@
         sel.forEach(g => g.trips.forEach(t => { const m = allCompanyTrips.find(x => x.id === t.id); if (m) m.staff = g.to; }));
       }
       return n;
+    }
+    // (22/11, người dùng) Nút Quản lý: đổi Điểm đến của TOÀN BỘ đơn cũ bên bán sang phường/xã mới. Xem trước số đơn rồi mới ghi.
+    async function openAddrFixModal() {
+      if (!isManager()) return;
+      const wait = bigModalShell({ bg: 'bg-sky-600', border: 'border-sky-600', icon: '⏳' }, 'ĐANG ĐỌC TOÀN BỘ ĐƠN...', '<div class="text-center text-slate-600 font-bold">Vui lòng chờ</div>', '');
+      let all;
+      try { all = Object.values((await dbRef('trips').once('value')).val() || {}); } catch (e) { wait.remove(); alert('Lỗi đọc dữ liệu: ' + e.message); return; }
+      wait.remove();
+      const plan = [], cnt = { kiem: 0, khong: 0 };
+      all.forEach(t => {
+        if (!t || !t.id || !PRICE_ROLES.includes(t.role)) return;
+        const n = applyAddrNorm(Object.assign({}, t));
+        const ch = {};
+        ['destination', 'destGoc', 'addrConf', 'addrCands'].forEach(k => { if (String(n[k] == null ? '' : n[k]) !== String(t[k] == null ? '' : t[k])) ch[k] = n[k] == null ? null : n[k]; });
+        if (n.addrConf) cnt[n.addrConf]++;
+        if (Object.keys(ch).length) plan.push({ t, n, ch });
+      });
+      const changed = plan.filter(x => 'destination' in x.ch), bad = plan.filter(x => x.n.addrConf);
+      const row = (a, b, cls) => `<div class="border rounded-xl p-2 text-[12px] ${cls}"><div class="text-slate-500 line-through">${escHtml(a)}</div><div class="font-bold">${b}</div></div>`;
+      const body = `<div class="grid grid-cols-3 gap-2 text-center font-black">
+          <div class="bg-emerald-50 border-2 border-emerald-400 rounded-2xl p-2"><div class="text-2xl text-emerald-700">${changed.length}</div><div class="text-[11px] text-emerald-800">✅ Đổi sang địa chỉ mới</div></div>
+          <div class="bg-amber-50 border-2 border-amber-400 rounded-2xl p-2"><div class="text-2xl text-amber-700">${cnt.kiem}</div><div class="text-[11px] text-amber-800">⚠️ Cần xem lại (giữ chữ cũ)</div></div>
+          <div class="bg-rose-50 border-2 border-rose-400 rounded-2xl p-2"><div class="text-2xl text-rose-700">${cnt.khong}</div><div class="text-[11px] text-rose-800">❌ Chưa đọc được (giữ chữ cũ)</div></div></div>
+        <div class="text-[12px] text-slate-600 font-semibold">Chỉ đơn Bán vé / Kế hoạch, chỉ ô Điểm đến. Chữ cũ được lưu lại để tra cứu. Giá bảng đã gắn với đơn không đổi.
+          Đơn ⚠️/❌ tìm ở Bảng Đối Soát bằng từ khóa <b>kiểm địa chỉ</b>.</div>
+        ${changed.length ? '<div class="font-black text-emerald-800 text-sm">Ví dụ đơn sẽ đổi:</div>' + changed.slice(0, 30).map(x => row(x.t.destination, '→ ' + escHtml(x.n.destination), 'bg-emerald-50/40')).join('') : ''}
+        ${bad.length ? '<div class="font-black text-amber-800 text-sm">Ví dụ đơn cần xem lại:</div>' + bad.slice(0, 20).map(x => row(x.t.destination, x.n.addrConf === 'kiem' ? '⚠️ ' + escHtml(x.n.addrCands || 'chưa rõ phường') : '❌ chưa đọc được', 'bg-amber-50/40')).join('') : ''}`;
+      const el = bigModalShell({ bg: 'bg-sky-600', border: 'border-sky-600', icon: '📍' }, 'CHUẨN HÓA ĐỊA CHỈ ĐƠN CŨ', body,
+        (plan.length ? `<button id="af-ok" class="w-full py-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl text-[18px] font-black shadow-lg">✅ ĐỒNG Ý – GHI ${plan.length} ĐƠN</button>` : '<div class="text-center font-bold text-emerald-700">Không còn đơn nào cần đổi.</div>')
+        + '<button id="af-no" class="w-full py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-2xl text-[15px] font-bold border border-slate-300">Đóng</button>');
+      el.querySelector('#af-no').onclick = () => el.remove();
+      const ok = el.querySelector('#af-ok');
+      if (!ok) return;
+      ok.onclick = async () => {
+        ok.disabled = true; ok.textContent = '⏳ Đang ghi...';
+        try {
+          const accs = [...new Set(plan.map(x => x.t.createdBy).filter(Boolean))], ut = {};
+          await Promise.all(accs.map(a => dbRef('users_trips/' + a).once('value').then(s => { ut[a] = s.val() || {}; }).catch(() => { ut[a] = {}; })));
+          const paths = [];
+          plan.forEach(({ t, ch }) => Object.keys(ch).forEach(k => {
+            paths.push([`trips/${t.id}/${k}`, ch[k]]);
+            if (t.createdBy && ut[t.createdBy] && ut[t.createdBy][t.id]) paths.push([`users_trips/${t.createdBy}/${t.id}/${k}`, ch[k]]);
+          }));
+          for (let i = 0; i < paths.length; i += 400) {
+            const upd = {}; paths.slice(i, i + 400).forEach(([k, v]) => { upd[k] = v; });
+            await dbRoot().update(upd);
+            ok.textContent = `⏳ Đang ghi ${Math.min(i + 400, paths.length)}/${paths.length}...`;
+          }
+          const log = {}; log['trip_log/' + dbRef('trip_log').push().key] = tripLogEntry('edit', { id: '', createdBy: '' }, `Chuẩn hóa địa chỉ đơn cũ: ${changed.length} đơn đổi sang phường/xã mới, ${cnt.kiem} cần xem lại, ${cnt.khong} chưa đọc được`);
+          dbRoot().update(log).catch(() => {});
+          plan.forEach(({ t, ch }) => { const m = allCompanyTrips.find(x => x.id === t.id); if (m) Object.assign(m, ch); });
+          el.remove();
+          updateManagerAuditTable();
+          alert(`Đã chuẩn hóa xong: ${changed.length} đơn đổi sang địa chỉ mới.`);
+        } catch (e) { ok.disabled = false; ok.textContent = '✅ THỬ GHI LẠI'; alert('Lỗi ghi: ' + e.message); }
+      };
     }
     // (17/11, người dùng: "cứ thấy sai là tự động sửa") TỰ ĐỘNG sửa tên sai kiểu khi Quản lý mở app:
     // 1 lần quét TOÀN BỘ đơn lúc đăng nhập, sau đó mỗi khi có đơn mới tải về (dùng bộ tên đã quét làm từ điển).
@@ -4165,6 +4346,7 @@
               dateKey: tripDateKey({ dateStr: formattedDate })
             };
             Object.assign(tripData, priceFields);
+            applyAddrNorm(tripData);   // (22/11) điểm đến -> phường/xã mới
 
             updates[`users_trips/${loggedInUser.user}/${subId}`] = tripData;
             updates[`trips/${subId}`] = tripData;
@@ -4856,6 +5038,12 @@
         return;
       }
       const changes = { [field]: value };
+      if (field === 'destination') {   // (22/11) điểm đến -> phường/xã mới
+        const tmp = applyAddrNorm(Object.assign({}, trip, { destination: value }));
+        Object.assign(changes, { destination: tmp.destination, addrConf: tmp.addrConf || null, addrCands: tmp.addrCands || null });
+        if (tmp.destGoc && tmp.destGoc !== trip.destGoc) changes.destGoc = tmp.destGoc;
+        if (tmp.destination !== value) setTimeout(updateManagerAuditTable, 300);
+      }
       if (field === 'ticketNumber') changes.originalTicket = baseTicketOf(value);
       if (field === 'dateStr') changes.dateKey = tripDateKey({ dateStr: value });
       const updates = {};
@@ -5363,6 +5551,7 @@
           else if (kw === 'lệch' || kw === 'đơn lệch') pass = status === 'mismatch';
           else if (kw === 'chưa khớp' || kw === 'đơn lẻ' || kw === 'thiếu') pass = status === 'unmatched';
           else if (kw === 'chưa báo' || kw === 'quá hạn') pass = det.overdue;
+          else if (kw === 'kiểm địa chỉ' || kw === 'địa chỉ') pass = trips.some(t => t.addrConf === 'kiem' || t.addrConf === 'khong');
           else if (kw === 'giảm giá' || kw === 'vượt mức') pass = trips.some(t => { const d = discountInfo(t); return d && d.over; });
           else pass = trips.some(t => `${t.dateStr} ${t.timeStr} ${t.role} ${t.staff} ${t.ticketNumber} ${t.plateNumber} ${t.carType || ''} ${t.source || ''} ${t.destination} ${t.paymentMethod || defaultPay} ${t.note || ''} ${t.totalFare}`.toLowerCase().includes(kw));
           if (!pass) return;
@@ -5372,6 +5561,12 @@
       return groups;
     }
 
+    // (22/11) Ghi chú dưới ô Điểm đến: địa chỉ chưa đổi được sang phường/xã mới
+    function addrNoteHtml(t) {
+      if (t.addrConf !== 'kiem' && t.addrConf !== 'khong') return '';
+      const k = t.addrConf === 'kiem';
+      return `<div class="mt-1 text-[10px] leading-tight font-bold ${k ? 'text-amber-700' : 'text-rose-600'}">${k ? '⚠️ Cần xem lại phường' : '❌ Chưa đọc được phường'}${t.addrCands ? ': ' + escHtml(t.addrCands) : ''}</div>`;
+    }
     // Ghi chú dưới ô Tổng Tiền: giá bảng & mức giảm (đỏ nếu vượt mức)
     function priceNoteHtml(t) {
       const d = discountInfo(t);
@@ -5480,7 +5675,7 @@
                   ${sourceOptions.map(s => `<option value="${escHtml(s)}" ${escHtml(t.source === s ? 'selected' : '')}>${escHtml(s)}</option>`).join('')}
                 </select>
               </td>
-              <td class="p-2.5"><input type="text" value="${escHtml(t.destination || '')}" class="inline-edit-input w-36" onblur="updateInlineTripField('${t.id}', 'destination', this.value)"></td>
+              <td class="p-2.5"><input type="text" value="${escHtml(t.destination || '')}" class="inline-edit-input w-36" onblur="updateInlineTripField('${t.id}', 'destination', this.value)">${addrNoteHtml(t)}</td>
               <td class="p-2.5">
                 <select class="inline-edit-input w-32 font-bold" onchange="updateInlineTripField('${t.id}', 'paymentMethod', this.value)">
                   ${payOptionsHtml}
@@ -6143,7 +6338,8 @@
           <input type="date" value="${remindTo}" class="px-2 py-1 bg-slate-50 border rounded-lg font-mono font-bold" onchange="setRemindRange(remindFrom, this.value)">
           ${btn('today', 'Hôm nay')} ${btn('yesterday', 'Hôm qua')} ${btn('7', '7 ngày')} ${btn('month', 'Tháng này')}
           ${head}
-          <button id="btn-remind-excel" onclick="exportReminderExcel()" class="ml-auto px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold shadow-sm">📥 Xuất Excel Mục Này</button>
+          <button onclick="openAddrFixModal()" class="ml-auto px-3 py-1.5 bg-sky-600 hover:bg-sky-700 text-white rounded-lg font-bold shadow-sm">📍 Chuẩn Hóa Địa Chỉ Đơn Cũ</button>
+          <button id="btn-remind-excel" onclick="exportReminderExcel()" class=" px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold shadow-sm">📥 Xuất Excel Mục Này</button>
         </div>
         <div class="${ok ? 'bg-emerald-50 border-emerald-300' : 'bg-orange-50 border-orange-300'} border-2 rounded-2xl p-3 space-y-2 text-xs">
           ${ok ? `<div class="font-bold text-emerald-700">✅ Tất cả đơn ${one ? 'ngày này' : 'trong khoảng này'} đã đủ 2 bên báo cáo.</div>` : `
@@ -6717,7 +6913,7 @@
             const role = XL.role[t.role] || { label: t.role || '', color: 'FF334155' };
             const vals = [stt, normalizeDateInput(t.dateStr) || '',t.timeStr || '', role.label, nameCase(t.staff), formatDisplayTicket(t.ticketNumber), plateCell(t.plateNumber),
               t.carType || '', t.source || '', t.pickup ? 'Ga ' + t.pickup : '', t.destination || '', t.paymentMethod || '(Chưa ghi)',
-              [t.note || '', (di => di && di.over ? `💸 ${discountText(di)}` : '')(discountInfo(t))].filter(Boolean).join(' | '),
+              [t.note || '', (di => di && di.over ? `💸 ${discountText(di)}` : '')(discountInfo(t)), t.addrConf === 'kiem' ? 'Cần xem lại phường' + (t.addrCands ? ': ' + t.addrCands : '') : t.addrConf === 'khong' ? 'Chưa đọc được phường' : ''].filter(Boolean).join(' | '),
               Number(t.totalFare || 0), signFeeOf(t) || '', Number(t.totalFare || 0) + signFeeOf(t), auditStatusText(g)];
             const row = ws.getRow(r);
             vals.forEach((v, i) => {

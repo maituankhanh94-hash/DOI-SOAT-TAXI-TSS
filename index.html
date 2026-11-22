@@ -1225,9 +1225,12 @@
       out += raw.slice(last);
       let street = out.replace(/\(\s*\)/g, ' ').replace(/\s*([,;])\s*/g, ', ').replace(/(?:,\s*){2,}/g, ', ').replace(/\s{2,}/g, ' ')
         .replace(/^[\s,;.\-–]+|[\s,;.\-–]+$/g, '').replace(/\s+([.,])/g, '');
+      street = addrCap(street);
       const full = ((street ? street + ', ' : '') + wardLabelOf(ward) + ', ' + ADDR_CITY).normalize('NFC');
       return { conf: 'ok', addr: full, ward, cands };
     }
+    // (22/11, kế toán) Viết hoa chữ cái đầu mỗi chữ: "88 đồng khởi" -> "88 Đồng Khởi" (không đổi chữ đã viết hoa như KDC, QL13)
+    const addrCap = s => String(s || '').normalize('NFC').replace(/(^|[\s,.;:\-\/(])(\p{Ll})/gu, (m, a, b) => a + b.toUpperCase());
     // Áp vào 1 đơn (đối tượng sẽ ghi): sửa destination nếu chắc chắn, ghi addrConf / addrCands / destGoc
     function applyAddrNorm(trip) {
       if (!trip || !PRICE_ROLES.includes(trip.role)) return trip;
@@ -1236,7 +1239,11 @@
       if (!r) return trip;
       if (r.conf === 'ok') {
         if (r.addr !== trip.destination) { if (!trip.destGoc) trip.destGoc = trip.destination; trip.destination = r.addr; }
-      } else { trip.addrConf = r.conf; if (r.cands.length) trip.addrCands = r.cands.slice(0, 6).join(', '); }
+      } else {
+        trip.addrConf = r.conf; if (r.cands.length) trip.addrCands = r.cands.slice(0, 6).join(', ');
+        const cap = addrCap(String(trip.destination).trim());   // chưa rõ phường: vẫn viết hoa cho đẹp
+        if (cap !== trip.destination) { if (!trip.destGoc) trip.destGoc = trip.destination; trip.destination = cap; }
+      }
       return trip;
     }
     const DEST_RULE_TEXT = 'BẮT BUỘC ghi TÊN ĐƯỜNG + Phường/Xã (hoặc Quận/Huyện). Số nhà có hay không đều được — vd: "Võ Duy Ninh, Thạnh Mỹ Tây", "140/20 Võ Duy Ninh, Thạnh Mỹ Tây", "Đề Thám, Q1". Chỉ ghi phường/quận là CHƯA ĐỦ. Bệnh viện, khách sạn, bến xe, đi tỉnh cũng phải có tên đường — vd: "Bệnh viện Chợ Rẫy, Nguyễn Chí Thanh, Q5", "Thùy Vân, Vũng Tàu".';

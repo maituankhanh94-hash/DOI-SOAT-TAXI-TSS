@@ -234,6 +234,7 @@
 - `applyAddrNorm(trip)`: ok → đổi destination, lưu chữ cũ ở `destGoc`; không ok → giữ chữ, ghi `addrConf` 'kiem'|'khong' + `addrCands`. Gọi ở submitBatch, saveEditedTrip, updateInlineTripField (destination). Không chặn lưu. Xem trước: khung "Đã ghi nhận" có "📍 Sẽ lưu địa chỉ mới: …".
 - Giá: giá bảng đã gắn (priceId/listPrice) giữ nguyên; `inferListPrice` dùng `destGoc` nếu có → ước tính giá đơn cũ không đổi; modal sửa chỉ gắn data-price-label khi chữ còn chứa nhãn (tránh mất giá khi sửa). Đối soát không dùng địa chỉ.
 - Quản lý: nút "📍 Chuẩn Hóa Địa Chỉ Đơn Cũ" (đầu khung Nhắc Báo Cáo) → `openAddrFixModal`: đọc toàn bộ trips, xem trước số ✅/⚠️/❌ + ví dụ → "ĐỒNG Ý" ghi trips + users_trips (chỉ đơn có bản sao), 400 đường dẫn/lần, 1 dòng nhật ký. Bảng Đối Soát: dưới ô Điểm đến ghi "⚠️ Cần xem lại phường: …"/"❌ Chưa đọc được phường" (`addrNoteHtml`), từ khóa lọc "kiểm địa chỉ"; Excel Đối Soát cột Ghi chú có ghi chú này. Quy tắc Firebase không cần sửa (trips không giới hạn trường). app.css?v=5.
+- (22/11, kế toán chị Ngọc xem ảnh Excel: "mớ này quá tốt", chỉ cần VIẾT HOA chữ đầu) `addrCap`: viết hoa chữ cái đầu mỗi chữ (không hạ chữ đã hoa: KDC, QL13) cho phần số nhà/đường; đơn ⚠️/❌ cũng viết hoa (lưu destGoc).
 - Thử: ~40 mẫu (scratchpad emu/addrt.cjs + addr-cases.txt), emulator addre2e.cjs: nút đơn cũ ghi đúng 2 nơi, đối soát + giảm giá trước/sau giống hệt, nhập mới lưu địa chỉ mới.
 
 ## Bảng giá công ty (nhánh `bang-gia`, 09/11 — ĐÃ LÊN MAIN 09/11 (commit 9ac73e8 + ghi chú); nhánh `sao-luu-thung-rac` vẫn CHƯA lên main)

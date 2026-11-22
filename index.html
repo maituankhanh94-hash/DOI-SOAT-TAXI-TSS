@@ -2024,15 +2024,22 @@
           }
         }
       }
-      // (19/11) phiếu đã có người nhập (cùng bên) -> báo ngay lúc nhập (khi lưu sẽ bị chặn)
+      // (19/11 → 22/11) phiếu đã có người nhập (cùng bên): CÙNG NGÀY -> đỏ, sẽ không lưu; NGÀY KHÁC -> cam, vẫn lưu được
       if (ticket && loggedInUser) {
         const side = ticketSideOf(staffRole || loggedInUser.role), key = ticketIdxKey(ticket);
-        const own = personalTrips.find(t => ticketSideOf(t.role) === side && ticketIdxKey(t.originalTicket || t.ticketNumber) === key);
-        const e = own ? { u: loggedInUser.user, d: tripDateKey(own) } : ticketIdxEntry(side, key);
-        const dupRow = [...Array(i).keys()].some(j => ticketIdxKey(v(`t-${j}`)) === key);
-        if (dupRow) out.unshift({ f: 't', red: true, text: `Phiếu ${ticket} bị gõ 2 lần trong bảng – sẽ KHÔNG lưu được` });
-        else if (e) out.unshift({ f: 't', red: true, text: `Phiếu ${ticket} ĐÃ ĐƯỢC ${e.u === loggedInUser.user ? 'bạn' : 'tài khoản ' + e.u} nhập ngày ${dkText(e.d)} – sẽ KHÔNG lưu được` });
-        else if (!((side + '|' + key) in ticketIdxCache)) fetchTicketIdx(side, [key]).then(() => { if (ticketIdxEntry(side, key)) updateBatchPreview(); });
+        const dk = tripDateKey({ dateStr: v(`date-${i}`) }) || localDateKey(new Date());
+        const who = u => u === loggedInUser.user ? 'bạn' : 'tài khoản ' + u;
+        const sameOwn = personalTrips.find(t => ticketSideOf(t.role) === side && ticketIdxKey(t.originalTicket || t.ticketNumber) === key && tripDateKey(t) === dk);
+        const sameIdx = ticketIdxList(side, key).find(e => e.d === dk);
+        const e = sameOwn ? { u: loggedInUser.user, d: dk } : sameIdx;
+        const dupRow = [...Array(i).keys()].some(j => ticketIdxKey(v(`t-${j}`)) === key && (tripDateKey({ dateStr: v(`date-${j}`) }) || dk) === dk);
+        if (dupRow) out.unshift({ f: 't', red: true, text: `Phiếu ${ticket} bị gõ 2 lần trong bảng (cùng ngày) – sẽ KHÔNG lưu được` });
+        else if (e) out.unshift({ f: 't', red: true, text: `Phiếu ${ticket} ĐÃ ĐƯỢC ${who(e.u)} nhập CÙNG NGÀY ${dkText(e.d)} – sẽ KHÔNG lưu được` });
+        else {
+          const others = ticketOtherDates(side, key, dk, personalTrips, null);
+          if (others.length) out.push({ f: 't', text: `Phiếu ${ticket} đã có ở ngày khác: ${others.slice(0, 3).map(o => dkText(o.d) + ' (' + who(o.u) + ')').join(', ')}. Đúng là phiếu của ngày ${dkText(dk)} thì cứ lưu bình thường` });
+        }
+        if (!((side + '|' + key) in ticketIdxCache)) fetchTicketIdx(side, [key]).then(() => { if (ticketIdxList(side, key).length) updateBatchPreview(); });
       }
       ['p', 't'].forEach(f => { const el = document.getElementById(`${f}-${i}`); if (el) el.classList.toggle('batch-warn', out.some(w => w.f === f)); });
       return out;
@@ -2945,13 +2952,14 @@
         }
       }
 
-      // (19/11) đổi sang số phiếu đã có người nhập (cùng bên) -> chặn
+      // (19/11 → 22/11) đổi sang số phiếu / ngày mà CÙNG NGÀY đã có người nhập (cùng bên) -> chặn; khác ngày thì được
       const oldKey = ticketIdxKey(trip.originalTicket || trip.ticketNumber), newKey = ticketIdxKey(ticket);
-      if (newKey && newKey !== oldKey) {
+      const oldDk = tripDateKey(trip), newDk = tripDateKey({ dateStr: formattedDate });
+      if (newKey && (newKey !== oldKey || newDk !== oldDk)) {
         const side = ticketSideOf(trip.role);
-        await fetchTicketIdx(side, [newKey]);
-        const tk = await ticketTakenBy(side, newKey, personalTrips, trip.id);
-        if (tk) { alert(`⛔ Phiếu ${ticket} đã được ${tk.u === loggedInUser.user ? 'bạn' : 'tài khoản ' + tk.u} nhập ngày ${dkText(tk.d)}.\nSố phiếu không bao giờ trùng – kiểm tra lại số phiếu.`); return; }
+        await fetchTicketIdx(side, [newKey], true);
+        const tk = await ticketTakenBy(side, newKey, newDk, personalTrips, trip.id);
+        if (tk) { alert(`⛔ Phiếu ${ticket} đã được ${tk.u === loggedInUser.user ? 'bạn' : 'tài khoản ' + tk.u} nhập CÙNG NGÀY ${dkText(tk.d)}.\nKiểm tra lại số phiếu.`); return; }
       }
       const oldTripForIdx = Object.assign({}, trip);
 
@@ -2989,7 +2997,7 @@
       parts.forEach(p => { updates[`users_trips/${loggedInUser.user}/${p.id}`] = p; updates[`trips/${p.id}`] = p; });
 
       dbRoot().update(updates).then(() => {
-        if (ticketIdxKey(oldTripForIdx.originalTicket || oldTripForIdx.ticketNumber) !== ticketIdxKey(trip.originalTicket)) ticketIdxRemove([oldTripForIdx]).then(() => ticketIdxWrite([parts[0]]));
+        if (ticketIdxKey(oldTripForIdx.originalTicket || oldTripForIdx.ticketNumber) !== ticketIdxKey(trip.originalTicket) || tripDateKey(oldTripForIdx) !== tripDateKey(trip)) ticketIdxRemove([oldTripForIdx]).then(() => ticketIdxWrite([parts[0]]));
         else ticketIdxWrite([parts[0]]);
         const ch = changeText(before, parts[0]);
         if (parts.length > 1) logTrips('edit', [parts[0]], () => `Tách đơn chia tiền ${parts.length} người: ${parts.map(p => p.ticketNumber + ' ' + p.staff).join('; ')}` + (ch ? ' | ' + ch : ''));
@@ -4075,9 +4083,7 @@
       const mySide = ticketSideOf(loggedInUser.role);
       const rowKeys = [];
       for (let i = 0; i < BATCH_ROWS; i++) { const el = document.getElementById(`t-${i}`); rowKeys[i] = el ? ticketIdxKey(el.value) : ''; }
-      await fetchTicketIdx(mySide, rowKeys.filter(Boolean));
-      const taken = {};
-      for (const k of [...new Set(rowKeys.filter(Boolean))]) taken[k] = await ticketTakenBy(mySide, k, dupPool, null);
+      await fetchTicketIdx(mySide, rowKeys.filter(Boolean), true);
       const savedDests = [];
       const timeStr = new Date().toLocaleTimeString('vi-VN', {hour:'2-digit', minute:'2-digit'});
       let count = 0;
@@ -4130,15 +4136,16 @@
           const cleanTicket = ticket.trim().toUpperCase();
           const cleanPlate = plate.trim().toUpperCase();
 
-          // (19/11) TRÙNG SỐ PHIẾU = cùng số phiếu ở cùng BÊN (bán / tài xế), KHÔNG cần cùng ngày, cùng xe hay cùng tài khoản
+          // (22/11) TRÙNG = cùng số phiếu + cùng BÊN (bán / tài xế) + CÙNG NGÀY (khác ngày vẫn lưu – người dùng: số phiếu có thể lặp lại)
           const tKey = rowKeys[i] || ticketIdxKey(cleanTicket);
-          // 1. trùng ngay trong các dòng đang nhập
-          const isDuplicateInBatch = batchEntriesToCheck.some(item => item.key === tKey);
-          // 2. đã lưu trước đó (của mình ở mọi ngày, hoặc tài khoản khác cùng bên)
-          const tk = taken[tKey];
+          const rowDk = tripDateKey({ dateStr: formattedDate });
+          // 1. trùng ngay trong các dòng đang nhập (cùng ngày)
+          const isDuplicateInBatch = batchEntriesToCheck.some(item => item.key === tKey && item.date === formattedDate);
+          // 2. đã lưu trước đó cùng ngày (của mình, hoặc tài khoản khác cùng bên)
+          const tk = isDuplicateInBatch ? null : await ticketTakenBy(mySide, tKey, rowDk, dupPool, null);
           if (isDuplicateInBatch || tk) {
-            duplicateDetails.push(`• Dòng ${i+1} – Phiếu ${ticket}: ` + (isDuplicateInBatch ? 'bị gõ 2 lần trong bảng nhập'
-              : (tk.u === loggedInUser.user ? `bạn ĐÃ NHẬP ngày ${dkText(tk.d)}` : `tài khoản ${tk.u} ĐÃ NHẬP ngày ${dkText(tk.d)}`)));
+            duplicateDetails.push(`• Dòng ${i+1} – Phiếu ${ticket}: ` + (isDuplicateInBatch ? 'bị gõ 2 lần trong bảng nhập (cùng ngày)'
+              : (tk.u === loggedInUser.user ? `bạn ĐÃ NHẬP cùng ngày ${dkText(tk.d)}` : `tài khoản ${tk.u} ĐÃ NHẬP cùng ngày ${dkText(tk.d)}`)));
             continue;
           }
 
@@ -4179,7 +4186,7 @@
 
       if (duplicateDetails.length > 0) {
         await showBigNotice(`⛔ ${duplicateDetails.length} ĐƠN TRÙNG SỐ PHIẾU – KHÔNG LƯU`, duplicateDetails.map(x => x.replace(/^•\s*/, '')),
-          'Số phiếu không bao giờ trùng. Kiểm tra lại số phiếu trên giấy rồi sửa. Nếu đúng là phiếu của bạn mà tài khoản khác nhập nhầm, báo Quản lý.' + (count > 0 ? ' (Các dòng khác vẫn được lưu bình thường.)' : ''));
+          'Cùng 1 số phiếu đã được nhập trong CÙNG NGÀY này. Kiểm tra lại số phiếu trên giấy rồi sửa. Nếu đúng là phiếu của bạn mà tài khoản khác nhập nhầm, báo Quản lý.' + (count > 0 ? ' (Các dòng khác vẫn được lưu bình thường.)' : ''));
       }
 
       if (count > 0) {
@@ -4722,65 +4729,79 @@
       return String(ticket || '').trim().replace(/-\d+[\/-]\d+$/, '');
     }
 
-    // ===== (19/11, người dùng) CHẶN TRÙNG SỐ PHIẾU =====
-    // Số phiếu KHÔNG BAO GIỜ trùng -> cùng 1 số phiếu chỉ được nhập 1 lần ở mỗi BÊN (bên bán: Bán vé + KH + KH2; bên tài xế),
-    // dù khác ngày, khác biển số, khác tài khoản. Bán vé và tài xế nhập cùng phiếu thì ĐƯỢC (để đối soát).
-    // Nhân viên không đọc được đơn người khác -> sổ chung `ticket_index/<sell|drv>/<số phiếu>` = {u: tài khoản, d: ngày, id: mã đơn}.
-    // Quản lý mở app: `syncTicketIndex` dựng lại sổ từ toàn bộ đơn (sửa chỗ lệch khi đơn bị sửa/xóa).
+    // ===== (19/11, người dùng) CHẶN TRÙNG SỐ PHIẾU – (22/11, người dùng: số phiếu VẪN CÓ THỂ TRÙNG ở ngày khác) =====
+    // CHỈ CHẶN khi cùng BÊN (bán: Bán vé + KH + KH2 / tài xế) + cùng số phiếu + CÙNG NGÀY (gần như chắc là nhập 2 lần).
+    // Khác ngày -> VẪN LƯU, chỉ nhắc cam "phiếu này đã có ngày …". Bán vé và tài xế cùng phiếu luôn được (đối soát).
+    // Sổ chung `ticket_index/<sell|drv>/<số phiếu>~<yyyy-mm-dd>` = {u: tài khoản, d: ngày, id: mã đơn} (nhân viên không đọc được đơn người khác).
+    // Đọc mọi ngày của 1 phiếu bằng orderByKey + startAt/endAt '<phiếu>~'. Quản lý mở app: `syncTicketIndex` dựng lại sổ (xóa luôn mục kiểu cũ không có ngày).
     function ticketSideOf(role) { return role === 'driver' ? 'drv' : 'sell'; }
     function ticketIdxKey(tk) {
       let b = baseTicketOf(tk).toUpperCase().replace(/\s+/g, '');
       if (/^\d+$/.test(b)) b = b.replace(/^0+(?=\d)/, '');   // 09838 = 9838
-      return b.replace(/[.#$\[\]\/]/g, '_');
+      return b.replace(/[.#$\[\]\/~]/g, '_');
     }
-    const ticketIdxCache = {};   // 'sell|108975' -> {u,d,id} | null ; chưa có = chưa hỏi
-    async function fetchTicketIdx(side, keys) {
-      const need = [...new Set(keys)].filter(k => k && !((side + '|' + k) in ticketIdxCache));
-      await Promise.all(need.map(k => dbRef(`ticket_index/${side}/${k}`).once('value')
-        .then(sn => { ticketIdxCache[side + '|' + k] = sn.val() || null; })
-        .catch(() => { ticketIdxCache[side + '|' + k] = null; })));   // quy tắc cũ chưa cho đọc -> bỏ qua, chỉ chặn trong tài khoản
+    function ticketIdxPath(side, key, dk) { return `${side}/${key}~${dk || 'x'}`; }
+    function baseTripId(id) { return String(id || '').replace(/_s\d+$/, ''); }
+    const ticketIdxCache = {};   // 'sell|108975' -> [{u,d,id}, …] (mọi ngày) ; chưa có = chưa hỏi
+    async function fetchTicketIdx(side, keys, force) {
+      const need = [...new Set(keys)].filter(k => k && (force || !((side + '|' + k) in ticketIdxCache)));
+      await Promise.all(need.map(k => dbRef(`ticket_index/${side}`).orderByKey().startAt(k + '~').endAt(k + '~').once('value')
+        .then(sn => { ticketIdxCache[side + '|' + k] = Object.values(sn.val() || {}); })
+        .catch(() => { ticketIdxCache[side + '|' + k] = []; })));   // quy tắc cũ chưa cho đọc -> bỏ qua, chỉ chặn trong tài khoản
     }
-    function ticketIdxEntry(side, key) { const v = ticketIdxCache[side + '|' + key]; return v || null; }
+    function ticketIdxList(side, key) { return ticketIdxCache[side + '|' + key] || []; }
+    function ticketIdxEntry(side, key) { return ticketIdxList(side, key)[0] || null; }   // có ở BẤT KỲ ngày nào
     function ticketIdxWrite(trips) {
       const upd = {};
       trips.forEach(t => {
-        const k = ticketIdxKey(t.originalTicket || t.ticketNumber);
-        if (!k) return;
-        const v = { u: t.createdBy || '', d: tripDateKey(t) || '', id: String(t.id || '').replace(/_s\d+$/, '') };
-        upd[`${ticketSideOf(t.role)}/${k}`] = v;
-        ticketIdxCache[ticketSideOf(t.role) + '|' + k] = v;
+        const k = ticketIdxKey(t.originalTicket || t.ticketNumber), dk = tripDateKey(t) || '';
+        if (!k || !dk) return;
+        const side = ticketSideOf(t.role), v = { u: t.createdBy || '', d: dk, id: baseTripId(t.id) };
+        upd[ticketIdxPath(side, k, dk)] = v;
+        const c = ticketIdxCache[side + '|' + k];
+        if (c) { if (!c.some(x => x.d === dk && x.id === v.id)) c.push(v); }
       });
       if (Object.keys(upd).length) dbRef('ticket_index').update(upd).catch(e => console.warn('ticket_index', e && e.message));
     }
     async function ticketIdxRemove(trips) {
       for (const t of trips) {
-        const side = ticketSideOf(t.role), k = ticketIdxKey(t.originalTicket || t.ticketNumber);
-        if (!k) continue;
+        const side = ticketSideOf(t.role), k = ticketIdxKey(t.originalTicket || t.ticketNumber), dk = tripDateKey(t) || '';
+        if (!k || !dk) continue;
         try {
-          const ref = dbRef(`ticket_index/${side}/${k}`);
+          const ref = dbRef('ticket_index/' + ticketIdxPath(side, k, dk));
           const v = (await ref.once('value')).val();
-          if (v && v.id === String(t.id || '').replace(/_s\d+$/, '')) { await ref.remove(); ticketIdxCache[side + '|' + k] = null; }
+          if (v && v.id === baseTripId(t.id)) {
+            await ref.remove();
+            const c = ticketIdxCache[side + '|' + k]; if (c) ticketIdxCache[side + '|' + k] = c.filter(x => !(x.d === dk && x.id === v.id));
+          }
         } catch (e) {}
       }
     }
-    // Phiếu `key` đã có ở bên `side` chưa? Trả về {u, d} của đơn đã có (null = chưa có). excludeId: đơn đang sửa.
-    // pool = đơn của chính tài khoản đã tải; sổ chung ghi phiếu của mình mà không thấy trong pool -> tải đúng ngày đó để chắc chắn.
-    async function ticketTakenBy(side, key, pool, excludeId) {
+    // Phiếu `key` đã có ở bên `side` CÙNG NGÀY `dk` chưa? -> {u, d} (null = chưa). excludeId: đơn đang sửa.
+    // pool = đơn của chính tài khoản đã tải; sổ ghi của mình mà không thấy trong pool -> tải đúng ngày đó để chắc còn đơn (có thể đã xóa).
+    async function ticketTakenBy(side, key, dk, pool, excludeId) {
       const me = loggedInUser && loggedInUser.user;
-      const baseEx = String(excludeId || '').replace(/_s\d+$/, '');
-      const own = pool.find(t => ticketSideOf(t.role) === side && ticketIdxKey(t.originalTicket || t.ticketNumber) === key && String(t.id).replace(/_s\d+$/, '') !== baseEx);
-      if (own) return { u: own.createdBy || me, d: tripDateKey(own) };
-      const e = ticketIdxEntry(side, key);
-      if (!e || (baseEx && e.id === baseEx)) return null;
-      if (e.u && e.u !== me) return { u: e.u, d: e.d };
-      if (e.d) {   // phiếu của chính mình ở ngày chưa tải -> kiểm tra lại đơn còn không (có thể đã xóa)
+      const baseEx = baseTripId(excludeId);
+      const same = t => ticketSideOf(t.role) === side && ticketIdxKey(t.originalTicket || t.ticketNumber) === key && tripDateKey(t) === dk && baseTripId(t.id) !== baseEx;
+      const own = pool.find(same);
+      if (own) return { u: own.createdBy || me, d: dk };
+      for (const e of ticketIdxList(side, key)) {
+        if (e.d !== dk || (baseEx && e.id === baseEx)) continue;
+        if (e.u && e.u !== me) return { u: e.u, d: e.d };
         try {
-          const sn = await dbRef(`users_trips/${me}`).orderByChild('dateKey').equalTo(e.d).once('value');
-          const hit = Object.values(sn.val() || {}).find(t => ticketSideOf(t.role) === side && ticketIdxKey(t.originalTicket || t.ticketNumber) === key && String(t.id).replace(/_s\d+$/, '') !== baseEx);
-          return hit ? { u: me, d: e.d } : null;
-        } catch (er) { return { u: me, d: e.d }; }
+          const sn = await dbRef(`users_trips/${me}`).orderByChild('dateKey').equalTo(dk).once('value');
+          if (Object.values(sn.val() || {}).some(same)) return { u: me, d: dk };
+        } catch (er) { return { u: me, d: dk }; }
       }
       return null;
+    }
+    // Cùng phiếu ở NGÀY KHÁC (để nhắc nhẹ, vẫn cho lưu)
+    function ticketOtherDates(side, key, dk, pool, excludeId) {
+      const baseEx = baseTripId(excludeId), out = [], seen = new Set();
+      const add = (u, d) => { if (d && d !== dk && !seen.has(u + d)) { seen.add(u + d); out.push({ u, d }); } };
+      pool.forEach(t => { if (ticketSideOf(t.role) === side && ticketIdxKey(t.originalTicket || t.ticketNumber) === key && baseTripId(t.id) !== baseEx) add(t.createdBy || (loggedInUser && loggedInUser.user), tripDateKey(t)); });
+      ticketIdxList(side, key).forEach(e => { if (!(baseEx && e.id === baseEx)) add(e.u, e.d); });
+      return out.sort((a, b) => a.d.localeCompare(b.d));
     }
     function dkText(dk) { const p = String(dk || '').split('-'); return p.length === 3 ? `${p[2]}/${p[1]}/${p[0]}` : (dk || '?'); }
     // Quản lý: dựng lại sổ số phiếu từ toàn bộ đơn (đơn tạo trước giữ phiếu), xóa mục không còn đơn
@@ -4789,10 +4810,10 @@
       try {
         const want = {};
         trips.slice().sort((a, b) => (Number(a.timestamp) || 0) - (Number(b.timestamp) || 0)).forEach(t => {
-          const k = ticketIdxKey(t.originalTicket || t.ticketNumber);
-          if (!k) return;
-          const path = `${ticketSideOf(t.role)}/${k}`;
-          if (!want[path]) want[path] = { u: t.createdBy || '', d: tripDateKey(t) || '', id: String(t.id || '').replace(/_s\d+$/, '') };
+          const k = ticketIdxKey(t.originalTicket || t.ticketNumber), dk = tripDateKey(t) || '';
+          if (!k || !dk) return;
+          const path = ticketIdxPath(ticketSideOf(t.role), k, dk);
+          if (!want[path]) want[path] = { u: t.createdBy || '', d: dk, id: baseTripId(t.id) };
         });
         const cur = (await dbRef('ticket_index').once('value')).val() || {};
         const upd = {};

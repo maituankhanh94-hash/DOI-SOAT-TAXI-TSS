@@ -6243,13 +6243,13 @@
     }
 
     // ===== XUẤT EXCEL RIÊNG CHO BẢNG NHẮC BÁO CÁO & GIẢM GIÁ VƯỢT MỨC (theo khoảng ngày đang chọn) =====
-    function collectOverDiscount(from, to) {
+    function collectOverDiscount(from, to, onPrice) {
       const bills = {};
       allCompanyTrips.forEach(t => {
         const k0 = tripDateKey(t);
         if (!k0 || k0 < from || k0 > to) return;
         const d = discountInfo(t);
-        if (!d || !d.over) return;
+        if (!d || (onPrice ? d.over : !d.over)) return;
         const k = billKey(t);
         if (!bills[k]) bills[k] = { trips: [], d, dateKey: k0 };
         bills[k].trips.push(t);
@@ -6354,6 +6354,26 @@
           trips[0].destination || '', (d.label || '') + (d.inferred ? ' (ước tính)' : ''), d.list, d.fare, Math.round(d.pct * 1000) / 10,
           `${pctText(d.limit)} ${ZONE_LABEL[d.zone]}`, [...new Set(trips.map(t => t.note).filter(Boolean))].join(' | ')]), () => 'FFFEE2E2');
         if (onlyDiscount && od.length) xlSignature(ws, odEnd + 3, 12);
+        // 3b. (22/11) Đơn bán ĐÚNG bảng giá (đúng giá / giảm trong mức cho phép)
+        const okd = collectOverDiscount(remindFrom, remindTo, true);
+        ws = xlSheetSetup(wb, 'Đúng Bảng Giá', true);
+        xlTitle(ws, 12, f, 'ĐƠN BÁN ĐÚNG BẢNG GIÁ (ĐÚNG GIÁ HOẶC GIẢM TRONG MỨC CHO PHÉP)');
+        const okTxt = d => d.pct <= 1e-9 ? (d.pct < -1e-9 ? 'Cao hơn giá bảng' : 'Đúng giá') : 'Giảm trong mức';
+        const okEnd = xlTable(ws, 6, [
+          { h: 'STT', w: 6, align: 'center' }, { h: 'Nhân viên', w: 28, wrap: true }, { h: 'Ngày', w: 12, align: 'center' }, { h: 'Số phiếu', w: 12, align: 'center' },
+          { h: 'Biển số', w: 11, align: 'center' }, { h: 'Điểm đến', w: 26, wrap: true }, { h: 'Mục bảng giá', w: 34, wrap: true }, { h: 'Giá bảng', w: 13, fmt: '#,##0' },
+          { h: 'Đã thu', w: 13, fmt: '#,##0' }, { h: 'Giảm (%)', w: 10, fmt: '0.0' }, { h: 'Tình trạng', w: 16, align: 'center' }, { h: 'Ghi chú', w: 24, wrap: true }
+        ], okd.map(({ trips, d, dateKey }, i) => [i + 1, fullStaffName(trips), dmy(dateKey), trips[0].originalTicket || trips[0].ticketNumber, plateCell(trips[0].plateNumber),
+          trips[0].destination || '', (d.label || '') + (d.inferred ? ' (ước tính)' : ''), d.list, d.fare, Math.max(0, Math.round(d.pct * 1000) / 10),
+          okTxt(d), [...new Set(trips.map(t => t.note).filter(Boolean))].join(' | ')]), i => okd[i].d.pct > 1e-9 ? 'FFFEF9C3' : 'FFDCFCE7');
+        if (okd.length) {
+          const row = ws.getRow(okEnd);
+          ['', `TỔNG CỘNG: ${okd.length} đơn`, '', '', '', '', '', okd.reduce((a, o) => a + o.d.list, 0), okd.reduce((a, o) => a + o.d.fare, 0), '', '', ''].forEach((v, i) => {
+            const c = row.getCell(i + 1); c.value = v; c.border = XL.border; xlFill(c, 'FFFDE68A'); xlFont(c, { bold: true });
+            if (i === 7 || i === 8) c.numFmt = '#,##0';
+          });
+          xlSignature(ws, okEnd + 3, 12);
+        }
         // 4. Tổng hợp theo nhân viên (giảm giá vượt mức)
         const byStaff = {};
         od.forEach(({ trips, d }) => {

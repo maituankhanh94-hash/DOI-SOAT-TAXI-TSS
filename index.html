@@ -1141,12 +1141,12 @@
     function normalizeDestAddr(dest) {
       const raw = String(dest || '').normalize('NFC').trim();
       if (!raw) return null;
-      const t = canonWords(raw);
+      const t = raw.split(/[,;]/).map(canonWords).join('|');   // dấu phẩy là ranh giới: "Tân Bình, Thành phố" không thành "Bình Thạnh"
       if (DEST_EXEMPT.some(k => t.startsWith(' ' + k + ' '))) return null;
       const toks = addrTokens(raw), C = toks.map(x => x.c), del = new Array(toks.length).fill(false);
       const seqAt = (words, from) => { const out = []; for (let i = from; i + words.length <= C.length; i++) if (words.every((w, j) => C[i + j] === w)) out.push(i); return out; };
       // xóa lần xuất hiện CUỐI của cụm (kèm chữ đứng trước như "phường", "quận", "tp"); bỏ qua nếu ngay trước là số nhà (= tên đường)
-      const PFX = ['p', 'phuong', 'f', 'xa', 'tt', 'dac khu', 'thi tran', 'q', 'quan', 'huyen', 'h', 'tp', 'thanh pho', 'tx', 'thi xa', 'district', 'ward'];
+      const PFX = ['p', 'phuong', 'f', 'xa', 'tt', 'dac khu', 'thi tran', 'q', 'quan', 'huyen', 'h', 'tp', 'thanh pho', 'tx', 'thi xa', 'district', 'ward', 'tinh'];
       const killLast = (phrase, allowAfterNum) => {
         const w = canonWords(phrase).trim().split(' ');
         const hits = seqAt(w, 0).filter(i => !del[i]);
@@ -1198,10 +1198,34 @@
         }
       }
       cands = [...new Set(cands)];
+      // Bỏ phần hành chính cũ khỏi chữ gõ -> phần số nhà, tên đường (viết hoa chữ đầu)
+      const streetOf = (ward, prov) => {
+        toks.forEach((x, i) => { if (/^(?:q|p|f)\d{1,2}$/.test(x.c)) del[i] = true; });
+        toks.forEach((x, i) => { if (i + 1 < toks.length && /^(?:q|quan|district|p|phuong|f|ward)$/.test(x.c) && /^\d{1,2}$/.test(C[i + 1])) { del[i] = del[i + 1] = true; } });
+        if (dist && dist.key) killLast(dist.d, true);
+        if (dist) C.forEach((c, i) => { if (DIST_ABBR_NAME[c] === dist.d) { del[i] = true; if (i > 0 && /^(?:q|quan)$/.test(C[i - 1])) del[i - 1] = true; } });
+        if (ward) { killLast(ward, false); dist && dist.wards.forEach(w => { if (w.n === ward && w.key) killLast(w.o, false); }); }
+        if (prov) killLast(prov, true);
+        ['tp hcm', 'tphcm', 'hcm', 'hcmc', 'ho chi minh', 'sai gon city', 'viet nam', 'vietnam', 'vn', 'tinh binh duong', 'binh duong', 'ba ria vung tau', 'brvt'].forEach(p => { while (killLast(p, true)); });
+        let out = '', last = 0;
+        toks.forEach((x, i) => { if (del[i]) { out += raw.slice(last, x.s); last = x.e; } });
+        out += raw.slice(last);
+        return addrCap(out.replace(/\(\s*\)/g, ' ').replace(/\s*([,;])\s*/g, ', ').replace(/(?:,\s*){2,}/g, ', ').replace(/\s{2,}/g, ' ')
+          .replace(/^[\s,;.\-–]+|[\s,;.\-–]+$/g, '').replace(/\s+([.,])/g, '$1'));
+      };
+      const join = parts => parts.filter(Boolean).join(', ').normalize('NFC');
       if (cands.length !== 1) {
-        if (cands.length > 1) return { conf: 'kiem', cands, why: (dist ? (dist.num ? 'Quận ' + dist.d : dist.d) + ' cũ' : 'Tên') + ' thuộc nhiều phường mới' };
+        // (22/11, kế toán: "có cái có cái không") chưa rõ phường mới vẫn ghi ĐỦ: "đường, (Phường cũ,) Quận cũ, Thành phố Hồ Chí Minh"
+        if (dist) {
+          const dLabel = dist.num ? 'Quận ' + dist.num : (mq && (+mq[1] === 2 || +mq[1] === 9)) ? 'Quận ' + (+mq[1]) : (ADDR_TP_OLD.includes(dist.d) ? 'Thành phố ' : ADDR_HUYEN_OLD.includes(dist.d) ? 'Huyện ' : 'Quận ') + dist.d;
+          const addr = join([streetOf(null), mp ? 'Phường ' + (+mp[1]) : '', dLabel, ADDR_CITY]);
+          return { conf: 'kiem', addr, cands, why: (dist.num ? 'Quận ' + dist.d : dist.d) + ' cũ thuộc nhiều phường mới' };
+        }
         if (mp) return { conf: 'kiem', cands: [], why: 'Có số phường nhưng thiếu quận cũ' };
-        if (LANDMARKS.some(k => t.includes(' ' + k + ' '))) return { conf: 'kiem', cands: [], why: 'Chỉ có tên địa điểm' };
+        // Đi tỉnh: ghi tên tỉnh/thành MỚI (sau sáp nhập), vd "Chợ Dầu Dây Đồng Nai" -> "Chợ Dầu Dây, Tỉnh Đồng Nai"
+        const pv = addrProvinceOf(t, C, seqAt);
+        if (pv) return { conf: 'kiem', addr: join([streetOf(null, pv.city ? null : pv.key), pv.full]), cands: [], why: 'Ngoài TP.HCM, chưa rõ phường' };
+        if (LANDMARKS.some(k => t.includes(' ' + k + ' '))) return { conf: 'kiem', addr: join([streetOf(null), ADDR_CITY]), cands: [], why: 'Chỉ có tên địa điểm' };
         if (destHasDistrict(raw)) return { conf: 'kiem', cands: [], why: 'Chỉ có tỉnh / địa điểm, chưa rõ phường' };
         return { conf: 'khong', cands: [], why: 'Không đọc được phường/quận' };
       }
@@ -1210,24 +1234,37 @@
       if (!prefNew.length && !dist && !mp) {
         const w = canonWords(ward).trim().split(' ');
         const hits = seqAt(w, 0);
-        if (hits.length && hits.every(i => i > 0 && /^\d/.test(C[i - 1]))) return { conf: 'kiem', cands, why: 'Tên phường trùng tên đường' };
+        if (hits.length && hits.every(i => i > 0 && /^\d/.test(C[i - 1]))) return { conf: 'kiem', addr: join([streetOf(null), ADDR_CITY]), cands, why: 'Tên phường trùng tên đường' };
       }
-      // Bỏ phần hành chính cũ khỏi chữ gõ
-      toks.forEach((x, i) => { if (/^(?:q|p|f)\d{1,2}$/.test(x.c)) del[i] = true; });
-      toks.forEach((x, i) => { if (i + 1 < toks.length && /^(?:q|quan|district|p|phuong|f|ward)$/.test(x.c) && /^\d{1,2}$/.test(C[i + 1])) { del[i] = del[i + 1] = true; } });
-      if (dist && dist.key) killLast(dist.d, true);
-      if (dist) C.forEach((c, i) => { if (DIST_ABBR_NAME[c] === dist.d) del[i] = true; });
-      killLast(ward, false);
-      dist && dist.wards.forEach(w => { if (w.n === ward && w.key) killLast(w.o, false); });
-      ['tp hcm', 'tphcm', 'hcm', 'hcmc', 'ho chi minh', 'sai gon city', 'viet nam', 'vietnam', 'vn', 'tinh binh duong', 'binh duong', 'ba ria vung tau', 'brvt'].forEach(p => { while (killLast(p, true)); });
-      let out = '', last = 0;
-      toks.forEach((x, i) => { if (del[i]) { out += raw.slice(last, x.s); last = x.e; } });
-      out += raw.slice(last);
-      let street = out.replace(/\(\s*\)/g, ' ').replace(/\s*([,;])\s*/g, ', ').replace(/(?:,\s*){2,}/g, ', ').replace(/\s{2,}/g, ' ')
-        .replace(/^[\s,;.\-–]+|[\s,;.\-–]+$/g, '').replace(/\s+([.,])/g, '');
-      street = addrCap(street);
-      const full = ((street ? street + ', ' : '') + wardLabelOf(ward) + ', ' + ADDR_CITY).normalize('NFC');
-      return { conf: 'ok', addr: full, ward, cands };
+      return { conf: 'ok', addr: join([streetOf(ward), wardLabelOf(ward), ADDR_CITY]), ward, cands };
+    }
+    const ADDR_TP_OLD = ['Thủ Đức', 'Thuận An', 'Bà Rịa', 'Tân Uyên', 'Thủ Dầu Một', 'Bến Cát', 'Dĩ An', 'Phú Mỹ', 'Vũng Tàu'];
+    const ADDR_HUYEN_OLD = ['Bắc Tân Uyên', 'Bàu Bàng', 'Dầu Tiếng', 'Phú Giáo', 'Củ Chi', 'Cần Giờ', 'Hóc Môn', 'Xuyên Mộc', 'Bình Chánh', 'Châu Đức', 'Nhà Bè', 'Long Đất'];
+    // Tỉnh cũ -> tỉnh/thành MỚI (Nghị quyết 202/2025/QH15; cùng nguồn dữ liệu) + vài thành phố hay đi
+    const PROV_OLD_SRC = 'Hồ Chí Minh=Thành phố Hồ Chí Minh;Khánh Hòa=Khánh Hòa;Vĩnh Long=Vĩnh Long;Lâm Đồng=Lâm Đồng;Hải Phòng=Thành phố Hải Phòng;Đồng Tháp=Đồng Tháp;Gia Lai=Gia Lai;Cần Thơ=Thành phố Cần Thơ;Huế=Thành phố Huế;Đà Nẵng=Thành phố Đà Nẵng;Bến Tre=Vĩnh Long;Bình Phước=Đồng Nai;Bình Định=Gia Lai;Bình Dương=Thành phố Hồ Chí Minh;Quảng Ninh=Quảng Ninh;Quảng Nam=Thành phố Đà Nẵng;Tuyên Quang=Tuyên Quang;Tây Ninh=Tây Ninh;Cà Mau=Cà Mau;Hà Nội=Thành phố Hà Nội;Quảng Bình=Quảng Trị;Đồng Nai=Đồng Nai;Đắk Lắk=Đắk Lắk;Bà Rịa - Vũng Tàu=Thành phố Hồ Chí Minh;Thái Nguyên=Thái Nguyên;Phú Yên=Đắk Lắk;Bình Thuận=Lâm Đồng;Tiền Giang=Đồng Tháp;An Giang=An Giang;Bạc Liêu=Cà Mau;Ninh Thuận=Khánh Hòa;Hải Dương=Thành phố Hải Phòng;Đắk Nông=Lâm Đồng;Bắc Giang=Bắc Ninh;Hà Tĩnh=Hà Tĩnh;Bắc Kạn=Thái Nguyên;Thanh Hóa=Thanh Hóa;Bắc Ninh=Bắc Ninh;Lào Cai=Lào Cai;Sơn La=Sơn La;Hà Nam=Ninh Bình;Yên Bái=Lào Cai;Quảng Ngãi=Quảng Ngãi;Nghệ An=Nghệ An;Trà Vinh=Vĩnh Long;Ninh Bình=Ninh Bình;Hà Giang=Tuyên Quang;Kiên Giang=An Giang;Hoà Bình=Phú Thọ;Hưng Yên=Hưng Yên;Nam Định=Ninh Bình;Sóc Trăng=Thành phố Cần Thơ;Long An=Tây Ninh;Kon Tum=Quảng Ngãi;Lạng Sơn=Lạng Sơn;Hậu Giang=Thành phố Cần Thơ;Điện Biên=Điện Biên;Quảng Trị=Quảng Trị;Phú Thọ=Phú Thọ;Cao Bằng=Cao Bằng;Vĩnh Phúc=Phú Thọ;Thái Bình=Hưng Yên;Lai Châu=Lai Châu';
+    const PROV_CITY = { 'Đà Lạt': 'Lâm Đồng', 'Bảo Lộc': 'Lâm Đồng', 'Phan Thiết': 'Lâm Đồng', 'Mũi Né': 'Lâm Đồng', 'Nha Trang': 'Khánh Hòa', 'Cam Ranh': 'Khánh Hòa',
+      'Phan Rang': 'Khánh Hòa', 'Biên Hòa': 'Đồng Nai', 'Long Thành': 'Đồng Nai', 'Nhơn Trạch': 'Đồng Nai', 'Trảng Bom': 'Đồng Nai', 'Mỹ Tho': 'Đồng Tháp',
+      'Phú Quốc': 'An Giang', 'Rạch Giá': 'An Giang', 'Châu Đốc': 'An Giang', 'Buôn Ma Thuột': 'Đắk Lắk', 'Quy Nhơn': 'Gia Lai', 'Tuy Hòa': 'Đắk Lắk',
+      'Hội An': 'Thành phố Đà Nẵng', 'Hạ Long': 'Quảng Ninh', 'Tân An': 'Tây Ninh' };
+    const PROV_STREET_LIKE = ['hoa binh', 'hau giang', 'thai binh', 'phu tho', 'ha noi', 'hue', 'hai phong', 'cao bang', 'lang son', 'ha giang', 'yen bai', 'nam dinh', 'bac giang', 'tay ninh'];
+    let provList = null;
+    function addrProvinceOf(t, C, seqAt) {
+      if (!provList) {
+        const full = n => /^Thành phố /.test(n) ? n : 'Tỉnh ' + n;
+        provList = PROV_OLD_SRC.split(';').map(x => x.split('=')).filter(([o, n]) => !/Hồ Chí Minh/.test(n)).map(([o, n]) => ({ key: o, full: full(n) }))
+          .concat(Object.entries(PROV_CITY).map(([o, n]) => ({ key: o, full: full(n), city: true })))   // tên thành phố giữ lại trong chữ
+          .map(x => Object.assign(x, { c: canonWords(x.key).trim() })).sort((a, b) => b.c.length - a.c.length);
+      }
+      for (const p of provList) {
+        const w = p.c.split(' '), hits = seqAt(w, 0);
+        if (!hits.length) continue;
+        const i = hits[hits.length - 1];
+        const pref = i > 0 && /^(?:tinh|tp|pho)$/.test(C[i - 1]);
+        if (!pref && i > 0 && /^\d/.test(C[i - 1])) continue;   // "12 Đồng Nai" = tên đường
+        if (!pref && PROV_STREET_LIKE.includes(p.c)) continue;   // tên tỉnh trùng tên đường TP.HCM: phải ghi "Tỉnh ..."
+        return p;
+      }
+      return null;
     }
     // (22/11, kế toán) Viết hoa chữ cái đầu mỗi chữ: "88 đồng khởi" -> "88 Đồng Khởi" (không đổi chữ đã viết hoa như KDC, QL13)
     const addrCap = s => String(s || '').normalize('NFC').replace(/(^|[\s,.;:\-\/(])(\p{Ll})/gu, (m, a, b) => a + b.toUpperCase());
@@ -1241,7 +1278,7 @@
         if (r.addr !== trip.destination) { if (!trip.destGoc) trip.destGoc = trip.destination; trip.destination = r.addr; }
       } else {
         trip.addrConf = r.conf; if (r.cands.length) trip.addrCands = r.cands.slice(0, 6).join(', ');
-        const cap = addrCap(String(trip.destination).trim());   // chưa rõ phường: vẫn viết hoa cho đẹp
+        const cap = r.addr || addrCap(String(trip.destination).trim());   // chưa rõ phường: vẫn ghi đủ Quận cũ / tỉnh + viết hoa
         if (cap !== trip.destination) { if (!trip.destGoc) trip.destGoc = trip.destination; trip.destination = cap; }
       }
       return trip;
@@ -2184,7 +2221,7 @@
         const parts = [v(`staff-${i}`) || '(chưa có tên)', t ? 'Phiếu ' + t : '(chưa có phiếu)', p ? 'Xe ' + p : '', d, fare ? fare.toLocaleString('vi-VN') + 'đ' : '', v(`m-${i}`)].filter(Boolean);
         const na = d && usesPriceList() ? normalizeDestAddr(d) : null;   // (22/11) xem trước địa chỉ phường/xã mới sẽ lưu
         lines.push(`<div class="py-0.5">✅ <b>Dòng ${i + 1}:</b> ${parts.map(escHtml).join(' • ')}</div>` +
-          (na && na.conf === 'ok' && na.addr !== d ? `<div class="ml-5 text-[11px] text-sky-800 font-bold">📍 Sẽ lưu địa chỉ mới: ${escHtml(na.addr)}</div>` : '') +
+          (na && na.addr && na.addr !== d ? `<div class="ml-5 text-[11px] text-sky-800 font-bold">📍 Sẽ lưu địa chỉ mới: ${escHtml(na.addr)}</div>` : '') +
           warns.map(w => w.red
             ? `<div class="ml-5 mb-1 px-3 py-2 bg-red-600 border-2 border-red-800 rounded-xl text-white text-[14px] font-black shadow">⛔ ${escHtml(w.text)}</div>`
             : `<div class="ml-5 mb-0.5 px-2 py-0.5 bg-orange-100 border border-orange-300 rounded-lg text-orange-800 font-extrabold">⚠️ ${escHtml(w.text)}</div>`).join(''));
@@ -3560,16 +3597,16 @@
         if (n.addrConf) cnt[n.addrConf]++;
         if (Object.keys(ch).length) plan.push({ t, n, ch });
       });
-      const changed = plan.filter(x => 'destination' in x.ch), bad = plan.filter(x => x.n.addrConf);
+      const changed = plan.filter(x => 'destination' in x.ch), okN = changed.filter(x => !x.n.addrConf).length, bad = plan.filter(x => x.n.addrConf);
       const row = (a, b, cls) => `<div class="border rounded-xl p-2 text-[12px] ${cls}"><div class="text-slate-500 line-through">${escHtml(a)}</div><div class="font-bold">${b}</div></div>`;
       const body = `<div class="grid grid-cols-3 gap-2 text-center font-black">
-          <div class="bg-emerald-50 border-2 border-emerald-400 rounded-2xl p-2"><div class="text-2xl text-emerald-700">${changed.length}</div><div class="text-[11px] text-emerald-800">✅ Đổi sang địa chỉ mới</div></div>
-          <div class="bg-amber-50 border-2 border-amber-400 rounded-2xl p-2"><div class="text-2xl text-amber-700">${cnt.kiem}</div><div class="text-[11px] text-amber-800">⚠️ Cần xem lại (giữ chữ cũ)</div></div>
-          <div class="bg-rose-50 border-2 border-rose-400 rounded-2xl p-2"><div class="text-2xl text-rose-700">${cnt.khong}</div><div class="text-[11px] text-rose-800">❌ Chưa đọc được (giữ chữ cũ)</div></div></div>
-        <div class="text-[12px] text-slate-600 font-semibold">Chỉ đơn Bán vé / Kế hoạch, chỉ ô Điểm đến. Chữ cũ được lưu lại để tra cứu. Giá bảng đã gắn với đơn không đổi.
+          <div class="bg-emerald-50 border-2 border-emerald-400 rounded-2xl p-2"><div class="text-2xl text-emerald-700">${okN}</div><div class="text-[11px] text-emerald-800">✅ Đổi sang phường mới</div></div>
+          <div class="bg-amber-50 border-2 border-amber-400 rounded-2xl p-2"><div class="text-2xl text-amber-700">${cnt.kiem}</div><div class="text-[11px] text-amber-800">⚠️ Ghi Quận cũ / tỉnh – cần xem lại phường</div></div>
+          <div class="bg-rose-50 border-2 border-rose-400 rounded-2xl p-2"><div class="text-2xl text-rose-700">${cnt.khong}</div><div class="text-[11px] text-rose-800">❌ Chưa đọc được (chỉ viết hoa)</div></div></div>
+        <div class="text-[12px] text-slate-600 font-semibold">Chỉ đơn Bán vé / Kế hoạch, chỉ ô Điểm đến. Mọi địa chỉ đều ghi đủ tỉnh/thành ở cuối. Chữ cũ được lưu lại để tra cứu. Giá bảng đã gắn với đơn không đổi.
           Đơn ⚠️/❌ tìm ở Bảng Đối Soát bằng từ khóa <b>kiểm địa chỉ</b>.</div>
         ${changed.length ? '<div class="font-black text-emerald-800 text-sm">Ví dụ đơn sẽ đổi:</div>' + changed.slice(0, 30).map(x => row(x.t.destination, '→ ' + escHtml(x.n.destination), 'bg-emerald-50/40')).join('') : ''}
-        ${bad.length ? '<div class="font-black text-amber-800 text-sm">Ví dụ đơn cần xem lại:</div>' + bad.slice(0, 20).map(x => row(x.t.destination, x.n.addrConf === 'kiem' ? '⚠️ ' + escHtml(x.n.addrCands || 'chưa rõ phường') : '❌ chưa đọc được', 'bg-amber-50/40')).join('') : ''}`;
+        ${bad.length ? '<div class="font-black text-amber-800 text-sm">Ví dụ đơn cần xem lại:</div>' + bad.slice(0, 20).map(x => row(x.t.destination, x.n.addrConf === 'kiem' ? '→ ' + escHtml(x.n.destination) + ' <span class="text-amber-700">⚠️ ' + escHtml(x.n.addrCands || 'chưa rõ phường') + '</span>' : '❌ chưa đọc được', 'bg-amber-50/40')).join('') : ''}`;
       const el = bigModalShell({ bg: 'bg-sky-600', border: 'border-sky-600', icon: '📍' }, 'CHUẨN HÓA ĐỊA CHỈ ĐƠN CŨ', body,
         (plan.length ? `<button id="af-ok" class="w-full py-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl text-[18px] font-black shadow-lg">✅ ĐỒNG Ý – GHI ${plan.length} ĐƠN</button>` : '<div class="text-center font-bold text-emerald-700">Không còn đơn nào cần đổi.</div>')
         + '<button id="af-no" class="w-full py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-2xl text-[15px] font-bold border border-slate-300">Đóng</button>');
@@ -3596,7 +3633,7 @@
           plan.forEach(({ t, ch }) => { const m = allCompanyTrips.find(x => x.id === t.id); if (m) Object.assign(m, ch); });
           el.remove();
           updateManagerAuditTable();
-          alert(`Đã chuẩn hóa xong: ${changed.length} đơn đổi sang địa chỉ mới.`);
+          alert(`Đã chuẩn hóa xong ${changed.length} đơn (${okN} đơn sang phường mới).`);
         } catch (e) { ok.disabled = false; ok.textContent = '✅ THỬ GHI LẠI'; alert('Lỗi ghi: ' + e.message); }
       };
     }

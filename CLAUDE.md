@@ -228,7 +228,7 @@
 
 - (13/11, LÊN MAIN, người dùng đổi ý) Trang Dữ Liệu MISA: cột F "Mã khách hàng" = 3 SỐ CUỐI BIỂN SỐ (kiểu SỐ, `plate3Num`) của đúng cuốc — lấy biển số bên tài xế trong cùng nhóm đối soát, chưa có tài xế thì lấy biển số bên bán (KH không biển số → trống). KHÔNG ghi tên tài xế. Cột O "Mã nhân viên bán hàng" = chỉ tên nhân viên Bán vé/Kế hoạch (dòng chỉ có bên tài xế → trống).
 
-## Chuẩn hóa địa chỉ theo phường/xã mới (22/11, nhánh THỬ `dia-chi-moi`, CHƯA lên main)
+## Chuẩn hóa địa chỉ theo phường/xã mới (22/11, ĐÃ LÊN MAIN 22/11; nhánh `dia-chi-moi`)
 - Yêu cầu từ phiên Văn phòng AI (sếp). Người dùng chọn: SỬA THẲNG chữ gốc ô Điểm đến (không phải cột riêng), CHỈ Điểm đến, chỉ bên bán (PRICE_ROLES).
 - `normalizeDestAddr(dest)` (miễn phí, không AI): bảng `OLD_WARD_MAP_SRC` (npm vietnam-address-database 1.0.0 ward_mappings, 489 phường cũ TP.HCM + Bình Dương + BR-VT → 168 phường mới, dạng "Quận:cũ=mới,…;…"). Nhận Q5/Quận 05/District 7/Q2,Q9→Thủ Đức, tên quận, viết tắt (BT TB PN GV TĐ…), P4/F.12/Phường 03, tên phường cũ/mới, "P./Phường" + tên mới (chắc chắn). Kết quả `ok` → "số nhà đường, Phường X, Thành phố Hồ Chí Minh"; quận cũ thuộc nhiều phường / chỉ tên địa điểm / đi tỉnh / tên phường trùng tên đường sau số nhà → `kiem` (+ ứng viên); không đọc được → `khong`. Chạy lại trên kết quả không đổi (đã thử). Chuỗi xử lý NFC (dữ liệu NEW_WARDS có dấu tổ hợp).
 - `applyAddrNorm(trip)`: ok → đổi destination, lưu chữ cũ ở `destGoc`; không ok → giữ chữ, ghi `addrConf` 'kiem'|'khong' + `addrCands`. Gọi ở submitBatch, saveEditedTrip, updateInlineTripField (destination). Không chặn lưu. Xem trước: khung "Đã ghi nhận" có "📍 Sẽ lưu địa chỉ mới: …".

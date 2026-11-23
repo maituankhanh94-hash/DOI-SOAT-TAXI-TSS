@@ -1451,10 +1451,17 @@
       if (priced.length) {
         const min = priced.reduce((a, b) => (b.p < a.p ? b : a));
         const anyNgoai = priced.some(x => x.it.zone === 'ngoai');
-        res = { listPrice: min.p, priceZone: anyNgoai ? 'ngoai' : min.it.zone, priceLabel: priced.length === 1 ? min.it.label : `${min.it.label} (thấp nhất trong ${priced.length} khu vực khớp)`, inferred: true };
+        res = { listPrice: min.p, priceZone: anyNgoai ? 'ngoai' : min.it.zone, priceLabel: priced.length === 1 ? min.it.label : `${min.it.label} (thấp nhất trong ${priced.length} khu vực khớp)`, inferred: true, priceKm: min.it.km };
       }
       inferCache.set(key, res);
       return res;
+    }
+    // (23/11, người dùng) Số km của cuốc theo BẢNG GIÁ (cột Km): mục bảng giá đã gắn với đơn, không có thì suy từ điểm đến
+    function tripKm(t) {
+      const it = t && t.priceId ? priceById[t.priceId] : null;
+      if (it && it.km != null) return it.km;
+      const inf = t ? inferListPrice(t) : null;
+      return inf && inf.priceKm != null ? inf.priceKm : '';
     }
     function discountInfo(t0) {
       // (13/11) Team Kế Hoạch / Kế Hoạch 2: giá đã được công ty duyệt -> KHÔNG rà soát giảm giá vượt mức
@@ -6848,10 +6855,10 @@
       });
       const cols = [
         ['STT', 6], ['Ngày', 11], ['Giờ Nộp', 8], ['Phân Vùng', 15], ['Nhân Sự', 24], ['Số Phiếu', 12], ['Biển Số', 11],
-        ['Loại Xe', 11], ['Nguồn Đơn', 14], ['Điểm Đón', 9], ['Điểm Đến', 26], ['Thanh Toán', 18], ['Ghi Chú', 20], ['Giá Xe', 13], ['Bảng Đón', 12], ['TOTAL', 14], ['Trạng Thái', 24]
+        ['Loại Xe', 11], ['Nguồn Đơn', 14], ['Điểm Đón', 9], ['Điểm Đến', 26], ['Km', 7], ['Thanh Toán', 18], ['Ghi Chú', 20], ['Giá Xe', 13], ['Bảng Đón', 12], ['TOTAL', 14], ['Trạng Thái', 24]
       ];
       // (13/11) Ghi nhận như bảng kê đối tác: GIÁ XE | BẢNG ĐÓN | TOTAL (= giá xe + bảng đón)
-      const C_FARE = 14, C_SIGN = 15, C_TOTAL = 16, C_STATUS = 17;
+      const C_FARE = 15, C_SIGN = 16, C_TOTAL = 17, C_STATUS = 18;   // (23/11) thêm cột Km (12) sau Điểm Đến
       const N = cols.length;
       ws.columns = cols.map(([, w]) => ({ width: w }));
       xlTitle(ws, N, f, 'BÁO CÁO ĐỐI SOÁT ĐƠN HÀNG');
@@ -6865,8 +6872,8 @@
         [4, 6, `Đơn lệch: ${cnt.mismatch} nhóm`, 'mismatch'],
         [7, 9, `Chưa khớp: ${cnt.unmatched} nhóm`, 'unmatched'],
         [10, 12, `Tiền Quầy + Kế hoạch: ${totPos.toLocaleString('vi-VN')}`, null],
-        [13, 14, `Tiền Chủ xe báo: ${totDrv.toLocaleString('vi-VN')}`, null],
-        [15, 17, `Bảng đón: ${totSign.toLocaleString('vi-VN')} • TOTAL: ${(totPos + totSign).toLocaleString('vi-VN')}`, 'sign']
+        [13, 15, `Tiền Chủ xe báo: ${totDrv.toLocaleString('vi-VN')}`, null],
+        [16, 18, `Bảng đón: ${totSign.toLocaleString('vi-VN')} • TOTAL: ${(totPos + totSign).toLocaleString('vi-VN')}`, 'sign']
       ];
       ws.getRow(6).height = 24;
       boxes.forEach(([c1, c2, text, st]) => {
@@ -6897,13 +6904,13 @@
       // tiền Quầy+KH ghi phụ bên cạnh. Trước đây cột Tổng Tiền luôn cộng Quầy+KH nên ra 0.
       const driverView = f.roleFilter === 'driver' || (totPos === 0 && totDrv > 0);
       const writeTotalRow = (label, sums, fillArgb, bold) => {
-        ws.mergeCells(r, 1, r, 11);
+        ws.mergeCells(r, 1, r, 12);
         const l = ws.getCell(r, 1);
         l.value = label;
         xlFont(l, { bold: true, color: { argb: 'FF0F172A' } });
         l.alignment = { horizontal: 'right', vertical: 'middle' };
-        ws.mergeCells(r, 12, r, 13);
-        const info = ws.getCell(r, 12);
+        ws.mergeCells(r, 13, r, 14);
+        const info = ws.getCell(r, 13);
         info.value = `Quầy+KH: ${sums.posN} đơn | Chủ xe: ${sums.drvN} đơn`;
         xlFont(info, { size: 9, color: { argb: 'FF334155' } });
         info.alignment = { horizontal: 'center', vertical: 'middle' };
@@ -6958,7 +6965,7 @@
           g.trips.forEach(t => {
             const role = XL.role[t.role] || { label: t.role || '', color: 'FF334155' };
             const vals = [stt, normalizeDateInput(t.dateStr) || '',t.timeStr || '', role.label, nameCase(t.staff), formatDisplayTicket(t.ticketNumber), plateCell(t.plateNumber),
-              t.carType || '', t.source || '', t.pickup ? 'Ga ' + t.pickup : '', t.destination || '', t.paymentMethod || '(Chưa ghi)',
+              t.carType || '', t.source || '', t.pickup ? 'Ga ' + t.pickup : '', t.destination || '', tripKm(t), t.paymentMethod || '(Chưa ghi)',
               [t.note || '', (di => di && di.over ? `💸 ${discountText(di)}` : '')(discountInfo(t)), t.addrConf === 'kiem' ? 'Cần xem lại phường' + (t.addrCands ? ': ' + t.addrCands : '') : t.addrConf === 'khong' ? 'Chưa đọc được phường' : ''].filter(Boolean).join(' | '),
               Number(t.totalFare || 0), signFeeOf(t) || '', Number(t.totalFare || 0) + signFeeOf(t), auditStatusText(g)];
             const row = ws.getRow(r);
@@ -6968,7 +6975,7 @@
               xlFill(c, st.fill);
               c.border = XL.border;
               xlFont(c, {});
-              c.alignment = { vertical: 'middle', wrapText: i === 4 || i === 10 || i === 12 };
+              c.alignment = { vertical: 'middle', wrapText: i === 4 || i === 10 || i === 13 };
             });
             xlFont(row.getCell(4), { bold: true, color: { argb: role.color } });
             xlFont(row.getCell(6), { bold: true, color: { argb: 'FF1D4ED8' } });
@@ -6978,7 +6985,7 @@
             xlFont(row.getCell(C_SIGN), { bold: true, color: { argb: 'FF9D174D' } });
             row.getCell(C_TOTAL).numFmt = XL.money;
             xlFont(row.getCell(C_TOTAL), { bold: true, color: { argb: 'FF1E3A8A' } });
-            [1, 2, 3, 6, 7, 10].forEach(i => { row.getCell(i).alignment = { horizontal: 'center', vertical: 'middle' }; });
+            [1, 2, 3, 6, 7, 10, 12].forEach(i => { row.getCell(i).alignment = { horizontal: 'center', vertical: 'middle' }; });
             r++;
           });
           const last = r - 1;

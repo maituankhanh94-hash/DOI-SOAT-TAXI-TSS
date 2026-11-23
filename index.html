@@ -1836,6 +1836,7 @@
                 <label class="text-xs font-bold text-slate-600">Chọn ngày xem:</label>
                 <input type="date" id="filter-history-date" class="px-3 py-1.5 bg-slate-50 border rounded-xl font-mono text-xs font-bold" onchange="renderActiveWorksheetTrips('${role}')">
                 <button onclick="resetHistoryDateToToday('${role}')" class="px-2.5 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl text-xs font-bold">Hôm nay</button>
+                <button onclick="resetHistoryDateToToday('${role}', 1)" class="px-2.5 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl text-xs font-bold">Hôm qua</button>
               </div>
             </div>
             <div class="overflow-x-auto custom-scrollbar max-h-[380px]">
@@ -2640,10 +2641,11 @@
       }
     }
 
-    function resetHistoryDateToToday(role) {
+    function resetHistoryDateToToday(role, back) {   // back = 1 -> Hôm qua (giờ địa phương)
       const histDateInp = document.getElementById('filter-history-date');
       if(histDateInp) {
         const todayObj = new Date();
+        if (back) todayObj.setDate(todayObj.getDate() - back);
         const yyyy = todayObj.getFullYear();
         const mm = String(todayObj.getMonth() + 1).padStart(2, '0');
         const dd = String(todayObj.getDate()).padStart(2, '0');

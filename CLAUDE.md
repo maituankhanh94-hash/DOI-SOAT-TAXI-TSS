@@ -103,6 +103,8 @@
 - (18/11, người dùng gửi file giọng "Duyên Hà My" .wav 56,6s đọc 15 câu) GIỌNG + NHẠC GHÉP SẴN TRONG VIDEO: cắt 15 câu theo khoảng lặng (silencedetect -35dB 0,35s; ranh câu = lặng ≥0,6s), mỗi câu bắt đầu 0,3s sau khi chú thích bước đó hiện; câu dài hơn đoạn hình → đứng hình (tpad clone) cho đủ; nhạc nền volume 0.22 + fade cuối; script scratchpad voice/build.py. Video 95,25s, 3MB, `?v=4`. `USE_DEVICE_VOICE = false` → nút "🔊" chỉ bật tiếng + chạy lại từ đầu, KHÔNG dùng speechSynthesis (code cũ còn, bật lại = true).
 - Video quay bằng Playwright trên emulator (tài khoản giả NVA, script scratchpad emu/rec.cjs: chú thích vàng trên cùng, ngón tay 👆), crop 390x760 → mp4 H.264 586x1142 (đổi `?v=` trong GUIDE_VIDEO_SRC mỗi lần thay video).
 
+- (23/11, người dùng, LÊN MAIN) Bảng "Lịch Sử Đơn Hàng Theo Ngày" (nhân viên): cạnh "Hôm nay" thêm nút "Hôm qua" (`resetHistoryDateToToday(role, 1)`).
+
 ## Tự cập nhật bản mới (15/11, LÊN MAIN)
 - Video người dùng (iPhone đời cũ, bảng nhập giật/nhảy ô): người dùng ĐÍNH CHÍNH video QUAY NGÀY 12/11 (gửi 15/11) → là lỗi khung cuộn lồng đã sửa 13/11 "nhập mượt", KHÔNG phải trang bị kẹt bản cũ. Đã nhờ người dùng thử lại máy đó với bản hiện tại; nếu còn lỗi cần video mới + phiên bản iOS. Tự cập nhật vẫn giữ (có ích để máy luôn chạy bản mới).
 - `api/version.js` trả `VERCEL_GIT_COMMIT_SHA` (no-store). Client `checkAppUpdate()`: lúc mở + mỗi 5 phút + visibilitychange/pageshow; mã khác lúc mở HOẶC đã sang ngày mới (`appLoadDay`) → `location.reload()` nếu `hasUnsavedWork()` = false (ô nhập hàng loạt có `dataset.touched` + giá trị, hoặc đang mở modal sửa/quét/đăng nhập/ảnh báo cáo/Baby Car đang chạy); nếu đang nhập dở → thanh xanh dưới đáy "🔄 … bấm để tải lại". Phiên đăng nhập giữ khi tải lại (Persistence.SESSION).

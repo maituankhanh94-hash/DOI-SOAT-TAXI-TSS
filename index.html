@@ -2205,7 +2205,9 @@
         const e = own ? { u: loggedInUser.user, d: tripDateKey(own) } : ticketIdxEntry(side, key);
         const dupRow = [...Array(i).keys()].some(j => ticketIdxKey(v(`t-${j}`)) === key);
         if (dupRow) out.unshift({ f: 't', red: true, text: `Phiếu ${ticket} bị gõ 2 lần trong bảng – sẽ KHÔNG lưu được` });
-        else if (e) out.unshift({ f: 't', red: true, text: `Phiếu ${ticket} ĐÃ ĐƯỢC ${e.u === loggedInUser.user ? 'bạn' : 'tài khoản ' + e.u} nhập ngày ${dkText(e.d)} – sẽ KHÔNG lưu được` });
+        if (!own && (side + '|' + key) in ticketIdxCache && Date.now() - (ticketIdxAt[side + '|' + key] || 0) > TICKET_IDX_TTL)
+          fetchTicketIdx(side, [key]).then(() => updateBatchPreview());   // hỏi lại sổ (có thể Quản lý vừa sửa)
+        if (dupRow) {} else if (e) out.unshift({ f: 't', red: true, text: `Phiếu ${ticket} ĐÃ ĐƯỢC ${e.u === loggedInUser.user ? 'bạn' : 'tài khoản ' + e.u} nhập ngày ${dkText(e.d)} – sẽ KHÔNG lưu được` });
         else if (!((side + '|' + key) in ticketIdxCache)) fetchTicketIdx(side, [key]).then(() => { if (ticketIdxEntry(side, key)) updateBatchPreview(); });
       }
       ['p', 't'].forEach(f => { const el = document.getElementById(`${f}-${i}`); if (el) el.classList.toggle('batch-warn', out.some(w => w.f === f)); });
@@ -3126,7 +3128,7 @@
       const oldKey = ticketIdxKey(trip.originalTicket || trip.ticketNumber), newKey = ticketIdxKey(ticket);
       if (newKey && newKey !== oldKey) {
         const side = ticketSideOf(trip.role);
-        await fetchTicketIdx(side, [newKey]);
+        await fetchTicketIdx(side, [newKey], true);
         const tk = await ticketTakenBy(side, newKey, personalTrips, trip.id);
         if (tk) { alert(`⛔ Phiếu ${ticket} đã được ${tk.u === loggedInUser.user ? 'bạn' : 'tài khoản ' + tk.u} nhập ngày ${dkText(tk.d)}.\nSố phiếu không bao giờ trùng – kiểm tra lại số phiếu.`); return; }
       }
@@ -3655,6 +3657,7 @@
       try {
         let trips = allCompanyTrips;
         if (full) { const ts = await dbRef('trips').once('value'); trips = Object.values(ts.val() || {}); autoFixDict = trips; }
+        if (full) syncTicketIndex(trips);   // (19/11) sổ chung số phiếu; (24/11) chạy TRƯỚC các bước tự sửa khác để lỗi ở đó không chặn việc dọn sổ
         const dict = autoFixDict ? autoFixDict.concat(allCompanyTrips) : trips;
         const groups = buildFixNamesPlan(trips, dict);
         if (groups.length) {
@@ -3665,7 +3668,6 @@
         // sau khi tên đã đúng kiểu: đơn 1 dòng ghi nhiều người -> tách ra
         const ns = await autoSplitCombinedTrips(trips);
         if (ns) { if (autoFixDict === trips) autoFixDict = null; showSplitToast(ns); }
-        if (full) syncTicketIndex(trips);   // (19/11) sổ chung số phiếu để chặn trùng giữa các tài khoản
         if (!groups.length && !ns) return;
         updateManagerAuditTable(); renderBizBox();
       } catch (e) {
@@ -4281,6 +4283,9 @@
           return;
         }
       }
+      // (24/11) hỏi sổ số phiếu MỚI NHẤT trước khi cảnh báo (Quản lý có thể vừa sửa đơn, gỡ số cũ)
+      { const ks = []; for (let i = 0; i < BATCH_ROWS; i++) { const k = ticketIdxKey((document.getElementById(`t-${i}`) || {}).value || ''); if (k) ks.push(k); }
+        if (ks.length) await fetchTicketIdx(ticketSideOf(loggedInUser.role), ks, true); }
       // (16/11) Biển số / số phiếu đáng ngờ -> hỏi lại 1 lần (đúng thì vẫn lưu)
       const warnRows = [];
       for (let i = 0; i < BATCH_ROWS; i++) {
@@ -4309,7 +4314,7 @@
       const mySide = ticketSideOf(loggedInUser.role);
       const rowKeys = [];
       for (let i = 0; i < BATCH_ROWS; i++) { const el = document.getElementById(`t-${i}`); rowKeys[i] = el ? ticketIdxKey(el.value) : ''; }
-      await fetchTicketIdx(mySide, rowKeys.filter(Boolean));
+      await fetchTicketIdx(mySide, rowKeys.filter(Boolean), true);   // lúc lưu luôn hỏi sổ mới nhất
       const taken = {};
       for (const k of [...new Set(rowKeys.filter(Boolean))]) taken[k] = await ticketTakenBy(mySide, k, dupPool, null);
       const savedDests = [];
@@ -4969,11 +4974,14 @@
       return b.replace(/[.#$\[\]\/]/g, '_');
     }
     const ticketIdxCache = {};   // 'sell|108975' -> {u,d,id} | null ; chưa có = chưa hỏi
-    async function fetchTicketIdx(side, keys) {
-      const need = [...new Set(keys)].filter(k => k && !((side + '|' + k) in ticketIdxCache));
+    const ticketIdxAt = {};      // (24/11) lúc hỏi sổ -> nhớ tối đa 60 giây (Quản lý sửa sổ thì máy nhân viên thấy ngay, không phải tải lại trang)
+    const TICKET_IDX_TTL = 60000;
+    async function fetchTicketIdx(side, keys, fresh) {
+      const now = Date.now();
+      const need = [...new Set(keys)].filter(k => k && (fresh || !((side + '|' + k) in ticketIdxCache) || now - (ticketIdxAt[side + '|' + k] || 0) > TICKET_IDX_TTL));
       await Promise.all(need.map(k => dbRef(`ticket_index/${side}/${k}`).once('value')
-        .then(sn => { ticketIdxCache[side + '|' + k] = sn.val() || null; })
-        .catch(() => { ticketIdxCache[side + '|' + k] = null; })));   // quy tắc cũ chưa cho đọc -> bỏ qua, chỉ chặn trong tài khoản
+        .then(sn => { ticketIdxCache[side + '|' + k] = sn.val() || null; ticketIdxAt[side + '|' + k] = Date.now(); })
+        .catch(() => { ticketIdxCache[side + '|' + k] = null; ticketIdxAt[side + '|' + k] = Date.now(); })));   // quy tắc cũ chưa cho đọc -> bỏ qua, chỉ chặn trong tài khoản
     }
     function ticketIdxEntry(side, key) { const v = ticketIdxCache[side + '|' + key]; return v || null; }
     function ticketIdxWrite(trips) {

@@ -4998,6 +4998,12 @@
         } catch (e) {}
       }
     }
+    // (24/11, người dùng) Đơn đổi số phiếu / ngày (Quản lý sửa tại Bảng Đối Soát, nút ghép 🔗): bỏ số cũ khỏi sổ, ghi số mới
+    // (trước đây không cập nhật -> số cũ vẫn bị coi là đã nhập, tài khoản khác nhập đúng số đó bị chặn oan).
+    function ticketIdxMove(before, after) {
+      const changed = ticketIdxKey(before.originalTicket || before.ticketNumber) !== ticketIdxKey(after.originalTicket || after.ticketNumber);
+      return (changed ? ticketIdxRemove([before]) : Promise.resolve()).then(() => ticketIdxWrite([after]));
+    }
     // Phiếu `key` đã có ở bên `side` chưa? Trả về {u, d} của đơn đã có (null = chưa có). excludeId: đơn đang sửa.
     // pool = đơn của chính tài khoản đã tải; sổ chung ghi phiếu của mình mà không thấy trong pool -> tải đúng ngày đó để chắc chắn.
     async function ticketTakenBy(side, key, pool, excludeId) {
@@ -5107,6 +5113,7 @@
       const before = Object.assign({}, trip);
       Object.assign(trip, changes);
       dbRoot().update(updates).then(() => {
+        if (field === 'ticketNumber' || field === 'dateStr') ticketIdxMove(before, trip);   // cập nhật sổ số phiếu chung
         logTrips('edit', [trip], () => changeText(before, changes) || `${field}: ${oldVal} → ${value}`);
         updateManagerRevenueSummary();
         if (field === 'dateStr' || field === 'staff') updateManagerAuditTable();   // đổi ngày -> nhóm đối soát thay đổi; tên -> vẽ lại đúng kiểu
@@ -6273,6 +6280,7 @@
       dbRoot().update(updates).then(() => {
         logTrips('edit', targets, t => `Sửa theo gợi ý ghép đối soát (theo ${sideName(src)} phiếu ${src.ticketNumber}): ` + changeText(befores[targets.indexOf(t)], chs[targets.indexOf(t)]));
         targets.forEach((t, i) => Object.assign(t, chs[i]));
+        targets.forEach((t, i) => ticketIdxMove(befores[i], t));   // cập nhật sổ số phiếu chung
         updateManagerAuditTable();
         updateManagerRevenueSummary();
       }).catch(err => alert('Lỗi cập nhật: ' + err.message));

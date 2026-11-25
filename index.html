@@ -192,7 +192,9 @@
     function payListFor(role) { return role === 'plan2' ? plan2PaymentOptions : (role === 'plan' ? planPaymentOptions : paymentOptions); }
     
     let lockHourSetting = 8; 
-    const TERMINAL_OPTIONS = ["T2", "T1", "T3"];
+    // (25/11, người dùng) thêm lựa chọn "Cuốc tiễn" (đón khách ở nơi khác, chở ra sân bay)
+    const TERMINAL_OPTIONS = ["T2", "T1", "T3", "Cuốc tiễn"];
+    const pickupLabel = p => !p ? '' : (/^T\d$/.test(p) ? 'Ga ' + p : p);
     const ROLE_LABELS = { 'pos': 'Bán Vé (Quầy)', 'driver': 'Cổng Chủ Xe', 'plan': 'Team Kế Hoạch', 'plan2': 'Team Kế Hoạch 2', 'manager': 'Quản Lý' };
 
     // ===== TỰ CẬP NHẬT BẢN MỚI (15/11) =====
@@ -1883,7 +1885,7 @@
             </div>
 
             <div id="batch-wrap" class="overflow-x-auto custom-scrollbar max-h-[450px]">
-              <table id="batch-table" class="text-left border-collapse" style="table-layout:fixed; width:${hasSignFee(role) ? 2374 : 2214}px">
+              <table id="batch-table" class="text-left border-collapse" style="table-layout:fixed; width:${hasSignFee(role) ? 2404 : 2244}px">
                 <thead class="sticky top-0 z-20 shadow-md">
                   <tr class="bg-slate-900 text-white text-[11px] font-bold">
                     <th class="p-3 text-center bg-slate-900 bstt" style="width:64px">STT</th>
@@ -1893,7 +1895,7 @@
                     <th class="p-3 bg-slate-900" style="width:120px">Biển Số Xe</th>
                     <th class="p-3 bg-slate-900" style="width:170px">Loại Xe</th>
                     <th class="p-3 bg-slate-900" style="width:200px">Nguồn Đơn</th>
-                    <th class="p-3 bg-slate-900" style="width:130px">Điểm Đón</th>
+                    <th class="p-3 bg-slate-900" style="width:160px">Điểm Đón</th>
                     <th class="p-3 bg-slate-900" style="width:320px">Điểm Đến</th>
                     <th class="p-3 text-right bg-slate-900" style="width:160px">Tổng Tiền</th>
                     ${hasSignFee(role) ? '<th class="p-3 text-right bg-pink-800" style="width:160px">🪧 Bảng Đón (công nợ ĐT)</th>' : ''}
@@ -1964,7 +1966,7 @@
             </td>
             <td class="p-2.5">
               <select id="pick-${i}" class="w-full p-2 bg-slate-50 border rounded-xl font-bold text-xs">
-                ${TERMINAL_OPTIONS.map(t => `<option value="${t}">Ga ${t}</option>`).join('')}
+                ${TERMINAL_OPTIONS.map(t => `<option value="${t}">${pickupLabel(t)}</option>`).join('')}
               </select>
             </td>
             <td class="p-2.5 relative">
@@ -2972,7 +2974,7 @@
             <td class="p-2.5 font-mono font-bold uppercase">${escHtml(t.plateNumber)}</td>
             <td class="p-2.5 font-bold">${escHtml(t.carType || '--')}</td>
             <td class="p-2.5 font-bold">${escHtml(t.source || '--')}</td>
-            <td class="p-2.5 font-bold">${escHtml(t.pickup ? 'Ga ' + t.pickup : '--')}</td>
+            <td class="p-2.5 font-bold">${escHtml(t.pickup ? pickupLabel(t.pickup) : '--')}</td>
             <td class="p-2.5">${escHtml(t.destination)}</td>
             <td class="p-2.5 font-bold text-slate-700">${escHtml(t.paymentMethod || activePayments[0])}</td>
             <td class="p-2.5 text-slate-600">${escHtml(t.note || '--')}</td>
@@ -3043,7 +3045,7 @@
                 <div>
                   <label class="font-bold text-slate-600">Điểm Đón:</label>
                   <select id="edit-modal-pickup" class="w-full mt-1 p-2.5 bg-slate-50 border rounded-xl font-bold">
-                    ${TERMINAL_OPTIONS.map(t => `<option value="${t}" ${escHtml(trip.pickup === t ? 'selected' : '')}>Ga ${t}</option>`).join('')}
+                    ${TERMINAL_OPTIONS.map(t => `<option value="${t}" ${escHtml(trip.pickup === t ? 'selected' : '')}>${pickupLabel(t)}</option>`).join('')}
                   </select>
                 </div>
               </div>
@@ -6981,7 +6983,7 @@
           g.trips.forEach(t => {
             const role = XL.role[t.role] || { label: t.role || '', color: 'FF334155' };
             const vals = [stt, normalizeDateInput(t.dateStr) || '',t.timeStr || '', role.label, nameCase(t.staff), formatDisplayTicket(t.ticketNumber), plateCell(t.plateNumber),
-              t.carType || '', t.source || '', t.pickup ? 'Ga ' + t.pickup : '', t.destination || '', tripKm(t), t.paymentMethod || '(Chưa ghi)',
+              t.carType || '', t.source || '', pickupLabel(t.pickup), t.destination || '', tripKm(t), t.paymentMethod || '(Chưa ghi)',
               [t.note || '', (di => di && di.over ? `💸 ${discountText(di)}` : '')(discountInfo(t)), t.addrConf === 'kiem' ? 'Cần xem lại phường' + (t.addrCands ? ': ' + t.addrCands : '') : t.addrConf === 'khong' ? 'Chưa đọc được phường' : ''].filter(Boolean).join(' | '),
               Number(t.totalFare || 0), signFeeOf(t) || '', Number(t.totalFare || 0) + signFeeOf(t), auditStatusText(g)];
             const row = ws.getRow(r);
@@ -7104,7 +7106,7 @@
             'Chưa thu tiền', dateVal, dateVal, ticket, ticket,
             custCode, 'VC', '131', '5113', 'Chuyến', 1,
             fare, fare, clean(t.source), t.role === 'driver' ? '' : nameCase(clean(t.staff)),
-            clean(t.paymentMethod), t.pickup ? 'Ga ' + clean(t.pickup) : '', clean(t.destination)
+            clean(t.paymentMethod), clean(pickupLabel(t.pickup)), clean(t.destination)
           ]);
           if (p) { row.getCell(2).numFmt = 'dd/mm/yyyy'; row.getCell(3).numFmt = 'dd/mm/yyyy'; }
           [4, 5, 8, 9, 10, 14, 15, 16, 17, 18].forEach(i => { row.getCell(i).numFmt = '@'; });

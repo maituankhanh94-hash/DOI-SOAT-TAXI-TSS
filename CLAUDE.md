@@ -93,6 +93,8 @@
 - (17/11, người dùng) Tiêu đề bảng nhập đổi thành "📝 BẢNG NHẬP ĐƠN" (khung màu theo phân vùng, chữ to đậm trắng); ô Ngày bỏ font-mono, chữ 16px cho khỏi tràn trên iPhone.
 - (14/11, LÊN MAIN) Ô Số phiếu tự nhảy số kế tiếp khi bấm vào (`handleSmartTicketFocus`) — TẮT cho TÀI XẾ (`staffRole === 'driver'`), vì tài xế mỗi cuốc 1 phiếu không theo thứ tự. Bán vé / KH / KH2 vẫn giữ.
 
+- (25/11, người dùng, LÊN MAIN) Cột Điểm Đón thêm lựa chọn "Cuốc tiễn" (`TERMINAL_OPTIONS = [T2, T1, T3, "Cuốc tiễn"]`, giá trị lưu đúng chữ "Cuốc tiễn"); hiển thị qua `pickupLabel` (T1→"Ga T1", còn lại giữ nguyên) ở bảng nhập, modal sửa, lịch sử, Excel Đối Soát + MISA. Cột Điểm Đón bảng nhập 130→160px (bảng +30px).
+
 ## Hướng dẫn nhập & kiểm tra đơn (18/11, ĐÃ LÊN MAIN 18/11; nhánh `huong-dan-nhap`)
 - (T1) Bảng "Lịch Sử Đơn Hàng Theo Ngày" (nhân viên): cột Thao Tác (✏️ Sửa xanh đậm to hơn + 🗑️ Xóa) dời lên ĐẦU hàng (sau ô chọn).
 - (T2) Nhân viên đăng nhập → `scrollToBatchSectionOnLogin` cuộn #main-container tới `#batch-section` (BẢNG NHẬP ĐƠN), chạy lại 1,2s/2,5s nếu người dùng chưa tự kéo.

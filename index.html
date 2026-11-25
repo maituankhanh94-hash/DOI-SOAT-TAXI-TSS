@@ -6591,55 +6591,55 @@
         ws = xlSheetSetup(wb, 'Tài Xế Chưa Báo', true);
         const xPool = gs.length <= 400 ? auditUnmatchedPool(remindFrom, remindTo) : [];
         const nearTxt = g => { const c = xPool.length ? auditNearCands(g, xPool)[0] : null; if (!c) return ''; const o = c.g2.trips[0]; return `Có thể ${sideName(o).toLowerCase()} nhập nhầm thành phiếu ${escTk(o)}, xe ${o.plateNumber || '-'} (${fullStaffName(c.g2.trips)}) - ${c.why}`; };
-        xlTitle(ws, 9, f, 'TÀI XẾ / CHỦ XE CHƯA BÁO CÁO');
+        xlTitle(ws, 10, f, 'TÀI XẾ / CHỦ XE CHƯA BÁO CÁO');
         xlTable(ws, 6, [
           { h: 'STT', w: 6, align: 'center' }, { h: 'Ngày', w: 12, align: 'center' }, { h: 'Biển số xe', w: 14, align: 'center' }, { h: 'Số phiếu', w: 14, align: 'center' },
-          { h: 'Bán vé / KH đã nhập', w: 30, wrap: true }, { h: 'Điểm đến', w: 34, wrap: true }, { h: 'Số tiền', w: 14, fmt: '#,##0' }, { h: 'Trạng thái', w: 12, align: 'center' },
+          { h: 'Bán vé / KH đã nhập', w: 30, wrap: true }, { h: 'Điểm đến', w: 34, wrap: true }, { h: 'Km', w: 7, align: 'center' }, { h: 'Số tiền', w: 14, fmt: '#,##0' }, { h: 'Trạng thái', w: 12, align: 'center' },
           { h: 'Gợi ý (nhập nhầm?)', w: 40, wrap: true }
         ], drv.map((g, i) => [i + 1, dmy(g.dateKey), plateCell(g.trips[0].plateNumber), g.trips[0].originalTicket || g.trips[0].ticketNumber,
-          fullStaffName(g.trips), g.trips[0].destination || '', sumFare(g.trips), stTxt(g), nearTxt(g)]), i => lateFill(drv[i]));
+          fullStaffName(g.trips), g.trips[0].destination || '', tripKm(g.trips[0]), sumFare(g.trips), stTxt(g), nearTxt(g)]), i => lateFill(drv[i]));
         // 2. Bán vé chưa nhập
         const pos = gs.filter(g => g.missing === 'pos');
         ws = xlSheetSetup(wb, 'Bán Vé Chưa Nhập', true);
-        xlTitle(ws, 10, f, 'BÁN VÉ / KẾ HOẠCH CHƯA NHẬP ĐƠN');
+        xlTitle(ws, 11, f, 'BÁN VÉ / KẾ HOẠCH CHƯA NHẬP ĐƠN');
         xlTable(ws, 6, [
           { h: 'STT', w: 6, align: 'center' }, { h: 'Ngày', w: 12, align: 'center' }, { h: 'Số phiếu', w: 14, align: 'center' }, { h: 'Biển số xe', w: 14, align: 'center' },
-          { h: 'Tài xế / Chủ xe đã báo', w: 30, wrap: true }, { h: 'Điểm đến', w: 34, wrap: true }, { h: 'Số tiền', w: 14, fmt: '#,##0' }, { h: 'Trạng thái', w: 12, align: 'center' },
+          { h: 'Tài xế / Chủ xe đã báo', w: 30, wrap: true }, { h: 'Điểm đến', w: 34, wrap: true }, { h: 'Km', w: 7, align: 'center' }, { h: 'Số tiền', w: 14, fmt: '#,##0' }, { h: 'Trạng thái', w: 12, align: 'center' },
           { h: 'Có thể của (theo số phiếu kề)', w: 36, wrap: true }, { h: 'Gợi ý (nhập nhầm?)', w: 40, wrap: true }
         ], pos.map((g, i) => [i + 1, dmy(g.dateKey), g.trips[0].originalTicket || g.trips[0].ticketNumber, plateCell(g.trips[0].plateNumber),
-          fullStaffName(g.trips), g.trips[0].destination || '', sumFare(g.trips), stTxt(g), guessSellerText(g), nearTxt(g)]), i => lateFill(pos[i]));
+          fullStaffName(g.trips), g.trips[0].destination || '', tripKm(g.trips[0]), sumFare(g.trips), stTxt(g), guessSellerText(g), nearTxt(g)]), i => lateFill(pos[i]));
         }
         // 3. Giảm giá vượt mức
         const od = collectOverDiscount(remindFrom, remindTo);
         ws = xlSheetSetup(wb, 'Giảm Giá Vượt Mức', true);
-        xlTitle(ws, 12, f, `ĐƠN GIẢM GIÁ VƯỢT MỨC QUY ĐỊNH (${pctText(DISCOUNT_LIMIT.noi)} NỘI THÀNH, ${pctText(DISCOUNT_LIMIT.ngoai)} NGOẠI THÀNH)`);
+        xlTitle(ws, 13, f, `ĐƠN GIẢM GIÁ VƯỢT MỨC QUY ĐỊNH (${pctText(DISCOUNT_LIMIT.noi)} NỘI THÀNH, ${pctText(DISCOUNT_LIMIT.ngoai)} NGOẠI THÀNH)`);
         const odEnd = xlTable(ws, 6, [
           { h: 'STT', w: 6, align: 'center' }, { h: 'Nhân viên', w: 28, wrap: true }, { h: 'Ngày', w: 12, align: 'center' }, { h: 'Số phiếu', w: 12, align: 'center' },
-          { h: 'Biển số', w: 11, align: 'center' }, { h: 'Điểm đến', w: 26, wrap: true }, { h: 'Mục bảng giá', w: 34, wrap: true }, { h: 'Giá bảng', w: 13, fmt: '#,##0' },
+          { h: 'Biển số', w: 11, align: 'center' }, { h: 'Điểm đến', w: 26, wrap: true }, { h: 'Km', w: 7, align: 'center' }, { h: 'Mục bảng giá', w: 34, wrap: true }, { h: 'Giá bảng', w: 13, fmt: '#,##0' },
           { h: 'Đã thu', w: 13, fmt: '#,##0' }, { h: 'Giảm (%)', w: 10, fmt: '0.0' }, { h: 'Mức cho phép', w: 16, align: 'center' }, { h: 'Ghi chú', w: 24, wrap: true }
         ], od.map(({ trips, d, dateKey }, i) => [i + 1, fullStaffName(trips), dmy(dateKey), trips[0].originalTicket || trips[0].ticketNumber, plateCell(trips[0].plateNumber),
-          trips[0].destination || '', (d.label || '') + (d.inferred ? ' (ước tính)' : ''), d.list, d.fare, Math.round(d.pct * 1000) / 10,
+          trips[0].destination || '', tripKm(trips[0]), (d.label || '') + (d.inferred ? ' (ước tính)' : ''), d.list, d.fare, Math.round(d.pct * 1000) / 10,
           `${pctText(d.limit)} ${ZONE_LABEL[d.zone]}`, [...new Set(trips.map(t => t.note).filter(Boolean))].join(' | ')]), () => 'FFFEE2E2');
-        if (onlyDiscount && od.length) xlSignature(ws, odEnd + 3, 12);
+        if (onlyDiscount && od.length) xlSignature(ws, odEnd + 3, 13);
         // 3b. (22/11) Đơn bán ĐÚNG bảng giá (đúng giá / giảm trong mức cho phép)
         const okd = collectOverDiscount(remindFrom, remindTo, true);
         ws = xlSheetSetup(wb, 'Đúng Bảng Giá', true);
-        xlTitle(ws, 12, f, 'ĐƠN BÁN ĐÚNG BẢNG GIÁ (ĐÚNG GIÁ HOẶC GIẢM TRONG MỨC CHO PHÉP)');
+        xlTitle(ws, 13, f, 'ĐƠN BÁN ĐÚNG BẢNG GIÁ (ĐÚNG GIÁ HOẶC GIẢM TRONG MỨC CHO PHÉP)');
         const okTxt = d => d.pct <= 1e-9 ? (d.pct < -1e-9 ? 'Cao hơn giá bảng' : 'Đúng giá') : 'Giảm trong mức';
         const okEnd = xlTable(ws, 6, [
           { h: 'STT', w: 6, align: 'center' }, { h: 'Nhân viên', w: 28, wrap: true }, { h: 'Ngày', w: 12, align: 'center' }, { h: 'Số phiếu', w: 12, align: 'center' },
-          { h: 'Biển số', w: 11, align: 'center' }, { h: 'Điểm đến', w: 26, wrap: true }, { h: 'Mục bảng giá', w: 34, wrap: true }, { h: 'Giá bảng', w: 13, fmt: '#,##0' },
+          { h: 'Biển số', w: 11, align: 'center' }, { h: 'Điểm đến', w: 26, wrap: true }, { h: 'Km', w: 7, align: 'center' }, { h: 'Mục bảng giá', w: 34, wrap: true }, { h: 'Giá bảng', w: 13, fmt: '#,##0' },
           { h: 'Đã thu', w: 13, fmt: '#,##0' }, { h: 'Giảm (%)', w: 10, fmt: '0.0' }, { h: 'Tình trạng', w: 16, align: 'center' }, { h: 'Ghi chú', w: 24, wrap: true }
         ], okd.map(({ trips, d, dateKey }, i) => [i + 1, fullStaffName(trips), dmy(dateKey), trips[0].originalTicket || trips[0].ticketNumber, plateCell(trips[0].plateNumber),
-          trips[0].destination || '', (d.label || '') + (d.inferred ? ' (ước tính)' : ''), d.list, d.fare, Math.max(0, Math.round(d.pct * 1000) / 10),
+          trips[0].destination || '', tripKm(trips[0]), (d.label || '') + (d.inferred ? ' (ước tính)' : ''), d.list, d.fare, Math.max(0, Math.round(d.pct * 1000) / 10),
           okTxt(d), [...new Set(trips.map(t => t.note).filter(Boolean))].join(' | ')]), i => okd[i].d.pct > 1e-9 ? 'FFFEF9C3' : 'FFDCFCE7');
         if (okd.length) {
           const row = ws.getRow(okEnd);
-          ['', `TỔNG CỘNG: ${okd.length} đơn`, '', '', '', '', '', okd.reduce((a, o) => a + o.d.list, 0), okd.reduce((a, o) => a + o.d.fare, 0), '', '', ''].forEach((v, i) => {
+          ['', `TỔNG CỘNG: ${okd.length} đơn`, '', '', '', '', '', '', okd.reduce((a, o) => a + o.d.list, 0), okd.reduce((a, o) => a + o.d.fare, 0), '', '', ''].forEach((v, i) => {
             const c = row.getCell(i + 1); c.value = v; c.border = XL.border; xlFill(c, 'FFFDE68A'); xlFont(c, { bold: true });
-            if (i === 7 || i === 8) c.numFmt = '#,##0';
+            if (i === 8 || i === 9) c.numFmt = '#,##0';
           });
-          xlSignature(ws, okEnd + 3, 12);
+          xlSignature(ws, okEnd + 3, 13);
         }
         // 4. Tổng hợp theo nhân viên (giảm giá vượt mức)
         const byStaff = {};

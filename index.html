@@ -10,7 +10,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="TSS POS">
   <!-- (21/11) Tailwind dựng sẵn (app.css) thay cho cdn.tailwindcss.com để app nhẹ, không lag. Thêm class mới thì chạy lại lệnh trong tailwind/tailwind.config.cjs -->
-  <link rel="stylesheet" href="app.css?v=8">
+  <link rel="stylesheet" href="app.css?v=9">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
@@ -7563,18 +7563,17 @@
       box.innerHTML = `
         <div class="grid lg:grid-cols-2 gap-3">
           <div class="bg-emerald-50 border border-emerald-200 rounded-2xl p-3 space-y-2">
-            <div class="text-xs font-extrabold text-emerald-900">1️⃣ Vị trí được điểm danh (bán kính + sai số GPS ≤ 150 m)</div>
-            ${places.length ? places.map(([k, p]) => `<div class="flex items-center justify-between gap-2 bg-white border rounded-xl px-2 py-1.5 text-xs"><span><b>${escHtml(p.name || k)}</b> – ${Number(p.lat).toFixed(5)}, ${Number(p.lng).toFixed(5)} • ${Number(p.r) || 300} m</span><button onclick="deleteCheckinPlace('${escHtml(k)}')" class="px-2 py-1 bg-rose-100 hover:bg-rose-200 text-rose-700 rounded-lg font-bold">Xóa</button></div>`).join('')
-              : '<div class="text-xs text-rose-700 font-bold">Chưa có vị trí nào → nhân viên CHƯA điểm danh được.</div>'}
-            <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
-              <input id="ci-p-name" placeholder="Tên (vd Quầy T2)" class="p-2 border rounded-xl text-xs font-bold">
-              <input id="ci-p-ll" placeholder="Dán tọa độ Google Maps" class="p-2 border rounded-xl text-xs font-mono">
-              <input id="ci-p-r" type="number" value="300" min="50" class="p-2 border rounded-xl text-xs font-bold" title="Bán kính (m)">
-            </div>
-            <div class="flex flex-wrap gap-2">
-              <button onclick="useMyLocationForPlace()" class="px-3 py-1.5 bg-white border border-emerald-400 text-emerald-800 rounded-xl text-xs font-bold">📡 Lấy vị trí máy này</button>
-              <button onclick="addCheckinPlace()" class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold">➕ Thêm vị trí</button>
-            </div>
+            <div class="text-xs font-extrabold text-emerald-900">1️⃣ 3 khu vực điểm danh: Ga T1, Ga T2, Ga T3 (bán kính + sai số GPS ≤ 150 m)</div>
+            ${CHECKIN_AREAS.map(([k, nm]) => { const p = checkinPlaces[k]; return `<div class="bg-white border rounded-xl p-2 space-y-1.5 text-xs">
+              <div class="flex items-center justify-between gap-2"><b class="text-sm">📍 ${nm}</b>${p ? `<span class="text-emerald-700 font-bold">✅ ${Number(p.lat).toFixed(5)}, ${Number(p.lng).toFixed(5)} • ${Number(p.r) || 300} m</span>` : '<span class="text-rose-700 font-bold">Chưa cài – chưa điểm danh được</span>'}</div>
+              <div class="flex flex-wrap items-center gap-1.5">
+                <input id="ci-ll-${k}" placeholder="Dán tọa độ Google Maps" value="${p ? `${p.lat}, ${p.lng}` : ''}" class="flex-1 min-w-[150px] p-1.5 border rounded-lg font-mono">
+                <input id="ci-r-${k}" type="number" min="50" value="${p ? Number(p.r) || 300 : 300}" class="w-20 p-1.5 border rounded-lg font-bold" title="Bán kính (m)"><span>m</span>
+                <button onclick="useMyLocationForPlace('${k}')" class="px-2 py-1.5 bg-white border border-emerald-400 text-emerald-800 rounded-lg font-bold">📡 Vị trí máy này</button>
+                <button onclick="saveCheckinArea('${k}')" class="px-2 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold">💾 Lưu</button>
+                ${p ? `<button onclick="deleteCheckinPlace('${k}')" class="px-2 py-1.5 bg-rose-100 hover:bg-rose-200 text-rose-700 rounded-lg font-bold">Xóa</button>` : ''}
+              </div></div>`; }).join('')}
+            ${places.filter(([k]) => !CHECKIN_AREAS.some(a => a[0] === k)).map(([k, p]) => `<div class="flex items-center justify-between gap-2 bg-white border rounded-xl px-2 py-1.5 text-xs"><span><b>${escHtml(p.name || k)}</b> (vị trí cũ)</span><button onclick="deleteCheckinPlace('${escHtml(k)}')" class="px-2 py-1 bg-rose-100 hover:bg-rose-200 text-rose-700 rounded-lg font-bold">Xóa</button></div>`).join('')}
           </div>
           <div class="bg-sky-50 border border-sky-200 rounded-2xl p-3 space-y-2">
             <div class="flex items-center justify-between gap-2"><div class="text-xs font-extrabold text-sky-900">2️⃣ Gắn tài khoản ↔ nhân sự (app HR)</div>
@@ -7656,14 +7655,17 @@
       renderCheckinAdmin();
     }
     async function reloadHrDirAdmin() { try { await loadHrDir(true); } catch (e) { alert(e.message || 'Lỗi tải danh sách HR'); } renderCheckinAdmin(); buildCheckinSuggest(); }
-    async function useMyLocationForPlace() {
-      try { const p = await getGeo(); const el = document.getElementById('ci-p-ll'); if (el) el.value = `${p.lat.toFixed(6)}, ${p.lng.toFixed(6)}`; alert(`Đã lấy vị trí máy này (sai số ${p.acc} m).`); }
+    async function useMyLocationForPlace(k) {
+      try { const p = await getGeo(); const el = document.getElementById('ci-ll-' + k); if (el) el.value = `${p.lat.toFixed(6)}, ${p.lng.toFixed(6)}`; alert(`Đã lấy vị trí máy này (sai số ${p.acc} m).`); }
       catch (e) { alert('Không lấy được vị trí – kiểm tra quyền Vị trí của trình duyệt.'); }
     }
-    async function addCheckinPlace() {
-      const name = (document.getElementById('ci-p-name').value || '').trim(), ll = parseLatLng(document.getElementById('ci-p-ll').value), r = Math.max(50, Number(document.getElementById('ci-p-r').value) || 300);
-      if (!name || !ll) { alert('Nhập tên và tọa độ (dán từ Google Maps, vd 10.8188, 106.6519).'); return; }
-      await dbRef('meta/checkinPlaces/' + (placeSlug(name) || ('p' + Date.now()))).set({ name, lat: ll.lat, lng: ll.lng, r });
+    // (28/11, người dùng) chỉ 3 khu vực chính: Ga T1, Ga T2, Ga T3
+    const CHECKIN_AREAS = [['t1', 'Ga T1'], ['t2', 'Ga T2'], ['t3', 'Ga T3']];
+    async function saveCheckinArea(k) {
+      const a = CHECKIN_AREAS.find(x => x[0] === k); if (!a) return;
+      const ll = parseLatLng(document.getElementById('ci-ll-' + k).value), r = Math.max(50, Number(document.getElementById('ci-r-' + k).value) || 300);
+      if (!ll) { alert('Dán tọa độ Google Maps (vd 10.8188, 106.6519) hoặc bấm "📡 Vị trí máy này" khi đang đứng ở ' + a[1] + '.'); return; }
+      await dbRef('meta/checkinPlaces/' + k).set({ name: a[1], lat: ll.lat, lng: ll.lng, r });
     }
     async function deleteCheckinPlace(k) { if (confirm('Xóa vị trí điểm danh này?')) await dbRef('meta/checkinPlaces/' + k).remove(); }
     async function saveCheckinBind(u, id) {

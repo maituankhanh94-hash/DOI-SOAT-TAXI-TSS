@@ -929,7 +929,7 @@
       });
       // Chữ gõ trùng đúng tên quận/huyện/tỉnh (vd "Bình Thạnh", "Bình Dương") -> chỉ lấy khu vực đó
       const inDistrict = hits.filter(it => { const dw = removeAccents(it.district).split(/\s+/); return tokens.length && tokens.every(tk => dw.includes(tk)); });
-      return (inDistrict.length ? inDistrict : hits).slice(0, limit || 6);
+      return dropLongerWard(text, inDistrict.length ? inDistrict : hits).slice(0, limit || 6);
     }
     // QUY ƯỚC Ô ĐIỂM ĐẾN (Bán vé + Kế hoạch): địa chỉ NỘI THÀNH bắt buộc ghi Quận (vd "Tân Định, Q1", "Landmark 81, Bình Thạnh").
     // Đi tỉnh / huyện ngoại thành: ghi tên tỉnh / huyện. Chọn gợi ý 📋 từ bảng giá thì đã có Quận sẵn.
@@ -1110,15 +1110,58 @@
     const NEW_WARD_KEYS = NEW_WARDS.map(w => ({ key: canonWords(w[1]), w }));
     // Các phường/xã mới có trong chữ gõ (ưu tiên tên dài: "Tân Sơn Nhất" thắng "Tân Sơn")
     function findNewWards(text) {
-      const t = canonWords(text);
+      const t = String(text || '').split(/[,;]/).map(canonWords).join('|');   // (28/11) không ghép chữ qua dấu phẩy ("…Tây, Thành phố" không thành "Tây Thạnh")
       const hits = NEW_WARD_KEYS.filter(x => t.includes(x.key));
       return hits.filter(h => !hits.some(o => o !== h && o.key.length > h.key.length && o.key.includes(h.key))).map(h => h.w);
     }
     // Mục bảng giá theo phường mới (cột "Phường mới" trong bảng giá)
-    function wardPriceMatches(text) {
-      const ws = findNewWards(text).filter(w => w[0] !== 'ĐK');
+    // (28/11, ảnh người dùng) gõ RÕ "Phường/P./Xã <tên mới>" thì chỉ giữ mục bảng giá ĐÚNG phường đó
+    // (trước đây "Phường An Nhơn" khớp chữ với "Xã An Nhơn Tây" (Củ Chi) / "Lý Nhơn" (Cần Giờ) -> tính nhầm ngoại thành)
+    function dropLongerWard(text, hits) {
+      const t = canonWords(text);
+      const ws = findNewWards(text).filter(w => new RegExp('(^|\\s)(phuong|p|xa)\\s+' + canonWords(w[1]).trim() + '(\\s|$)').test(t)).map(w => w[1]);
+      if (!ws.length) return hits;
+      return hits.filter(it => {
+        if (!it._wn) it._wn = findNewWards(it.ward || '').map(w => w[1]);
+        return it._wn.some(n => ws.includes(n));
+      });
+    }
+    // (28/11, ảnh người dùng) so ĐÚNG TÊN phường (trước đây so "chứa chữ" -> "Phường An Nhơn" (Gò Vấp) khớp nhầm "Xã An Nhơn Tây" (Củ Chi, ngoại thành))
+    function wardPriceMatches(text, depth) {
+      let ws = findNewWards(text).filter(w => w[0] !== 'ĐK');
       if (!ws.length) return [];
-      return priceItems.filter(it => it.kind === 'sb' && ws.some(w => wordsOf(it.ward).includes(wordsOf(w[1]))));
+      const sb = priceItems.filter(it => it.kind === 'sb');
+      // (28/11) tên trùng tên QUẬN cũ (Gò Vấp, Bình Thạnh, Tân Bình…) mà ghi "Quận X" hoặc kèm "P5" -> là quận cũ, không phải phường mới
+      const t = String(text || '').split(/[,;]/).map(canonWords).join('|');
+      const isDist = w => { const k = canonWords(w[1]).trim();
+        if (new RegExp('(^|[\\s|])(phuong|p|xa)\\s+' + k + '(?=[\\s|])').test(t)) return false;
+        // không ghi "Phường" mà trùng tên quận cũ (vd "12 Bạch Đằng, Tân Bình") -> hiểu là QUẬN (lấy giá thấp nhất cả quận, tránh báo nhầm)
+        return sb.some(it => wordsOf(it.district).includes(wordsOf(w[1]))); };
+      const dists = ws.filter(isDist);
+      ws = ws.filter(w => !isDist(w));
+      if (!ws.length) {
+        if (!depth) {   // đọc ra phường mới chắc chắn (vd "P5 Gò Vấp" -> An Nhơn) thì tìm theo phường đó
+          const na = normalizeDestAddr(text);
+          if (na && na.conf === 'ok' && na.addr && na.addr !== text) { const r = wardPriceMatches(na.addr, 1); if (r.length) return r; }
+        }
+        // chỉ biết quận cũ -> mọi mục bảng giá của quận đó (lấy giá thấp nhất)
+        return sb.filter(it => it.ward && dists.some(w => wordsOf(it.district).includes(wordsOf(w[1]))));   // bỏ mục đặc biệt không phường ("lân cận sân bay <4km")
+      }
+      sb.forEach(it => { if (!it._wn) it._wn = findNewWards(it.ward || '').map(w => w[1]); });
+      const direct = sb.filter(it => ws.some(w => it._wn.includes(w[1])));
+      if (direct.length) return direct;
+      // bảng giá chưa có cột phường mới này -> tìm theo PHƯỜNG CŨ thuộc phường mới (vd An Nhơn = Gò Vấp P5, P6)
+      const out = new Set();
+      oldWardData().forEach(d => d.wards.forEach(o => {
+        if (!ws.some(w => w[1] === o.n)) return;
+        const dKey = d.num ? wordsOf('quận ' + d.num) : wordsOf(d.d);
+        sb.forEach(it => {
+          if (!wordsOf(it.district).includes(dKey)) return;
+          const area = wordsOf(it.area);
+          if (/^\d+$/.test(o.o) ? area.includes(' ' + o.o + ' ') : area.includes(wordsOf(o.o))) out.add(it);
+        });
+      }));
+      return [...out];
     }
     // ===== (22/11, người dùng) TỰ CHUẨN HÓA ĐIỂM ĐẾN theo PHƯỜNG/XÃ MỚI (từ 01/7/2025 bỏ cấp Quận/Huyện) =====
     // vd "123 Nguyễn Trãi P2 Q5" -> "123 Nguyễn Trãi, Phường Chợ Quán, Thành phố Hồ Chí Minh". Chỉ bên bán, chỉ ô Điểm đến.
@@ -1446,12 +1489,14 @@
     // Khớp 1 khu vực -> giá đó; khớp nhiều khu vực -> lấy GIÁ THẤP NHẤT (không bắt lỗi oan). Không khớp -> không xét.
     const inferCache = new Map();
     function inferListPrice(t) {
+      const t0 = t;
       if (t && t.destGoc) t = Object.assign({}, t, { destination: t.destGoc });   // (22/11) đơn đã đổi sang phường mới: ước tính giá theo chữ GỐC như trước
       if (!priceItems.length || !t.destination) return null;
-      const key = `${t.destination}|${t.carType}`;
+      const key = `${t.destination}|${t0 && t0.destGoc ? t0.destination : ''}|${t.carType}`;
       if (inferCache.has(key)) return inferCache.get(key);
       let hits = findPriceMatches(t.destination, 60);
       if (!hits.length) hits = wardPriceMatches(t.destination);   // địa chỉ kiểu mới: "số nhà, đường, Phường mới"
+      if (!hits.length && t0 && t0.destGoc && t0.destination) hits = wardPriceMatches(t0.destination);   // chữ gốc không ra -> theo địa chỉ đã chuẩn hóa
 
       let res = null;
       const priced = hits.map(it => ({ it, p: priceForItem(it, t.carType) })).filter(x => x.p);

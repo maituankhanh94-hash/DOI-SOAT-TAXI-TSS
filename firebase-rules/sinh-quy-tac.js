@@ -6,6 +6,12 @@ function strict(B){
   const me = `${R}+'/user').val()`;
   const noRoles = `(auth != null && !root.child('${B}roles').exists())`;
   const readA = { ".read": active }, readM = { ".read": mgr };
+  const DAY = 86400000;
+  const recentOld = `data.child('timestamp').isNumber() && data.child('timestamp').val() > now - ${3 * DAY}`;
+  const recentNew = `newData.child('timestamp').isNumber() && newData.child('timestamp').val() > now - ${3 * DAY} && newData.child('timestamp').val() < now + ${DAY} && (!data.exists() || newData.child('timestamp').val() === data.child('timestamp').val()) && (!data.exists() || newData.child('createdBy').val() === data.child('createdBy').val())`;
+  const tripValidate = "newData.child('createdBy').isString()";
+  const strOk = (n) => `(!newData.isString() || newData.val().length <= ${n})`;
+  const fieldV = { ".validate": strOk(2000), "$g": { ".validate": `!newData.hasChildren() && ${strOk(2000)}` } };
   return {
     "login_index": { ".read": true, "$u": { ".write": `${mgr} || ${noRoles}` } },
     "roles": { ".read": mgr,
@@ -15,9 +21,14 @@ function strict(B){
     "settings": { ".write": mgr,
       "accounts": readM, "sources": readA, "staff": readA, "carTypes": readA,
       "payments": readA, "planPayments": readA, "plan2Payments": readA, "lockHour": readA },
+    // (28/11) Khóa ở MÁY CHỦ: nhân viên chỉ thêm/sửa/xóa đơn TẠO trong 3 ngày gần đây (app khóa sớm hơn theo giờ khóa),
+    // không đổi được giờ tạo (timestamp) / người tạo; mỗi ô tối đa 2000 ký tự, lồng tối đa 2 tầng. Quản lý không bị giới hạn thời gian.
     "trips": { ".read": mgr, ".indexOn": ["dateKey"],
-      "$id": { ".write": `${mgr} || (${active} && (!data.exists() || data.child('createdBy').val() === ${me}) && (!newData.exists() || newData.child('createdBy').val() === ${me}))` } },
-    "users_trips": { "$user": { ".indexOn": ["dateKey"], ".read": `${mgr} || (${active} && $user === ${me})`, ".write": `${mgr} || (${active} && $user === ${me})` } },
+      "$id": { ".write": `${mgr} || (${active} && (!data.exists() || (data.child('createdBy').val() === ${me} && ${recentOld})) && (!newData.exists() || (newData.child('createdBy').val() === ${me} && ${recentNew})))`,
+        ".validate": tripValidate, "$f": fieldV } },
+    "users_trips": { "$user": { ".indexOn": ["dateKey"], ".read": `${mgr} || (${active} && $user === ${me})`, ".write": mgr,
+      "$id": { ".write": `${active} && $user === ${me} && (!data.exists() || ${recentOld}) && (!newData.exists() || ${recentNew})`,
+        ".validate": tripValidate, "$f": fieldV } } },
     "places": { ".read": active, ".indexOn": ["n"],
       "$p": { ".write": active,
         ".validate": "newData.hasChildren(['name', 'n']) && newData.child('name').isString() && newData.child('name').val().length <= 200 && newData.child('n').isNumber()" } },
@@ -29,7 +40,7 @@ function strict(B){
     // Nhật ký (11/11): chỉ THÊM, không ai sửa/xóa; người ghi phải là chính mình
     "trip_log": { ".read": mgr,
       "$k": { ".write": `${active} && !data.exists() && newData.child('by').val() === ${me}`,
-        ".validate": "newData.hasChildren(['at', 'by', 'action']) && newData.child('at').isNumber() && newData.child('at').val() <= now" } },
+        ".validate": "newData.hasChildren(['at', 'by', 'action']) && newData.child('at').isNumber() && newData.child('at').val() <= now && (!newData.child('detail').isString() || newData.child('detail').val().length <= 20000)" } },
     // Bảng xếp hạng (15/11): tổng doanh thu theo ngày của từng tài khoản (chỉ tên + số tiền), mọi tài khoản đọc; ai ghi phần của người đó
     "rank": { ".read": active, "$d": { "$u": { ".write": `${mgr} || (${active} && $u === ${me})` } } },
     // Đội xe (16/11): biển số tài xế đã báo, mọi tài khoản đọc (cảnh báo bán vé gõ biển số lạ); chỉ tài xế / quản lý ghi

@@ -162,7 +162,7 @@
       if (c === 'auth/network-request-failed') return 'Mất kết nối mạng. Vui lòng kiểm tra Internet!';
       if (c === 'auth/operation-not-allowed') return 'Firebase chưa bật đăng nhập Email/Password. Báo quản trị viên bật trong Firebase > Authentication.';
       if (c === 'auth/weak-password') return 'Mật khẩu quá yếu!';
-      if (c === 'PERMISSION_DENIED' || /permission/i.test((e && e.message) || '')) return 'Không có quyền thực hiện thao tác này.';
+      if (c === 'PERMISSION_DENIED' || /permission/i.test((e && e.message) || '')) return 'Không có quyền thực hiện thao tác này. (Đơn tạo quá 3 ngày chỉ Quản lý sửa/xóa được; nếu vừa nhập đơn mới mà bị báo lỗi này, kiểm tra NGÀY GIỜ trên điện thoại có đúng không.)';
       return 'Lỗi: ' + ((e && e.message) || e);
     }
 

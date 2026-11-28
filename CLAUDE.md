@@ -271,6 +271,13 @@
 - (09/11) Nút riêng "📥 Xuất Excel Giảm Giá Vượt Mức" trong khung 💸 → `exportReminderExcel('discount')`: chỉ 2 trang Giảm Giá Vượt Mức (có ký tên) + Theo Nhân Viên, file `Giam_Gia_Vuot_Muc_TSS_….xlsx`.
 - Khung Nhắc Báo Cáo là BẢNG RIÊNG ("📋 Nhắc Báo Cáo & Giảm Giá Vượt Mức", ngay trên Bảng Đối Soát), chọn Từ–Đến ngày (`remindFrom/remindTo`, nút Hôm nay/Hôm qua/7 ngày/Tháng này). Excel: trang Đối Soát ghi 💸 vào cột Ghi chú; trang Dữ Liệu MISA thêm cột Giá bảng giá, Giảm %, Vùng, Vượt mức, Mục bảng giá.
 
+## Khóa ở máy chủ (28/11, kiểm tra bảo mật mục 3, người dùng đồng ý)
+- `sinh-quy-tac.js`: nhân viên (không phải QL) chỉ thêm/sửa/xóa `trips/$id` và `users_trips/<mình>/$id` khi `timestamp` (giờ TẠO đơn) > now − 3 ngày; đơn mới timestamp < now + 1 ngày; không đổi được timestamp / createdBy. App vẫn khóa sớm hơn theo lockHour. Đơn chia tiền tách ra giữ timestamp gốc (+k) → vẫn trong 3 ngày.
+- `users_trips/$user` .write chỉ QL; nhân viên ghi ở mức `$user/$id`. Mỗi ô của đơn ≤ 2000 ký tự, lồng tối đa 2 tầng; đơn phải có createdBy. `trip_log.detail` ≤ 20000 ký tự.
+- Lỗi quyền → thông báo nhắc "đơn quá 3 ngày chỉ QL sửa; kiểm tra ngày giờ điện thoại".
+- Thử emulator scratchpad emu/rules3.cjs (19 tình huống) + dup3/idx2 (nhập, sửa, xóa, chặn trùng vẫn đúng). NGƯỜI DÙNG PHẢI DÁN `quy-tac-buoc-2.json` mới.
+- Câu hỏi 2 (quét toàn bộ đơn mỗi lần QL đăng nhập): người dùng hỏi nếu chỉ quét 1 lần/ngày có ảnh hưởng gì – đã trả lời, CHƯA đổi code.
+
 ## Lỗi/rủi ro đã phát hiện (06/11/2026) — 3–9 ĐÃ SỬA ở nhánh `cai-tien-doi-soat` (08/11)
 1. ĐÃ SỬA 07/11: quy tắc RTDB thật trước đây `.read/.write: true`; nay là quy-tac-buoc-2 + Firebase Auth. Còn tồn: dữ liệu thử `test_env/` và tài khoản Auth `@test.taxi-tss.local`. Số liệu 07/11: lưu 1,61 MB, tải về 121 MB/6 ngày, kết nối đỉnh 33/100 (gói Spark). DB thật còn 2 nhánh cũ không dùng: `deleted_trips`, `drivers`.
 - (10/11) Excel Đối Soát lọc Phân vùng = Tài xế (hoặc chỉ có đơn chủ xe): cột Tổng Tiền ở dòng CỘNG NGÀY/TỔNG CỘNG cộng tiền CHỦ XE (`driverView` trong buildAuditSheet), cột cạnh ghi "Quầy+KH: …". Trước đó luôn cộng Quầy+KH → ra 0.

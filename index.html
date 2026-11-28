@@ -10,7 +10,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="TSS POS">
   <!-- (21/11) Tailwind dựng sẵn (app.css) thay cho cdn.tailwindcss.com để app nhẹ, không lag. Thêm class mới thì chạy lại lệnh trong tailwind/tailwind.config.cjs -->
-  <link rel="stylesheet" href="app.css?v=5">
+  <link rel="stylesheet" href="app.css?v=6">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
@@ -281,6 +281,7 @@
       loadPlaces();
       loadFleet();
       loadPriceList();
+      if (!listenCheckinMeta._on) { listenCheckinMeta._on = true; listenCheckinMeta(); }
       if (r.role === 'manager') startManagerSession();
       else startWorkerSession(r.role);
     }
@@ -324,6 +325,7 @@
           accountsMap = snap.val() || {};
           accountsLoaded = true;
           renderAccountsTable();
+          renderCheckinAdmin();
         }, () => {});
         dbRef('settings/accounts').on('value', snap => {
           const val = snap.val();
@@ -590,6 +592,7 @@
     async function startManagerSession() {
       document.getElementById('header-status').innerText = `Quản Lý: ${loggedInUser.user}`;
       renderManagerDashboard();
+      renderCheckinAdmin(); loadHrDir().then(renderCheckinAdmin, () => {});
       let ok = await checkDataMeta();
       if (ok === false) ok = await runDateKeyBackfill();
       if (ok === true) {
@@ -643,6 +646,7 @@
       document.getElementById('header-status').innerText = `${roleLabels[role] || role}: ${loggedInUser.user}`;
       staffRole = role;
       renderWorksheetView(role);
+      renderCheckinBox(); refreshMyCheckins();
       scrollToBatchSectionOnLogin();
       (async () => {
         const ok = await checkDataMeta();
@@ -1856,6 +1860,8 @@
 
       document.getElementById('main-container').innerHTML = `
         <div class="space-y-4 pb-20 w-full">
+          <!-- (28/11) ĐIỂM DANH CHECK-IN -->
+          ${CHECKIN_ROLES.includes(role) ? '<div id="checkin-box"></div>' : ''}
           <!-- NÚT BÁO CÁO NHANH ĐẦU TRANG -->
           <div class="bg-gradient-to-r from-blue-600 to-indigo-600 p-4 rounded-3xl shadow-lg flex flex-col sm:flex-row items-center justify-between text-white gap-3">
             <div>
@@ -3359,7 +3365,8 @@
       restore: ['♻️ Khôi phục', 'bg-purple-100 text-purple-800'],
       scan: ['📷 Quét giấy', 'bg-amber-100 text-amber-800'],
       scan_fail: ['📷 Quét lỗi', 'bg-orange-200 text-orange-900'],
-      baby_car: ['🤖 Hỏi Baby Car', 'bg-indigo-100 text-indigo-800']
+      baby_car: ['🤖 Hỏi Baby Car', 'bg-indigo-100 text-indigo-800'],
+      checkin: ['📍 Check-in điểm danh', 'bg-emerald-100 text-emerald-800']
     };
     // Khóa push của Firebase bắt đầu bằng thời điểm tạo -> lấy được mọi dòng nhật ký từ 1 thời điểm mà không cần .indexOn
     function pushKeyAt(ms) {
@@ -4535,6 +4542,7 @@
       ['💳 Thanh Toán', /Hình Thức Thanh Toán \(Bán Vé\)/i, 'bg-white text-slate-800 border border-slate-300 hover:bg-slate-50'],
       ['📋 TT Kế Hoạch', /THANH TOÁN Team kế hoạch$/i, 'bg-white text-purple-800 border border-purple-300 hover:bg-purple-50'],
       ['📋 TT Kế Hoạch 2', /THANH TOÁN Team kế hoạch 2/i, 'bg-white text-pink-800 border border-pink-300 hover:bg-pink-50'],
+      ['📍 Điểm Danh', /Điểm Danh Check-in/i, 'bg-white text-emerald-800 border border-emerald-300 hover:bg-emerald-50'],
       ['🔑 Tài Khoản', /Cấp Phát Tài Khoản/i, 'bg-white text-slate-800 border border-slate-300 hover:bg-slate-50'],
       ['⏰ Giờ Khóa', /Giờ Khóa Sửa/i, 'bg-white text-slate-800 border border-slate-300 hover:bg-slate-50']
     ];
@@ -4717,6 +4725,12 @@
                 <tbody id="tbody-acc" class="divide-y divide-slate-200"></tbody>
               </table>
             </div>
+          </div>
+
+          <!-- (28/11) ĐIỂM DANH CHECK-IN → APP NHÂN SỰ -->
+          <div class="bg-white rounded-3xl shadow-md border border-slate-200 p-4 sm:p-5 space-y-3">
+            <h4 class="text-xs sm:text-sm font-extrabold text-slate-800 uppercase">📍 Điểm Danh Check-in (gửi App Nhân Sự chấm công)</h4>
+            <div id="checkin-admin" class="space-y-3"></div>
           </div>
 
           <!-- MỤC 5.9: NHẮC BÁO CÁO (bảng riêng) -->
@@ -7323,6 +7337,289 @@
     // ===== QUẢN LÝ TÀI KHOẢN (accounts/<USER>, roles/<uid>, login_index/<USER>) =====
     const USER_RE = /^[A-Z0-9_.-]{2,30}$/;
 
+    // ===== (28/11, người dùng) ĐIỂM DANH CHECK-IN theo VỊ TRÍ → gửi sang APP NHÂN SỰ (HR) tự chấm công =====
+    // - Bán vé / KH / KH2 / Tài xế bấm "📍 Check-in": chọn tên (mặc định người gắn với tài khoản), app lấy GPS, phải ở trong bán kính 1 điểm danh.
+    // - Tên chọn phải là người gắn với tài khoản HOẶC tên hay dùng trong đơn của tài khoản (≥2 đơn) – không thì chặn.
+    // - 1 người / 1 ngày / 1 lần = 1 công. Ghi vào Firestore của app HR: hr_checkins/{YYYY-MM} → { 'YYYY-MM-DD': { staffId: {...} } }.
+    //   App HR tự điền "Có mặt" vào ô CHƯA CHẤM (ngày lễ/sự kiện nhân sự chấm tay thì giữ nguyên).
+    // - Quản lý cài: điểm danh (meta/checkinPlaces), gắn tài khoản ↔ nhân sự HR (meta/checkinBind/<TK>).
+    const HR_FB = { key: 'AIzaSyD3ikFbuGuQpt-VSyLRGn1aUCBzcF04LLY', project: 'app-nhan-su-74ad5' };
+    const HR_APP_ID = IS_TEST_ENV ? 'enterprise-hr-payroll-v29-test' : 'enterprise-hr-payroll-v26';   // bản thử → ô dữ liệu thử của app HR
+    let HR_AUTH_BASE = 'https://identitytoolkit.googleapis.com', HR_TOKEN_BASE = 'https://securetoken.googleapis.com', HR_FS_BASE = 'https://firestore.googleapis.com';
+    const CHECKIN_ROLES = ['pos', 'plan', 'plan2', 'driver'];
+    const CHECKIN_ACC_SLACK = 150;   // cộng thêm sai số GPS tối đa 150 m (giống app Sim / TĐNT)
+    let checkinPlaces = {}, checkinBind = {}, hrDir = null, hrDirAt = 0, srvOffset = 0;
+    function listenCheckinMeta() {
+      dbRef('meta/checkinPlaces').on('value', s => { checkinPlaces = s.val() || {}; renderCheckinBox(); renderCheckinAdmin(); }, () => {});
+      dbRef('meta/checkinBind').on('value', s => { checkinBind = s.val() || {}; renderCheckinBox(); renderCheckinAdmin(); }, () => {});
+      rtdb.ref('.info/serverTimeOffset').on('value', s => { srvOffset = Number(s.val()) || 0; }, () => {});
+    }
+    const srvNow = () => new Date(Date.now() + srvOffset);
+    // --- Firestore REST của app HR (đăng nhập ẩn danh giống app HR, khóa lưu trên máy) ---
+    let hrTok = null;
+    async function hrToken() {
+      if (hrTok && hrTok.exp > Date.now() + 60000) return hrTok.id;
+      let rt = null; try { rt = localStorage.getItem('tss_hr_rt'); } catch (e) {}
+      let j = null;
+      if (rt) {
+        const r = await fetch(`${HR_TOKEN_BASE}/v1/token?key=${HR_FB.key}`, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'grant_type=refresh_token&refresh_token=' + encodeURIComponent(rt) });
+        if (r.ok) { const x = await r.json(); j = { idToken: x.id_token, refreshToken: x.refresh_token, expiresIn: x.expires_in }; }
+      }
+      if (!j) {
+        const r = await fetch(`${HR_AUTH_BASE}/v1/accounts:signUp?key=${HR_FB.key}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ returnSecureToken: true }) });
+        if (!r.ok) throw new Error('Không kết nối được app Nhân sự (đăng nhập ' + r.status + ')');
+        j = await r.json();
+      }
+      try { localStorage.setItem('tss_hr_rt', j.refreshToken); } catch (e) {}
+      hrTok = { id: j.idToken, exp: Date.now() + (Number(j.expiresIn) || 3600) * 1000 };
+      return hrTok.id;
+    }
+    const hrDocName = path => `projects/${HR_FB.project}/databases/(default)/documents/artifacts/${HR_APP_ID}/public/data/${path}`;
+    function fsDecode(v) {
+      if (!v) return null;
+      if ('stringValue' in v) return v.stringValue;
+      if ('integerValue' in v) return Number(v.integerValue);
+      if ('doubleValue' in v) return v.doubleValue;
+      if ('booleanValue' in v) return v.booleanValue;
+      if ('timestampValue' in v) return Date.parse(v.timestampValue);
+      if ('nullValue' in v) return null;
+      if ('arrayValue' in v) return (v.arrayValue.values || []).map(fsDecode);
+      if ('mapValue' in v) return fsFields(v.mapValue.fields);
+      return null;
+    }
+    function fsFields(f) { const o = {}; Object.entries(f || {}).forEach(([k, v]) => { o[k] = fsDecode(v); }); return o; }
+    function fsEncode(x) {
+      if (x == null) return { nullValue: null };
+      if (typeof x === 'boolean') return { booleanValue: x };
+      if (typeof x === 'number') return Number.isInteger(x) ? { integerValue: String(x) } : { doubleValue: x };
+      if (Array.isArray(x)) return { arrayValue: { values: x.map(fsEncode) } };
+      if (typeof x === 'object') { const f = {}; Object.entries(x).forEach(([k, v]) => { f[k] = fsEncode(v); }); return { mapValue: { fields: f } }; }
+      return { stringValue: String(x) };
+    }
+    async function hrGet(path) {
+      const tok = await hrToken();
+      const r = await fetch(`${HR_FS_BASE}/v1/${hrDocName(path)}`, { headers: { Authorization: 'Bearer ' + tok } });
+      if (r.status === 404) return null;
+      if (!r.ok) throw new Error('Không đọc được app Nhân sự (' + r.status + ')');
+      return fsFields((await r.json()).fields);
+    }
+    // Danh bạ nhân sự do app HR tự xuất (chỉ id, tên, khu vực, bộ phận – không có lương)
+    async function loadHrDir(force) {
+      if (hrDir && !force && Date.now() - hrDirAt < 10 * 60000) return hrDir;
+      const d = await hrGet('hr_checkin_dir/main');
+      hrDir = (d && d.list || []).filter(x => x && x.id && x.name);
+      hrDirAt = Date.now();
+      return hrDir;
+    }
+    async function hrMonthCheckins(ym) { return (await hrGet('hr_checkins/' + ym)) || {}; }
+    const fsPathSeg = s => '`' + String(s).replace(/[`\\]/g, '\\$&') + '`';
+    async function hrWriteCheckin(dk, key, rec) {
+      const tok = await hrToken();
+      const fp = fsPathSeg(dk) + '.' + fsPathSeg(key);
+      const body = { writes: [{
+        update: { name: hrDocName('hr_checkins/' + dk.slice(0, 7)), fields: { [dk]: { mapValue: { fields: { [key]: fsEncode(rec) } } } } },
+        updateMask: { fieldPaths: [fp] },
+        updateTransforms: [{ fieldPath: fp + '.' + fsPathSeg('srv'), setToServerValue: 'REQUEST_TIME' }]
+      }] };
+      const r = await fetch(`${HR_FS_BASE}/v1/projects/${HR_FB.project}/databases/(default)/documents:commit`, { method: 'POST', headers: { Authorization: 'Bearer ' + tok, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      if (!r.ok) throw new Error('Không gửi được sang app Nhân sự (' + r.status + ')');
+    }
+    // --- Vị trí ---
+    function geoDistM(a, b) {
+      const R = 6371000, rad = x => x * Math.PI / 180;
+      const dLat = rad(b.lat - a.lat), dLng = rad(b.lng - a.lng);
+      const h = Math.sin(dLat / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLng / 2) ** 2;
+      return Math.round(2 * R * Math.asin(Math.sqrt(h)));
+    }
+    function parseLatLng(s) {   // dán từ Google Maps: "10.8188, 106.6519" hoặc link có @10.81,106.65
+      const m = String(s || '').match(/(-?\d{1,2}\.\d+)\s*[,; ]\s*(-?\d{1,3}\.\d+)/);
+      return m ? { lat: Number(m[1]), lng: Number(m[2]) } : null;
+    }
+    function getGeo() {
+      return new Promise((res, rej) => {
+        if (!navigator.geolocation) { rej({ code: 'nogeo' }); return; }
+        navigator.geolocation.getCurrentPosition(p => res({ lat: p.coords.latitude, lng: p.coords.longitude, acc: Math.round(p.coords.accuracy || 0) }), e => rej(e), { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 });
+      });
+    }
+    function nearestPlace(pos) {
+      let best = null;
+      Object.entries(checkinPlaces).forEach(([k, p]) => {
+        if (!p || p.lat == null) return;
+        const d = geoDistM(pos, p), lim = (Number(p.r) || 300) + Math.min(pos.acc || 0, CHECKIN_ACC_SLACK);
+        if (!best || d - lim < best.d - best.lim) best = { k, p, d, lim, ok: d <= lim };
+      });
+      return best;
+    }
+    // --- Tên: người gắn với tài khoản + tên hay dùng trong đơn của tài khoản ---
+    function accountNameUse() {
+      const c = {};
+      personalTrips.forEach(t => staffNamesOf(t.staff).forEach(n => { const s = placeSlug(n); if (s) c[s] = (c[s] || 0) + 1; }));
+      return c;
+    }
+    function checkinNameOk(name, hrId) {
+      const b = checkinBind[loggedInUser.user];
+      if (b && hrId && b.id === hrId) return true;
+      return (accountNameUse()[placeSlug(name)] || 0) >= 2;
+    }
+    function checkinKeyOf(hrId, name) { return hrId || ('x_' + placeSlug(name)); }
+    // --- Ô điểm danh trên trang nhân viên ---
+    let myCheckinsToday = null;
+    async function refreshMyCheckins() {
+      if (!loggedInUser || !CHECKIN_ROLES.includes(loggedInUser.role)) return;
+      const dk = localDateKey(srvNow());
+      try { const m = await hrMonthCheckins(dk.slice(0, 7)); myCheckinsToday = Object.values(m[dk] || {}).filter(r => r && r.acc === loggedInUser.user); }
+      catch (e) { myCheckinsToday = null; }
+      renderCheckinBox();
+    }
+    function renderCheckinBox() {
+      const box = document.getElementById('checkin-box');
+      if (!box || !loggedInUser || !CHECKIN_ROLES.includes(loggedInUser.role)) return;
+      const done = (myCheckinsToday || []).slice().sort((a, b) => (a.t || '').localeCompare(b.t || ''));
+      const b = checkinBind[loggedInUser.user];
+      box.innerHTML = `<div class="bg-gradient-to-r from-emerald-600 to-teal-500 p-4 rounded-3xl shadow-lg text-white flex flex-col sm:flex-row items-center justify-between gap-3">
+        <div class="text-center sm:text-left">
+          <h2 class="text-base font-black uppercase">📍 Điểm Danh Hôm Nay</h2>
+          ${done.length ? done.map(r => `<p class="text-[13px] font-bold">✅ ${escHtml(r.name)} – đã check-in lúc ${escHtml(r.t || '')}${r.place ? ' tại ' + escHtml(r.place) : ''}</p>`).join('')
+            : `<p class="text-[12px] opacity-95">Đến quầy rồi bấm nút để điểm danh – app Nhân sự tự chấm công.${b ? ' Tài khoản của: <b>' + escHtml(b.name) + '</b>' : ''}</p>`}
+        </div>
+        <button onclick="openCheckinModal()" class="px-6 py-3 bg-white text-emerald-700 hover:bg-emerald-50 font-black text-base rounded-2xl shadow">📍 CHECK-IN ĐIỂM DANH</button>
+      </div>`;
+    }
+    async function openCheckinModal() {
+      if (!loggedInUser) return;
+      if (!Object.keys(checkinPlaces).length) { await showBigNotice('CHƯA CÀI ĐIỂM DANH', ['Quản lý chưa cài vị trí quầy để điểm danh.'], 'Vui lòng báo Quản lý cài "📍 Điểm Danh" trong trang Quản lý.'); return; }
+      let dir = [];
+      try { dir = await loadHrDir(); } catch (e) { await showBigNotice('KHÔNG KẾT NỐI ĐƯỢC', [e.message || 'Lỗi kết nối app Nhân sự'], 'Kiểm tra mạng rồi thử lại.'); return; }
+      const b = checkinBind[loggedInUser.user];
+      const use = accountNameUse();
+      // danh sách chọn: người gắn với TK, rồi nhân sự HR có tên hay dùng trong TK, rồi mọi nhân sự HR; tài xế không có trong HR → tên hay dùng
+      const inDir = new Set(dir.map(x => placeSlug(x.name)));
+      const opts = [];
+      if (b) opts.push({ id: b.id || '', name: b.name });
+      dir.filter(x => (use[placeSlug(x.name)] || 0) >= 2 && !(b && b.id === x.id)).forEach(x => opts.push({ id: x.id, name: x.name }));
+      Object.entries(use).filter(([s, n]) => n >= 2 && !inDir.has(s)).forEach(([s]) => {
+        const nm = personalTrips.map(t => staffNamesOf(t.staff)).flat().find(n => placeSlug(n) === s);
+        if (nm && !opts.some(o => placeSlug(o.name) === s)) opts.push({ id: '', name: nameCase(nm) });
+      });
+      dir.filter(x => !opts.some(o => o.id === x.id)).sort((a, c) => a.name.localeCompare(c.name, 'vi')).forEach(x => opts.push({ id: x.id, name: x.name, other: true }));
+      const optHtml = opts.map((o, i) => `<option value="${i}">${escHtml(o.name)}${o.other ? '' : ' ⭐'}</option>`).join('');
+      const el = bigModalShell({ bg: 'bg-emerald-600', border: 'border-emerald-600', icon: '📍' }, 'CHECK-IN ĐIỂM DANH',
+        `<label class="block text-[15px] font-extrabold text-slate-800">Bạn là ai?</label>
+         <select id="ci-name" class="w-full p-3 border-2 border-emerald-400 rounded-2xl text-[18px] font-bold bg-white">${optHtml}</select>
+         <p class="text-[12px] text-slate-500">⭐ = người của tài khoản này. App sẽ lấy VỊ TRÍ điện thoại – phải đang ở quầy mới điểm danh được.</p>
+         <div id="ci-msg" class="text-[15px] font-bold"></div>`,
+        `<button id="ci-go" class="w-full py-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl text-[19px] font-black shadow-lg">📍 CHECK-IN NGAY</button>
+         <button id="ci-x" class="w-full py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-2xl text-[15px] font-bold border border-slate-300">Đóng</button>`);
+      const msg = (h, cls) => { el.querySelector('#ci-msg').className = 'text-[15px] font-bold rounded-2xl p-3 ' + (cls || 'bg-slate-50 text-slate-700'); el.querySelector('#ci-msg').innerHTML = h; };
+      el.querySelector('#ci-x').onclick = () => el.remove();
+      el.querySelector('#ci-go').onclick = async () => {
+        const btn = el.querySelector('#ci-go');
+        const o = opts[Number(el.querySelector('#ci-name').value)];
+        if (!o) return;
+        if (!checkinNameOk(o.name, o.id)) { msg(`⛔ Tên <b>${escHtml(o.name)}</b> không phải người của tài khoản ${escHtml(loggedInUser.user)} và không hay dùng trong đơn của tài khoản này. Hãy chọn đúng tên mình, hoặc báo Quản lý gắn tài khoản.`, 'bg-red-50 text-red-800 border-2 border-red-400'); return; }
+        btn.disabled = true; btn.textContent = '⏳ Đang lấy vị trí…';
+        msg('📡 Đang lấy vị trí điện thoại… (nếu máy hỏi, bấm CHO PHÉP vị trí)');
+        let pos;
+        try { pos = await getGeo(); }
+        catch (e) {
+          btn.disabled = false; btn.textContent = '📍 THỬ LẠI';
+          msg(e && e.code === 1 ? '⛔ Bạn đã TỪ CHỐI vị trí. Vào Cài đặt → Safari/Chrome → Vị trí → cho phép, rồi thử lại.' : '⛔ Không lấy được vị trí. Bật Định vị (GPS) của điện thoại rồi thử lại.', 'bg-red-50 text-red-800 border-2 border-red-400');
+          return;
+        }
+        const near = nearestPlace(pos);
+        if (!near || !near.ok) {
+          btn.disabled = false; btn.textContent = '📍 THỬ LẠI';
+          msg(`⛔ Bạn đang ở NGOÀI quầy${near ? ` (cách ${escHtml(near.p.name)} khoảng ${near.d.toLocaleString('vi-VN')} m, sai số GPS ${pos.acc} m)` : ''}. Về quầy rồi bấm thử lại.`, 'bg-red-50 text-red-800 border-2 border-red-400');
+          return;
+        }
+        btn.textContent = '⏳ Đang gửi…';
+        const now = srvNow(), dk = localDateKey(now), key = checkinKeyOf(o.id, o.name);
+        try {
+          const m = await hrMonthCheckins(dk.slice(0, 7));
+          const had = (m[dk] || {})[key];
+          if (had) { msg(`✅ <b>${escHtml(o.name)}</b> đã check-in hôm nay lúc ${escHtml(had.t || '')} rồi – không cần bấm lại.`, 'bg-emerald-50 text-emerald-800 border-2 border-emerald-400'); btn.remove(); return; }
+          const t = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+          await hrWriteCheckin(dk, key, { name: o.name, hrId: o.id || '', acc: loggedInUser.user, role: loggedInUser.role, t, place: near.p.name || '', dist: near.d, gps: pos.acc, at: now.getTime() });
+          dbRef('trip_log').push({ at: firebase.database.ServerValue.TIMESTAMP, by: loggedInUser.user, action: 'checkin', tripId: '', owner: loggedInUser.user, detail: `Check-in ${o.name} ${t} tại ${near.p.name || ''} (cách ${near.d} m, GPS ±${pos.acc} m)` }).catch(() => {});
+          msg(`✅ ĐÃ ĐIỂM DANH: <b>${escHtml(o.name)}</b> lúc ${t} tại ${escHtml(near.p.name || '')}. App Nhân sự sẽ tự chấm công.`, 'bg-emerald-50 text-emerald-800 border-2 border-emerald-400');
+          btn.remove();
+          refreshMyCheckins();
+        } catch (e) {
+          btn.disabled = false; btn.textContent = '📍 THỬ LẠI';
+          msg('⛔ ' + escHtml(e.message || 'Lỗi gửi điểm danh') + '. Thử lại sau ít phút.', 'bg-red-50 text-red-800 border-2 border-red-400');
+        }
+      };
+    }
+    // --- Trang Quản lý: cài điểm danh, gắn tài khoản, xem ai đã check-in ---
+    let ciViewDate = '', ciViewData = null;
+    function renderCheckinAdmin() {
+      const box = document.getElementById('checkin-admin');
+      if (!box || !isManager()) return;
+      if (!ciViewDate) ciViewDate = localDateKey(new Date());
+      const places = Object.entries(checkinPlaces);
+      const accs = Object.entries(accountsMap).filter(([u, a]) => a && CHECKIN_ROLES.includes(a.role)).sort((a, b) => a[0].localeCompare(b[0]));
+      const dirOpts = (hrDir || []).slice().sort((a, b) => a.name.localeCompare(b.name, 'vi'));
+      const rows = ciViewData ? Object.values(ciViewData).sort((a, b) => (a.t || '').localeCompare(b.t || '')) : null;
+      box.innerHTML = `
+        <div class="grid lg:grid-cols-2 gap-3">
+          <div class="bg-emerald-50 border border-emerald-200 rounded-2xl p-3 space-y-2">
+            <div class="text-xs font-extrabold text-emerald-900">1️⃣ Vị trí được điểm danh (bán kính + sai số GPS ≤ 150 m)</div>
+            ${places.length ? places.map(([k, p]) => `<div class="flex items-center justify-between gap-2 bg-white border rounded-xl px-2 py-1.5 text-xs"><span><b>${escHtml(p.name || k)}</b> – ${Number(p.lat).toFixed(5)}, ${Number(p.lng).toFixed(5)} • ${Number(p.r) || 300} m</span><button onclick="deleteCheckinPlace('${escHtml(k)}')" class="px-2 py-1 bg-rose-100 hover:bg-rose-200 text-rose-700 rounded-lg font-bold">Xóa</button></div>`).join('')
+              : '<div class="text-xs text-rose-700 font-bold">Chưa có vị trí nào → nhân viên CHƯA điểm danh được.</div>'}
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <input id="ci-p-name" placeholder="Tên (vd Quầy T2)" class="p-2 border rounded-xl text-xs font-bold">
+              <input id="ci-p-ll" placeholder="Dán tọa độ Google Maps" class="p-2 border rounded-xl text-xs font-mono">
+              <input id="ci-p-r" type="number" value="300" min="50" class="p-2 border rounded-xl text-xs font-bold" title="Bán kính (m)">
+            </div>
+            <div class="flex flex-wrap gap-2">
+              <button onclick="useMyLocationForPlace()" class="px-3 py-1.5 bg-white border border-emerald-400 text-emerald-800 rounded-xl text-xs font-bold">📡 Lấy vị trí máy này</button>
+              <button onclick="addCheckinPlace()" class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold">➕ Thêm vị trí</button>
+            </div>
+          </div>
+          <div class="bg-sky-50 border border-sky-200 rounded-2xl p-3 space-y-2">
+            <div class="flex items-center justify-between gap-2"><div class="text-xs font-extrabold text-sky-900">2️⃣ Gắn tài khoản ↔ nhân sự (app HR)</div>
+              <button onclick="reloadHrDirAdmin()" class="px-2 py-1 bg-white border border-sky-300 rounded-lg text-[11px] font-bold">🔄 Tải danh sách HR</button></div>
+            ${hrDir ? '' : '<div class="text-xs text-amber-700 font-bold">Chưa tải được danh sách nhân sự từ app HR (app HR phải mở bản mới 1 lần để xuất danh sách).</div>'}
+            <div class="max-h-[260px] overflow-y-auto custom-scrollbar space-y-1">
+              ${accs.map(([u, a]) => { const b = checkinBind[u] || {}; return `<div class="flex items-center gap-2 bg-white border rounded-xl px-2 py-1 text-xs"><span class="w-24 shrink-0 font-black">${escHtml(u)}</span>
+                <select onchange="saveCheckinBind('${escHtml(u)}', this.value)" class="flex-1 min-w-0 p-1.5 border rounded-lg text-xs font-bold ${b.id || b.name ? '' : 'bg-amber-50'}">
+                  <option value="">— chưa gắn —</option>
+                  ${dirOpts.map(x => `<option value="${escHtml(x.id)}" ${b.id === x.id ? 'selected' : ''}>${escHtml(x.name)}${x.dept ? ' (' + escHtml(x.dept) + ')' : ''}</option>`).join('')}
+                  ${b.name && !dirOpts.some(x => x.id === b.id) ? `<option value="${escHtml(b.id || '')}" selected>${escHtml(b.name)}</option>` : ''}
+                </select></div>`; }).join('') || '<div class="text-xs text-slate-500">Chưa có tài khoản.</div>'}
+            </div>
+          </div>
+        </div>
+        <div class="bg-white border border-slate-200 rounded-2xl p-3 space-y-2">
+          <div class="flex flex-wrap items-center gap-2 text-xs"><span class="font-extrabold text-slate-800">3️⃣ Đã check-in ngày</span>
+            <input type="date" value="${ciViewDate}" onchange="ciViewDate = this.value; loadCheckinView()" class="px-2 py-1 border rounded-lg font-mono font-bold">
+            <button onclick="loadCheckinView()" class="px-2 py-1 bg-slate-200 hover:bg-slate-300 rounded-lg font-bold">🔄 Xem</button>
+            ${rows ? `<span class="font-bold text-emerald-700">${rows.length} người</span>` : ''}</div>
+          ${rows == null ? '<div class="text-xs text-slate-500">Bấm "Xem" để tải.</div>' : rows.length ? `<div class="overflow-x-auto"><table class="w-full text-xs"><thead class="bg-slate-800 text-white"><tr><th class="p-1.5 text-left">Giờ</th><th class="p-1.5 text-left">Nhân sự</th><th class="p-1.5 text-left">Tài khoản</th><th class="p-1.5 text-left">Vị trí</th><th class="p-1.5 text-right">Cách</th><th class="p-1.5 text-left">App HR</th></tr></thead><tbody class="divide-y">
+            ${rows.map(r => `<tr><td class="p-1.5 font-bold">${escHtml(r.t || '')}</td><td class="p-1.5 font-bold">${escHtml(r.name || '')}</td><td class="p-1.5">${escHtml(r.acc || '')}</td><td class="p-1.5">${escHtml(r.place || '')}</td><td class="p-1.5 text-right">${Number(r.dist || 0).toLocaleString('vi-VN')} m</td><td class="p-1.5">${r.hrId ? (r.ap ? '<span class="text-emerald-700 font-bold">✅ Đã chấm</span>' : '<span class="text-amber-700 font-bold">⏳ Chờ app HR mở</span>') : '<span class="text-slate-500">Không có trong HR</span>'}</td></tr>`).join('')}
+            </tbody></table></div>` : '<div class="text-xs text-slate-500">Chưa ai check-in.</div>'}
+        </div>`;
+    }
+    async function loadCheckinView() {
+      try { const m = await hrMonthCheckins(ciViewDate.slice(0, 7)); ciViewData = m[ciViewDate] || {}; }
+      catch (e) { ciViewData = null; alert(e.message || 'Lỗi tải điểm danh'); }
+      renderCheckinAdmin();
+    }
+    async function reloadHrDirAdmin() { try { await loadHrDir(true); } catch (e) { alert(e.message || 'Lỗi tải danh sách HR'); } renderCheckinAdmin(); }
+    async function useMyLocationForPlace() {
+      try { const p = await getGeo(); const el = document.getElementById('ci-p-ll'); if (el) el.value = `${p.lat.toFixed(6)}, ${p.lng.toFixed(6)}`; alert(`Đã lấy vị trí máy này (sai số ${p.acc} m).`); }
+      catch (e) { alert('Không lấy được vị trí – kiểm tra quyền Vị trí của trình duyệt.'); }
+    }
+    async function addCheckinPlace() {
+      const name = (document.getElementById('ci-p-name').value || '').trim(), ll = parseLatLng(document.getElementById('ci-p-ll').value), r = Math.max(50, Number(document.getElementById('ci-p-r').value) || 300);
+      if (!name || !ll) { alert('Nhập tên và tọa độ (dán từ Google Maps, vd 10.8188, 106.6519).'); return; }
+      await dbRef('meta/checkinPlaces/' + (placeSlug(name) || ('p' + Date.now()))).set({ name, lat: ll.lat, lng: ll.lng, r });
+    }
+    async function deleteCheckinPlace(k) { if (confirm('Xóa vị trí điểm danh này?')) await dbRef('meta/checkinPlaces/' + k).remove(); }
+    async function saveCheckinBind(u, id) {
+      const x = (hrDir || []).find(d => d.id === id);
+      await dbRef('meta/checkinBind/' + u).set(id && x ? { id, name: x.name } : null);
+    }
     function renderAccountsTable() {
       renderLegacyMigrateBox();
       const tb = document.getElementById('tbody-acc');

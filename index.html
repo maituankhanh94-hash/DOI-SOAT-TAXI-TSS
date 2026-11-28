@@ -10,7 +10,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="TSS POS">
   <!-- (21/11) Tailwind dựng sẵn (app.css) thay cho cdn.tailwindcss.com để app nhẹ, không lag. Thêm class mới thì chạy lại lệnh trong tailwind/tailwind.config.cjs -->
-  <link rel="stylesheet" href="app.css?v=6">
+  <link rel="stylesheet" href="app.css?v=7">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
@@ -592,7 +592,7 @@
     async function startManagerSession() {
       document.getElementById('header-status').innerText = `Quản Lý: ${loggedInUser.user}`;
       renderManagerDashboard();
-      renderCheckinAdmin(); loadHrDir().then(renderCheckinAdmin, () => {});
+      renderCheckinAdmin(); loadHrDir().then(() => { renderCheckinAdmin(); buildCheckinSuggest(); }, () => {});
       let ok = await checkDataMeta();
       if (ok === false) ok = await runDateKeyBackfill();
       if (ok === true) {
@@ -7580,13 +7580,20 @@
             <div class="flex items-center justify-between gap-2"><div class="text-xs font-extrabold text-sky-900">2️⃣ Gắn tài khoản ↔ nhân sự (app HR)</div>
               <button onclick="reloadHrDirAdmin()" class="px-2 py-1 bg-white border border-sky-300 rounded-lg text-[11px] font-bold">🔄 Tải danh sách HR</button></div>
             ${hrDir ? '' : '<div class="text-xs text-amber-700 font-bold">Chưa tải được danh sách nhân sự từ app HR (app HR phải mở bản mới 1 lần để xuất danh sách).</div>'}
-            <div class="max-h-[260px] overflow-y-auto custom-scrollbar space-y-1">
-              ${accs.map(([u, a]) => { const b = checkinBind[u] || {}; return `<div class="flex items-center gap-2 bg-white border rounded-xl px-2 py-1 text-xs"><span class="w-24 shrink-0 font-black">${escHtml(u)}</span>
+            ${ciSuggest ? (() => { const n = accs.filter(([u]) => ciSuggest[u] && ciSuggest[u].sure && !(checkinBind[u] && checkinBind[u].id)).length;
+              return `<div class="flex flex-wrap items-center gap-2 text-[11px]"><span class="text-sky-900 font-bold">💡 Gợi ý theo tên hay ghi trong đơn 45 ngày qua.</span>${n ? `<button onclick="applyAllCheckinSuggest()" class="px-2 py-1 bg-sky-600 hover:bg-sky-700 text-white rounded-lg font-bold">⚡ Tự gắn ${n} tài khoản chưa gắn</button>` : ''}</div>`; })()
+              : (hrDir ? '<div class="text-[11px] text-slate-500">⏳ Đang đọc đơn để gợi ý…</div>' : '')}
+            <div class="max-h-[320px] overflow-y-auto custom-scrollbar space-y-1">
+              ${accs.map(([u, a]) => { const b = checkinBind[u] || {}, sg = ciSuggest && ciSuggest[u], top = sg && sg.list[0];
+                const sgHtml = !sg ? (ciSuggest ? '<div class="text-[10px] text-slate-400 pl-1">Chưa có đơn để gợi ý</div>' : '')
+                  : `<div class="text-[10px] pl-1 flex flex-wrap items-center gap-1 ${sg.sure ? 'text-emerald-700' : 'text-amber-700'}">💡 Theo đơn: ${sg.list.map(x => `<b>${escHtml(nameCase(x.name))}</b> ${x.n}/${sg.total} đơn${x.hr ? '' : ' (không có trong HR)'}`).join(' · ')}${sg.sure ? '' : ' – chưa chắc, tự chọn'}
+                    ${top && top.hr && b.id !== top.hr.id ? `<button onclick="applyCheckinSuggest('${escHtml(u)}')" class="px-1.5 py-0.5 bg-white border border-sky-400 text-sky-800 rounded font-bold">Gắn ${escHtml(top.hr.name)}</button>` : (top && top.hr && b.id === top.hr.id ? '<span class="text-emerald-700 font-bold">✓ khớp</span>' : '')}</div>`;
+                return `<div class="bg-white border rounded-xl px-2 py-1 text-xs"><div class="flex items-center gap-2"><span class="w-24 shrink-0 font-black">${escHtml(u)}</span>
                 <select onchange="saveCheckinBind('${escHtml(u)}', this.value)" class="flex-1 min-w-0 p-1.5 border rounded-lg text-xs font-bold ${b.id || b.name ? '' : 'bg-amber-50'}">
                   <option value="">— chưa gắn —</option>
                   ${dirOpts.map(x => `<option value="${escHtml(x.id)}" ${b.id === x.id ? 'selected' : ''}>${escHtml(x.name)}${x.dept ? ' (' + escHtml(x.dept) + ')' : ''}</option>`).join('')}
                   ${b.name && !dirOpts.some(x => x.id === b.id) ? `<option value="${escHtml(b.id || '')}" selected>${escHtml(b.name)}</option>` : ''}
-                </select></div>`; }).join('') || '<div class="text-xs text-slate-500">Chưa có tài khoản.</div>'}
+                </select></div>${sgHtml}</div>`; }).join('') || '<div class="text-xs text-slate-500">Chưa có tài khoản.</div>'}
             </div>
           </div>
         </div>
@@ -7600,12 +7607,56 @@
             </tbody></table></div>` : '<div class="text-xs text-slate-500">Chưa ai check-in.</div>'}
         </div>`;
     }
+    // (28/11, người dùng) GỢI Ý GẮN TÀI KHOẢN THEO ĐƠN: tên nhân sự hay ghi nhất trong đơn của tài khoản (45 ngày) → khớp danh bạ HR
+    let ciSuggest = null;
+    async function buildCheckinSuggest() {
+      const dir = hrDir || [];
+      if (!dir.length) return;
+      let trips = allCompanyTrips;
+      try { const sn = await dbRef('trips').orderByChild('dateKey').startAt(shiftDateKey(localDateKey(new Date()), -45)).once('value'); trips = Object.values(sn.val() || {}); } catch (e) {}
+      const per = {};
+      trips.forEach(t => {
+        const u = t && t.createdBy; if (!u) return;
+        const a = per[u] || (per[u] = { total: 0, names: {} });
+        a.total++;
+        staffNamesOf(t.staff).forEach(nm => { const k = placeSlug(nm); if (!k) return; const x = a.names[k] || (a.names[k] = { n: 0, name: nm }); x.n++; });
+      });
+      const findHr = nm => {
+        const k = placeSlug(nm);
+        const ex = dir.filter(d => placeSlug(d.name) === k);
+        if (ex.length === 1) return ex[0];
+        const sh = dir.filter(d => nameMatchesShort(d.name, nm));   // tên tắt "Lan Anh" → đúng 1 người "Nguyễn Lan Anh"
+        return sh.length === 1 ? sh[0] : null;
+      };
+      ciSuggest = {};
+      Object.entries(per).forEach(([u, a]) => {
+        const top = Object.values(a.names).sort((x, y) => y.n - x.n).slice(0, 3);
+        const list = top.map(x => ({ ...x, hr: findHr(x.name), pct: Math.round(x.n * 100 / a.total) })).filter(x => x.n >= 2);
+        if (!list.length) return;
+        const best = list[0];
+        // chắc chắn: ≥3 đơn, chiếm ≥60% đơn của TK, có trong danh bạ HR, người thứ 2 ít hơn hẳn
+        const sure = !!best.hr && best.n >= 3 && best.pct >= 60 && (!list[1] || list[1].n * 2 <= best.n);
+        ciSuggest[u] = { total: a.total, list, sure };
+      });
+      renderCheckinAdmin();
+    }
+    async function applyCheckinSuggest(u) {
+      const sg = ciSuggest && ciSuggest[u], b = sg && sg.list[0];
+      if (b && b.hr) await dbRef('meta/checkinBind/' + u).set({ id: b.hr.id, name: b.hr.name, auto: true });
+    }
+    async function applyAllCheckinSuggest() {
+      const us = Object.keys(ciSuggest || {}).filter(u => ciSuggest[u].sure && !(checkinBind[u] && checkinBind[u].id) && accountsMap[u] && CHECKIN_ROLES.includes(accountsMap[u].role));
+      if (!us.length) { alert('Không có tài khoản chưa gắn nào đủ chắc chắn để tự gắn.'); return; }
+      if (!confirm(`Tự gắn ${us.length} tài khoản theo tên hay ghi trong đơn?\n\n` + us.map(u => `${u} → ${ciSuggest[u].list[0].hr.name}`).join('\n'))) return;
+      const upd = {}; us.forEach(u => { const h = ciSuggest[u].list[0].hr; upd[u] = { id: h.id, name: h.name, auto: true }; });
+      await dbRef('meta/checkinBind').update(upd);
+    }
     async function loadCheckinView() {
       try { const m = await hrMonthCheckins(ciViewDate.slice(0, 7)); ciViewData = m[ciViewDate] || {}; }
       catch (e) { ciViewData = null; alert(e.message || 'Lỗi tải điểm danh'); }
       renderCheckinAdmin();
     }
-    async function reloadHrDirAdmin() { try { await loadHrDir(true); } catch (e) { alert(e.message || 'Lỗi tải danh sách HR'); } renderCheckinAdmin(); }
+    async function reloadHrDirAdmin() { try { await loadHrDir(true); } catch (e) { alert(e.message || 'Lỗi tải danh sách HR'); } renderCheckinAdmin(); buildCheckinSuggest(); }
     async function useMyLocationForPlace() {
       try { const p = await getGeo(); const el = document.getElementById('ci-p-ll'); if (el) el.value = `${p.lat.toFixed(6)}, ${p.lng.toFixed(6)}`; alert(`Đã lấy vị trí máy này (sai số ${p.acc} m).`); }
       catch (e) { alert('Không lấy được vị trí – kiểm tra quyền Vị trí của trình duyệt.'); }
